@@ -16,7 +16,7 @@ Models download to ephemeral container storage; user data persists in /workspace
 $envJson = '{\"WEBUI_DATA_ROOT\":\"/workspace/user-data\",\"MODEL_ROOT\":\"/models\",\"SKIP_MODEL_DOWNLOAD\":\"0\"}'
 $bootstrap = 'bash,-lc,curl https://raw.githubusercontent.com/ahmetyusufprojects/comfyui-runpod-pod/main/docker/bootstrap-runpod.sh | bash'
 & $runpodctl template create `
-    --name "comfyui-runpod-pod" `
+    --name "comfyui-runpod-pod-userdata-only" `
     --image $Image `
     --container-disk-in-gb 120 `
     --volume-in-gb $VolumeInGb `
