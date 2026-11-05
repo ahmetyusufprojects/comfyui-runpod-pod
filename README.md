@@ -19,6 +19,11 @@ Volume and may be downloaded again when a new Pod is created. Only
 `/workspace/user-data` is persistent. Set `HF_TOKEN` in the Pod environment
 when Hugging Face access requires authentication.
 
+The model downloader is strict by default. For a service-only boot test, set
+`SKIP_MODEL_DOWNLOAD=1`; for a real deployment leave it at `0`. If a model
+repository returns Hugging Face `401`, add a valid `HF_TOKEN` environment
+variable to the Pod. The token is used only for the download process.
+
 ## Runpod settings
 
 - Pod, not Serverless.
