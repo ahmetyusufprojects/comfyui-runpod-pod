@@ -20,7 +20,7 @@ $envJson = '{\"WEBUI_DATA_ROOT\":\"/workspace/user-data\",\"MODEL_ROOT\":\"/mode
 $bootstrap = 'bash,-lc,wget -qO- https://raw.githubusercontent.com/ahmetyusufprojects/comfyui-runpod-pod/main/docker/bootstrap-runpod.sh | bash'
 $templateArgs = @(
     "template", "create",
-    "--name", "comfyui-runpod-worker-no-volume-v5",
+    "--name", "comfyui-runpod-worker-no-volume-v6",
     "--image", $Image,
     "--container-disk-in-gb", "120",
     "--ports", "8189/http,8188/http",
