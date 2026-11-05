@@ -1,6 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Image,
+    [string]$Image = "runpod/comfyui:latest",
     [int]$VolumeInGb = 10
 )
 
@@ -15,6 +14,7 @@ ComfyUI + webui_flux2 + local Gemma LLM.
 Models download to ephemeral container storage; user data persists in /workspace/user-data.
 "@
 $envJson = '{"WEBUI_DATA_ROOT":"/workspace/user-data","MODEL_ROOT":"/models","SKIP_MODEL_DOWNLOAD":"0"}'
+$bootstrap = "bash -lc `"curl -fsSL https://raw.githubusercontent.com/ahmetyusufprojects/comfyui-runpod-pod/main/docker/bootstrap-runpod.sh | bash`""
 & $runpodctl template create `
     --name "comfyui-runpod-pod" `
     --image $Image `
@@ -23,6 +23,7 @@ $envJson = '{"WEBUI_DATA_ROOT":"/workspace/user-data","MODEL_ROOT":"/models","SK
     --volume-mount-path "/workspace" `
     --ports "8189/http,8188/http" `
     --port-labels "8189=webui,8188=comfyui" `
+    --docker-start-cmd $bootstrap `
     --env $envJson `
     --readme $readme
 if ($LASTEXITCODE -ne 0) {
