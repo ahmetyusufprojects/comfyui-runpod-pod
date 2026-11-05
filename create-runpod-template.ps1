@@ -13,8 +13,8 @@ $readme = @"
 ComfyUI + webui_flux2 + local Gemma LLM.
 Models download to ephemeral container storage; user data persists in /workspace/user-data.
 "@
-$envJson = '{"WEBUI_DATA_ROOT":"/workspace/user-data","MODEL_ROOT":"/models","SKIP_MODEL_DOWNLOAD":"0"}'
-$bootstrap = "bash -lc `"curl -fsSL https://raw.githubusercontent.com/ahmetyusufprojects/comfyui-runpod-pod/main/docker/bootstrap-runpod.sh | bash`""
+$envJson = '{\"WEBUI_DATA_ROOT\":\"/workspace/user-data\",\"MODEL_ROOT\":\"/models\",\"SKIP_MODEL_DOWNLOAD\":\"0\"}'
+$bootstrap = 'bash,-lc,curl https://raw.githubusercontent.com/ahmetyusufprojects/comfyui-runpod-pod/main/docker/bootstrap-runpod.sh | bash'
 & $runpodctl template create `
     --name "comfyui-runpod-pod" `
     --image $Image `
