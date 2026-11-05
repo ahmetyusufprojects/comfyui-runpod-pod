@@ -1,12 +1,12 @@
 FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS llama-builder
 
-ARG LLAMA_CPP_REF=master
+ARG LLAMA_CPP_REF=b6000
 ARG COMFYUI_REF=b0b743566f65daafc423b4fea8a2fbda94b3384a
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates git cmake ninja-build build-essential \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --depth 1 --branch "${LLAMA_CPP_REF}" \
-       https://github.com/ggerganov/llama.cpp.git /tmp/llama.cpp \
+       https://github.com/ggml-org/llama.cpp.git /tmp/llama.cpp \
     && cmake -S /tmp/llama.cpp -B /tmp/llama.cpp/build -G Ninja \
        -DGGML_CUDA=ON -DGGML_NATIVE=OFF -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /tmp/llama.cpp/build --target llama-server
