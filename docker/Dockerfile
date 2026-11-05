@@ -36,7 +36,7 @@ COPY docker/download_models.py /opt/download_models.py
 COPY webui_flux2/install_prompt_translation_model.py /opt/install_prompt_translation_model.py
 COPY docker/start.sh /usr/local/bin/start-comfy-pod
 COPY --from=llama-builder /tmp/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
-RUN python -m pip install --no-cache-dir huggingface_hub
+RUN python3 -m pip install --no-cache-dir huggingface_hub
 RUN git init /opt/comfyui-overlay \
     && git -C /opt/comfyui-overlay remote add origin https://github.com/comfyanonymous/ComfyUI.git \
     && git -C /opt/comfyui-overlay fetch --depth 1 origin "${COMFYUI_REF}" \

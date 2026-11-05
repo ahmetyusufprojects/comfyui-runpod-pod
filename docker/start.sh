@@ -16,12 +16,12 @@ for model_dir in checkpoints clip clip_vision controlnet diffusion_models embedd
     ln -s "/models/$model_dir" "$COMFY_ROOT/models/$model_dir"
 done
 if [ ! -f /opt/webui_flux2/models/opus_mt_tr_en/pytorch_model.bin ]; then
-    python /opt/install_prompt_translation_model.py
+    python3 /opt/install_prompt_translation_model.py
 fi
-python /opt/download_models.py
+python3 /opt/download_models.py
 
 log "Starting ComfyUI"
-python "$COMFY_ROOT/main.py" --listen 127.0.0.1 --port 8188 > /workspace/comfyui.log 2>&1 &
+python3 "$COMFY_ROOT/main.py" --listen 127.0.0.1 --port 8188 > /workspace/comfyui.log 2>&1 &
 comfy_pid=$!
 
 cleanup() {
@@ -50,4 +50,4 @@ for attempt in $(seq 1 120); do
 done
 
 log "Starting WebUI on port 8189"
-python /opt/webui_flux2/server.py
+python3 /opt/webui_flux2/server.py
