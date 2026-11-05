@@ -40,6 +40,12 @@ interrupted.
 - Container disk: 120 GB.
 - Network Volume: disabled by default. Pass a positive `-VolumeInGb` only when
   persistent user data is intentionally required.
+- When creating a Pod from the template, pass `--container-disk-in-gb 120`
+  explicitly; Runpod can otherwise fall back to its 20 GB default.
+- For low-cost tests, use an available community GPU and
+  `--cloud-type COMMUNITY`; do not use secure RTX 4090/A40 pricing unless
+  explicitly required. Prefer RTX A5000, RTX 4090 community, or another
+  available GPU at or below the target hourly rate.
 - Expose HTTP port: `8189`.
 - Optional internal diagnostics: `8188`.
 - Do not use Docker Compose; the image runs all services through
@@ -60,6 +66,14 @@ Runpod's HTTP proxy URL is:
 The official Runpod worker image uses `/comfyui` and already supplies the
 CUDA/Python runtime. The startup script overlays this application's files
 without placing runtime files on Network Storage.
+
+Example volume-free test command:
+
+```powershell
+runpodctl pod create --name comfyui-e2e --template-id fccm9qs9s6 `
+  --gpu-id "NVIDIA RTX A5000" --cloud-type COMMUNITY `
+  --container-disk-in-gb 120 --volume-in-gb 0
+```
 
 ## Sources
 
