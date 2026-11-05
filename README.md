@@ -32,3 +32,10 @@ Runpod's HTTP proxy URL is:
 The official Runpod base image uses `/workspace/runpod-slim/ComfyUI` and
 already supplies the CUDA/Python runtime. The startup script preserves that
 layout and only overlays this application's files.
+
+## Sources
+
+- [Runpod ComfyUI base image](https://github.com/runpod-workers/comfyui-base)
+- [Runpod port exposure](https://docs.runpod.io/pods/configuration/expose-ports)
+- [Runpod Pod management](https://docs.runpod.io/pods/manage-pods)
+- [Runpod template CLI](https://github.com/runpod/runpodctl)
