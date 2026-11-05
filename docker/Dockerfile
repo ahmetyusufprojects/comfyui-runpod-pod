@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS llama-builder
+FROM runpod/comfyui:latest AS llama-builder
 
 ARG LLAMA_CPP_REF=b6000
 ARG COMFYUI_REF=b0b743566f65daafc423b4fea8a2fbda94b3384a
