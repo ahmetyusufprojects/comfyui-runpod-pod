@@ -36,7 +36,7 @@ if [ ! -x "$LLAMA_ROOT/llama-server" ]; then
     tmp_dir="$(mktemp -d)"
     wget -q --tries=3 \
         "https://github.com/ggml-org/llama.cpp/releases/download/b12128/llama-b12128-bin-ubuntu-cuda-12.8-x64.tar.gz" \
-        -o "$tmp_dir/llama.tar.gz"
+        -O "$tmp_dir/llama.tar.gz"
     tar -xzf "$tmp_dir/llama.tar.gz" -C "$tmp_dir"
     llama_bin="$(find "$tmp_dir" -type f -name llama-server | head -n 1)"
     [ -n "$llama_bin" ] || fail "llama-server was missing from the release archive"
