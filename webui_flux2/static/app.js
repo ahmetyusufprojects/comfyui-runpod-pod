@@ -789,7 +789,51 @@ async function durum(){
     if(kisaDurum) kisaDurum.textContent = 'sunucu yok';
   }
 }
+let modelIndirmeSirasi = [];
+function modelIndirmeCiz(j){
+  const durumEl = $('modelIndirmeDurum'), liste = $('modelIndirmeSirasi'), kaydet = $('modelIndirmeKaydet');
+  if(!durumEl || !liste) return;
+  if(j.skipped){ durumEl.textContent = 'Model indirme kapalı (SKIP_MODEL_DOWNLOAD=1).'; liste.innerHTML = ''; return; }
+  if(j.selection_open) durumEl.textContent = 'Sıra seçilebilir · ' + j.selection_remaining_seconds + ' sn kaldı.';
+  else if(j.running) durumEl.textContent = j.current ? ('İndiriliyor: ' + j.current.label + ' — ' + j.current.file) : 'Model indirme sürüyor.';
+  else durumEl.textContent = j.error ? ('Son hata: ' + j.error) : 'Model indirme tamamlandı veya bekliyor.';
+  liste.innerHTML = '';
+  (j.order || []).forEach((m, i) => {
+    const row = document.createElement('div'); row.className = 'model-indirme-satir';
+    const label = document.createElement('strong'); label.textContent = (i + 1) + '. ' + m.label;
+    const state = document.createElement('span'); state.className = 'model-indirme-durum-kucuk';
+    const active = j.current && j.current.group === m.id;
+    const done = (j.completed_groups || []).includes(m.id);
+    state.textContent = active ? 'indiriliyor' : (done ? 'hazır' : 'bekliyor');
+    row.append(label, state);
+    if(j.selection_open){
+      const up = document.createElement('button'); up.textContent = '↑'; up.title = 'Yukarı taşı'; up.disabled = i === 0;
+      up.onclick = () => { const t = modelIndirmeSirasi[i-1]; modelIndirmeSirasi[i-1] = modelIndirmeSirasi[i]; modelIndirmeSirasi[i] = t; modelIndirmeCiz({order:modelIndirmeSirasi.map(id=>({id,label:(j.order.find(x=>x.id===id)||{}).label})), selection_open:true, selection_remaining_seconds:j.selection_remaining_seconds}); };
+      const down = document.createElement('button'); down.textContent = '↓'; down.title = 'Aşağı taşı'; down.disabled = i === j.order.length - 1;
+      down.onclick = () => { const t = modelIndirmeSirasi[i+1]; modelIndirmeSirasi[i+1] = modelIndirmeSirasi[i]; modelIndirmeSirasi[i] = t; modelIndirmeCiz({order:modelIndirmeSirasi.map(id=>({id,label:(j.order.find(x=>x.id===id)||{}).label})), selection_open:true, selection_remaining_seconds:j.selection_remaining_seconds}); };
+      row.append(up, down);
+    }
+    liste.append(row);
+  });
+  if(!modelIndirmeSirasi.length) modelIndirmeSirasi = (j.order || []).map(x => x.id);
+  if(kaydet){
+    kaydet.hidden = !j.selection_open;
+    kaydet.onclick = async () => {
+      const r = await fetch('/api/model-indirme/sira', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({order:modelIndirmeSirasi})});
+      const n = await r.json(); if(!r.ok) bildirim(n.hata || 'Sıra kaydedilemedi', true); else modelIndirmeCiz(n);
+    };
+  }
+}
+async function modelIndirmeYukle(){
+  try{
+    const r = await fetch('/api/model-indirme'); const j = await r.json();
+    if(!modelIndirmeSirasi.length) modelIndirmeSirasi = (j.order || []).map(x => x.id);
+    modelIndirmeCiz(j);
+  }catch(e){}
+}
 durum();
+modelIndirmeYukle();
+setInterval(modelIndirmeYukle, 2000);
 let progTimer = null, kuyrukTimer = null;
 function oranYuzde(il){
   if(!il) return null;

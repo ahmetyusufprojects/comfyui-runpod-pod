@@ -620,6 +620,16 @@
     <div class="izleme-kuyruk-alt"><span>Sağlık</span><b id="izlemeLlmSaglik">—</b></div>
   </article>
 </div>
+<section class="model-indirme-panel" aria-labelledby="modelIndirmeBaslik">
+  <div class="model-indirme-baslik">
+    <div><div class="izleme-ust-baslik">MODEL HAZIRLIĞI</div><h2 id="modelIndirmeBaslik">İndirme sırası</h2>
+    <p>Pod açıldıktan sonra ilk 60 saniye sırayı değiştirebilirsin. Hazır olan model, diğerleri inerken kullanılabilir.</p></div>
+    <button id="modelIndirmeYenile" class="izleme-yenile">↻ Yenile</button>
+  </div>
+  <div id="modelIndirmeDurum" class="model-indirme-durum" role="status" aria-live="polite">Model durumu yükleniyor…</div>
+  <div id="modelIndirmeSirasi" class="model-indirme-sirasi"></div>
+  <button id="modelIndirmeKaydet" class="model-indirme-kaydet" hidden>Sırayı kaydet ve indirmeyi başlat</button>
+</section>
 <div class="izleme-paneller">
   <section class="izleme-panel">
     <div class="izleme-panel-baslik"><div><h3>GPU aygıtları</h3><p>ComfyUI tarafından bildirilen bellek kullanımı</p></div><span class="izleme-panel-simge">▰</span></div>

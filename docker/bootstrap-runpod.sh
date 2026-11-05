@@ -21,6 +21,7 @@ fi
 rm -rf "$WEBUI_ROOT"
 cp -a "$WORK_ROOT/webui_flux2" "$WEBUI_ROOT"
 cp "$WORK_ROOT/docker/download_models.py" /opt/download_models.py
+cp "$WORK_ROOT/docker/download_models.py" "$WEBUI_ROOT/download_models.py"
 cp "$WORK_ROOT/webui_flux2/install_prompt_translation_model.py" \
     /opt/install_prompt_translation_model.py
 
@@ -65,10 +66,6 @@ done
 if ! python3 -c 'import huggingface_hub' >/dev/null 2>&1; then
     python3 -m pip install --no-cache-dir huggingface_hub
 fi
-if [ "${SKIP_MODEL_DOWNLOAD:-0}" != "1" ]; then
-    python3 /opt/download_models.py
-fi
-
 log "Starting ComfyUI"
 python3 "$COMFY_ROOT/main.py" --listen 127.0.0.1 --port 8188 > /tmp/comfyui.log 2>&1 &
 comfy_pid=$!

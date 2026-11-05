@@ -27,6 +27,13 @@ current core manifest uses the public `Comfy-Org/Flux-2-Klein-4B` and
 `Comfy-Org/Z-Image-Turbo` repositories. Gemma files are downloaded only when
 `DOWNLOAD_LLM_MODELS=1` is set, because that repository requires authorization.
 
+The Pod starts ComfyUI and WebUI before model downloads begin. The WebUI system
+monitor shows the queue and allows reordering during the first 60 seconds;
+without a change it uses Gemma (when enabled), Flux 2 Klein, then Z-Image Turbo.
+Completed groups are immediately usable while later groups continue downloading.
+Once a file download starts, reordering is refused so active downloads are not
+interrupted.
+
 ## Runpod settings
 
 - Pod, not Serverless.

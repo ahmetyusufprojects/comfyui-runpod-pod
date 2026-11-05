@@ -936,3 +936,14 @@ html[data-cinematic-mode] .ayar-birincil{background:linear-gradient(135deg,var(-
 html[data-cinematic-mode] .ayarlar-ustbaslik,
 html[data-cinematic-mode] .lib-baslik-ust,
 html[data-cinematic-mode] .izleme-ust-baslik{color:color-mix(in srgb,var(--brand) 55%,#e7edf6)}
+[hidden]{display:none !important}
+.model-indirme-panel{margin:1rem 0;padding:1.25rem;border:1px solid var(--cizgi,#273044);border-radius:16px;background:var(--panel,#111827)}
+.model-indirme-baslik{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}
+.model-indirme-baslik h2{margin:.25rem 0}
+.model-indirme-baslik p{margin:.35rem 0;color:var(--metin-soluk,#9ca3af)}
+.model-indirme-sirasi{display:grid;gap:.45rem;margin-top:.85rem;max-width:680px}
+.model-indirme-satir{display:flex;align-items:center;gap:.65rem;padding:.65rem .8rem;border:1px solid var(--cizgi,#273044);border-radius:10px}
+.model-indirme-satir strong{flex:1}
+.model-indirme-satir button{min-width:2rem}
+.model-indirme-durum-kucuk{font-size:.82rem;color:var(--metin-soluk,#9ca3af)}
+.model-indirme-kaydet{margin-top:.8rem}

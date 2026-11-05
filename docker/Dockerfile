@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt
 COPY webui_flux2/ /opt/webui_flux2/
 COPY docker/download_models.py /opt/download_models.py
+COPY docker/download_models.py /opt/webui_flux2/download_models.py
 COPY webui_flux2/install_prompt_translation_model.py /opt/install_prompt_translation_model.py
 COPY docker/start.sh /usr/local/bin/start-comfy-pod
 COPY --from=llama-builder /tmp/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server

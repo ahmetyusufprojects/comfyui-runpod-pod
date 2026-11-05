@@ -18,8 +18,6 @@ done
 if [ ! -f /opt/webui_flux2/models/opus_mt_tr_en/pytorch_model.bin ]; then
     python3 /opt/install_prompt_translation_model.py
 fi
-python3 /opt/download_models.py
-
 log "Starting ComfyUI"
 python3 "$COMFY_ROOT/main.py" --listen 127.0.0.1 --port 8188 > /workspace/comfyui.log 2>&1 &
 comfy_pid=$!

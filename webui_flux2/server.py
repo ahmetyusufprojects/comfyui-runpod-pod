@@ -37,6 +37,7 @@ import kasa
 import llm
 import prompt_store
 import prompt_translation
+import download_models
 from comfy_client import (COMFY, comfy_get_json, comfy_post_json,
                           comfy_request, upload_image_to_comfy)
 from image_graphs import (DIFFUSION_FILE, TEXT_ENCODER_FILE, VAE_FILE,
@@ -52,6 +53,8 @@ from image_utils import (exif_duzelt as _exif_duzelt,
 _AYARLAR_KILIT = threading.RLock()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_ROOT = os.path.abspath(os.environ.get("WEBUI_DATA_ROOT", BASE_DIR))
+_MODEL_MANAGER = download_models.MODEL_MANAGER
+_MODEL_MANAGER.start()
 
 def _dbg(msg):
     try:
@@ -2712,6 +2715,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
             self._send(200, json.dumps(info))
+        elif parsed.path == "/api/model-indirme":
+            self._send(200, json.dumps(_MODEL_MANAGER.status(), ensure_ascii=False))
         elif parsed.path == "/api/kurulum-durumu":
             self._send(200, json.dumps({"kurulu": _auth_store.kurulu_mu()}))
         elif parsed.path == "/api/ben":
@@ -3059,6 +3064,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         # Tum POST'lar CSRF perdesinden gecer (Origin/Referer varsa Host ile ayni olmali).
         if not self._origin_kontrol():
+            return
+        if parsed.path == "/api/model-indirme/sira":
+            req = self._json_oku()
+            if "__hata__" in req or not isinstance(req.get("order"), list):
+                self._send(400, '{"hata":"geçerli bir model sırası gerekli"}')
+                return
+            try:
+                _MODEL_MANAGER.set_order(req["order"])
+            except RuntimeError as exc:
+                self._send(409, json.dumps({"hata": str(exc)}, ensure_ascii=False))
+                return
+            self._send(200, json.dumps(_MODEL_MANAGER.status(), ensure_ascii=False))
             return
         # Herkese acik auth girisleri (kurulum/giris). Diger POST'lar asagida guard'li.
         if parsed.path == "/api/kurulum":
