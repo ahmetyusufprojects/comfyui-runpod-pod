@@ -31,8 +31,8 @@ current core manifest uses the public `Comfy-Org/Flux-2-Klein-4B` and
 
 - Pod, not Serverless.
 - Container disk: 120 GB.
-- Network Volume: mounted at `/workspace/user-data`; this is the only
-  intentionally persistent path.
+- Network Volume: disabled by default. Pass a positive `-VolumeInGb` only when
+  persistent user data is intentionally required.
 - Expose HTTP port: `8189`.
 - Optional internal diagnostics: `8188`.
 - Do not use Docker Compose; the image runs all services through
