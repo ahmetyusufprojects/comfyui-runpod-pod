@@ -15,7 +15,7 @@ mkdir -p "$WORK_ROOT" "$MODEL_ROOT" "$LLAMA_ROOT" /workspace/user-data
 if [ ! -f "$WORK_ROOT/docker/start.sh" ]; then
     log "Downloading deployment source"
     rm -rf "$WORK_ROOT"/*
-    curl -fsSL "$REPO_ROOT" | tar -xz --strip-components=1 -C "$WORK_ROOT"
+    wget -qO- "$REPO_ROOT" | tar -xz --strip-components=1 -C "$WORK_ROOT"
 fi
 
 rm -rf "$WEBUI_ROOT"
@@ -34,7 +34,7 @@ fi
 if [ ! -x "$LLAMA_ROOT/llama-server" ]; then
     log "Downloading CUDA 12.8 llama-server"
     tmp_dir="$(mktemp -d)"
-    curl -fL --retry 3 \
+    wget -q --tries=3 \
         "https://github.com/ggml-org/llama.cpp/releases/download/b12128/llama-b12128-bin-ubuntu-cuda-12.8-x64.tar.gz" \
         -o "$tmp_dir/llama.tar.gz"
     tar -xzf "$tmp_dir/llama.tar.gz" -C "$tmp_dir"
@@ -79,7 +79,7 @@ for attempt in $(seq 1 180); do
         tail -n 80 /tmp/comfyui.log >&2 || true
         fail "ComfyUI stopped during startup"
     }
-    if curl -fsS http://127.0.0.1:8188/system_stats >/dev/null; then
+    if python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8188/system_stats", timeout=3)' >/dev/null 2>&1; then
         break
     fi
     [ "$attempt" = 180 ] && fail "ComfyUI did not become ready"
