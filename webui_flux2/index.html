@@ -1,0 +1,672 @@
+﻿<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flux2-Klein / Z-Image WebUI</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="ust" style="display:none"><div class="ic"><button id="menuBtn" class="hayalet kucukbtn" style="display:none;flex:none">☰</button><div class="ust-durum"><span class="nokta" id="nokta"></span><span class="hap" id="kullaniciRozet" style="display:none"></span><span class="hap" id="kasaRozet" style="display:none"></span><button id="cikisBtn" class="hayalet kucukbtn" style="display:none;flex:none">Çıkış</button></div>
+<div class="ustnav" id="menuNav" style="display:none">
+<button data-menu="uretim" class="aktif">Üretim</button>
+<button data-menu="studyo">Prompt Stüdyosu</button>
+<button data-menu="kuyruk">Kuyruk</button>
+<button data-menu="kutuphane">Kütüphane</button>
+<button data-menu="arsiv">Arşiv</button>
+<button data-menu="promptlar">Promptlar</button>
+<button data-menu="model">Sohbet</button>
+<button data-menu="izleme">İzleme</button>
+<button data-menu="ayarlar">Ayarlar</button>
+<button data-menu="yonetim" id="menuYonetim" style="display:none">Yönetim</button>
+</div></div></header>
+<main id="baslangicEkrani" role="status" aria-live="polite">
+<div class="baslangic-kart">
+<span class="baslangic-spinner" aria-hidden="true"></span>
+<h1>Web arayüzü açılıyor</h1>
+<p id="baslangicMesaj">Sunucuya bağlanılıyor…</p>
+<button id="baslangicYenidenDene" type="button" class="hayalet" style="display:none">Tekrar dene</button>
+</div>
+</main>
+<main id="girisAlani" style="display:none">
+<div class="kart" id="kurulumKart" style="display:none">
+<h3>Kurulum — ilk yönetici</h3>
+<div class="kucuk">Bu bilgisayarda ilk kez açılıyor. Mevcut fotoğraf/geçmiş ilk yöneticiye taşınır.</div>
+<div class="satir"><div><label>Kullanıcı adı (küçük harf, 2-32)</label><input id="kurAd" autocomplete="username" placeholder="örn. admin"></div></div>
+<div class="satir"><div><label>Şifre (en az 8 karakter)</label><div class="parola"><input id="kurSifre" type="password" autocomplete="new-password"><button type="button" class="parolaGoz" data-hedef="kurSifre" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div></div></div>
+<div class="satir"><div><button id="kurBtn">Kur ve Başla</button></div></div>
+<div class="kucuk" id="kurHata"></div>
+</div>
+<div class="kart" id="girisKart" style="display:block">
+<h3>Giriş</h3>
+<div class="satir"><div><label>Kullanıcı adı</label><input id="girAd" autocomplete="username"></div></div>
+<div class="satir"><div><label>Şifre</label><div class="parola"><input id="girSifre" type="password" autocomplete="current-password"><button type="button" class="parolaGoz" data-hedef="girSifre" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div></div></div>
+<div class="satir"><div><button id="girBtn">Giriş Yap</button></div></div>
+<div class="kucuk" id="girHata"></div>
+</div>
+</main>
+<main id="kasaAlani" style="display:none">
+<div class="kart" id="kasaAcKart">
+<h3>Kasa aç</h3>
+<div class="kucuk">Verilerin şifreli duruyor. Görmek için kasa parolanı yaz (giriş şifrenden ayrı).</div>
+<div class="satir"><div><label>Kasa parolası</label><div class="parola"><input id="kasaParola" type="password" autocomplete="current-password"><button type="button" class="parolaGoz" data-hedef="kasaParola" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div></div></div>
+<div class="satir"><div><button id="kasaAcBtn">Kasayı Aç</button></div></div>
+<div class="kucuk" id="kasaHata"></div>
+</div>
+<div class="kart" id="kasaKurKart" style="display:none">
+<h3>İlk kasa kur</h3>
+<div class="kucuk">Bu profilde kasa yok. Parolanı iki kez yaz. Zayıfsa alttaki kutuyu işaretlemeden kurulmaz.</div>
+<div class="satir"><div><label>Kasa parolası</label><div class="parola"><input id="kasaKur1" type="password" autocomplete="new-password"><button type="button" class="parolaGoz" data-hedef="kasaKur1" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div></div></div>
+<div class="satir"><div><label>Kasa parolası (tekrar)</label><div class="parola"><input id="kasaKur2" type="password" autocomplete="new-password"><button type="button" class="parolaGoz" data-hedef="kasaKur2" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div></div></div>
+<div class="satir"><div><label style="display:flex;gap:8px;align-items:center;color:var(--yazi)"><input id="kasaRisk" type="checkbox"> Parolamın zayıf olduğunu biliyorum, yine de kur</label></div></div>
+<div class="satir"><div><button id="kasaKurBtn">Kasayı Kur</button></div></div>
+<div class="kucuk" id="kasaKurHata"></div>
+</div>
+<div class="kart" id="kasaKurtarKart" style="display:none">
+<h3>Mühürlenmemiş çalışma</h3>
+<div class="kucuk">WebUI yeniden başlatılmış veya önceki oturum düzgün kapanmamış. Çalışman duruyor. Kasa parolanı yaz; önce mühürleyip güvenli biçimde tekrar açayım.</div>
+<div class="satir"><div><label>Kasa parolası</label><div class="parola"><input id="kasaKurtarParola" type="password" autocomplete="current-password"><button type="button" class="parolaGoz" data-hedef="kasaKurtarParola" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div></div></div>
+<div class="satir"><div><button id="kasaKurtarBtn">Kurtar ve Aç</button></div></div>
+<div class="kucuk" id="kurtarHata"></div>
+</div>
+</main>
+<main id="uygulama" style="display:none">
+<div class="kart" id="kartDurum" data-menu="yok"><pre id="durum">Durum kontrol ediliyor...</pre></div>
+
+<div class="kart calisma" id="wsUretim" data-menu="uretim">
+<div id="uretimKararti" class="calisma-kararti" hidden></div>
+<aside id="uretimYanKenar" class="sohbet-yan-kenar calisma-yan" aria-label="Görsel geçmişi">
+  <div class="sohbet-yan-baslik">
+    <div class="sohbet-yan-baslik-yazi">Görsel geçmişi</div>
+    <button id="uretimYanKapat" class="sohbet-yan-kapat" type="button" aria-label="Geçmişi kapat">×</button>
+  </div>
+  <div class="gec-ust-kontrol">
+    <input id="gecArama" type="search" placeholder="Ara: prompt, model, seed">
+    <button id="gecFavoriBtn" class="gec-favori-btn" type="button" aria-pressed="false" title="Favoriler">★</button>
+    <button id="gorIzgara" class="gec-gorunum-btn aktif" type="button" title="Kutucuklar">⌃</button>
+    <button id="gorAkis" class="gec-gorunum-btn" type="button" title="Alt alta">≡</button>
+  </div>
+  <div class="izgara izgara-yan" id="gecIzgara"></div>
+  <div id="gecSayfalar" class="calisma-sayfalama" aria-label="Görsel geçmişi sayfaları"></div>
+  <div class="calisma-yan-alt">
+    <button id="gecDaha" class="hayalet kucukbtn" hidden>Daha fazla yükle</button>
+    <button id="gecTemizle" class="hayalet kucukbtn">Geçmişi temizle</button>
+  </div>
+  <div id="uretimYanBoyut" class="calisma-yan-boyut" role="separator" aria-orientation="vertical" aria-label="Geçmiş paneli genişliği" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" tabindex="0" title="Geçmiş genişliğini sürükleyerek ayarla"></div>
+</aside>
+
+<section class="calisma-ana" aria-label="Üretim">
+<div class="uretim-kaydir" id="uretimKaydir">
+  <div class="uretim-sahne" id="uretimSahne">
+    <div class="calisma-ustbar uretim-ust-overlay">
+      <button id="uretimMenuBtn" class="calisma-menu-btn" type="button" aria-expanded="true" aria-controls="uretimYanKenar" aria-label="Geçmiş menüsünü aç/kapat">☰</button>
+      <div class="calisma-ustbar-bos"></div>
+      <div class="uretim-medya-sec" role="group" aria-label="Üretim türü">
+        <div id="uretimGoruntuEtiket" class="uretim-goruntu-etiket" hidden>
+          <button id="uretimGoruntuFavori" class="gec-yildiz" type="button" aria-label="Favorilere ekle" aria-pressed="false">☆</button>
+          <span id="uretimAlbumEtiket" class="uretim-album-etiket" hidden></span>
+        </div>
+        <button id="uretimGorselMod" class="hayalet kucukbtn aktif" type="button">Görsel</button>
+        <button id="uretimVideoMod" class="hayalet kucukbtn" type="button">Video</button>
+      </div>
+    </div>
+    <div id="uretimGoruntuBos" class="uretim-goruntu-bos">Geçmişten bir görsel seç veya aşağıya prompt yazıp üret.</div>
+    <div id="uretimGoruntuStage" class="uretim-goruntu-stage" hidden aria-label="Seçili üretim">
+      <div id="uretimSolTik" class="uretim-navigasyon onceki" aria-hidden="true"></div>
+      <div id="uretimSagTik" class="uretim-navigasyon sonraki" aria-hidden="true"></div>
+      <div id="uretimGoruntuMount"><div id="galeri"></div></div>
+    </div>
+    <div id="uretimGorselOnizleme" class="uretim-ref-onizleme" hidden>
+      <div class="uretim-ref-slot" id="uretimRefSlot1"><span>Referans 1</span><div id="uretimPreview1"></div></div>
+      <div class="uretim-ref-slot" id="uretimRefSlot2"><span>Referans 2</span><div id="uretimPreview2"></div></div>
+    </div>
+  </div>
+  <div id="uretimSeciliBilgi" class="uretim-secili-bilgi" hidden></div>
+</div>
+<div class="uretim-alt">
+  <div id="uretimComposerMount"></div>
+  <div id="uretimIlerlemeMount"></div>
+</div>
+<div id="uretimAyarKararti" class="uretim-ayarlari-kararti" hidden></div>
+<div id="uretimAyarlarPanel" class="uretim-ayarlari-panel" hidden>
+  <div class="uretim-panel-baslik"><b>Üretim ayarları</b><button id="uretimAyarKapat" type="button" class="hayalet kucukbtn" aria-label="Ayarları kapat">×</button></div>
+  <div id="uretimAyarIcerik"></div>
+</div>
+<div class="kart" id="kartWf">
+<h3>İş akışı</h3>
+<select id="wf">
+<option value="otomatik" selected>Otomatik (görsel)</option>
+<option value="video">Video</option>
+</select>
+<div class="kucuk" id="wfAciklama">Model ve iş akışı otomatik seçilir: referans varsa Flux2 Klein düzenleme, yoksa Z-Image Turbo üretim.</div>
+<div class="kucuk" id="uretimModBilgi"></div>
+</div>
+<div class="kart" id="kartRef">
+<h3>Referans fotoğraflar</h3>
+<label>1. fotoğraf (yoksa saf üretim)</label>
+<input type="file" id="foto" accept="image/*,.heic,.heif">
+<div class="satir"><img id="oniz" class="oniz" style="display:none" alt="1. önizleme"></div>
+<div class="satir"><div><button id="fotoKaldir" class="hayalet kucukbtn" style="display:none" type="button" aria-label="Referans 1'i kaldır">×</button></div></div>
+<div class="kucuk" id="fotoBoy"></div>
+<div id="foto2Blok" style="display:none;margin-top:10px">
+<label>2. fotoğraf (çift referans modu)</label>
+<input type="file" id="foto2" accept="image/*,.heic,.heif">
+<div class="satir"><img id="oniz2" class="oniz" style="display:none" alt="2. önizleme"></div>
+<div class="satir"><div><button id="foto2Kaldir" class="hayalet kucukbtn" style="display:none" type="button" aria-label="Referans 2'yi kaldır">×</button></div></div>
+<div class="kucuk" id="fotoBoy2"></div>
+</div>
+<div class="kucuk">Fotoğraf yüklersen Flux2 Klein ile düzenlenir; fotoğraf olmadan Z-Image Turbo veya üretim ayarlarından seçtiğin Anima modeli kullanılır. Kullanılan fotoğraflar üretim bitince kütüphaneye eklenir.</div>
+</div>
+
+<div class="kart" id="videoKart" style="display:none">
+<h3>Video (referans → video, sessiz)</h3>
+<div class="kucuk">En az 1 referans fotoğraf gerekir. Ölçü, en uzun kenara göre alınır.</div>
+<div class="satir">
+<div><label>Süre (sn, 1-10)</label><input id="vsure" type="number" value="5" min="1" max="10"></div>
+<div><label>FPS (8/12/24)</label><select id="vfps"><option>8</option><option>12</option><option selected>24</option></select></div>
+<div><label>En uzun kenar (320-1344)</label><input id="vmax" type="number" value="1344" min="320" max="1344" step="32"></div>
+</div>
+<div class="kucuk">Kare = süre×fps (17k+5 ızgarasına yuvarlanır) · tek işçi sırayla çalışır.</div>
+<div class="satir"><div><button id="videoUret">Video Üret</button></div></div>
+</div>
+
+<div class="kart" id="kartPrompt">
+<div class="uretim-composer">
+  <div class="uretim-composer-satir">
+    <div class="uretim-yazim-satiri">
+      <div id="uretimGorselEkleAlani" class="uretim-gorsel-ekle-alani">
+        <button id="uretimGorselBtn" class="hayalet composer-icon" type="button" aria-label="Görsel ekle" aria-expanded="false" aria-controls="uretimGorselMenu">+</button>
+        <div id="uretimGorselMenu" class="uretim-gorsel-menu" hidden>
+          <button id="uretimDosyaSec" class="uretim-ekle-kart" type="button">
+            <span class="uretim-ekle-kart-ikon" aria-hidden="true">↑</span>
+            <span><b>Dosya seç</b><small>Bilgisayarından ekle</small></span>
+          </button>
+          <button id="uretimKutuphaneSec" class="uretim-ekle-kart" type="button">
+            <span class="uretim-ekle-kart-ikon" aria-hidden="true">▧</span>
+            <span><b>Kütüphaneden seç</b><small>Kayıtlı görsellerinden ekle</small></span>
+          </button>
+        </div>
+      </div>
+      <button id="uretimAyarBtn" class="hayalet composer-icon" type="button" aria-label="Üretim ayarları">…</button>
+      <textarea id="prompt" rows="1" placeholder="Görseli tarif et..."></textarea>
+      <button id="uret" class="uretim-gonder" type="button" aria-label="Görsel üret" title="Görsel üret">↑</button>
+      <button id="durdur" class="tehlike uretim-durdur" type="button" disabled aria-label="Durdur">■</button>
+    </div>
+  </div>
+</div>
+<div id="uretimDestekPanel" class="uretim-destek-panel" hidden>
+  <label class="uretim-destek-etiket"><input id="continuousGeneration" type="checkbox"> Durdurulana kadar kesintisiz üret</label>
+  <span class="kucuk">Her görsel tamamlanınca yeni bir iş başlar. Seed rastgele (-1) kullanılır; prompt desteği veya çeviri yalnızca ilk işte çalışır.</span>
+  <label class="uretim-destek-etiket"><input id="uretimPromptDestek" type="checkbox"> Promptu üretmeden önce Prompt Stüdyosu ile iyileştir</label>
+  <span class="kucuk">Referans varsa yalnızca istenen fotoğraf düzenlemelerini yazar; yoksa fikir promptu oluşturur. Kullanıcı metni kutuda korunur, AI promptu yalnızca üretimde kullanılır.</span>
+  <label class="uretim-destek-etiket"><input id="uretimPromptCeviri" type="checkbox"> Türkçe promptu görsel üretimi için İngilizceye çevir</label>
+  <span class="kucuk">Yerel OPUS-MT modeli kullanılır. Türkçe metin kutusu korunur; yalnızca İngilizce çeviri görsel modeline gönderilir. Prompt Stüdyosu seçeneğiyle aynı anda kullanılamaz.</span>
+  <div class="kucuk" id="uretimPromptCeviriBilgi" role="status" aria-live="polite"></div>
+</div>
+<div style="display:none"><textarea id="negatif" style="min-height:44px"></textarea></div>
+<div class="satir" id="pinBar">
+<div><button id="pin1Btn" class="hayalet kucukbtn">1</button></div>
+<div><button id="pin2Btn" class="hayalet kucukbtn">2</button></div>
+<div><button id="pinDigerBtn" class="hayalet kucukbtn">Diğer</button></div>
+<div><button id="pinEkleBtn" class="hayalet kucukbtn">+</button></div>
+</div>
+<div id="pinPanel" style="display:none">
+<div class="satir"><div><label>Kayıtlı promptlar</label><select id="pinSec"></select></div></div>
+<div class="satir"><div><button id="pinUygula" class="hayalet kucukbtn">Uygula</button></div><div><button id="pin1Sabitle" class="hayalet kucukbtn">1'e sabitle</button></div><div><button id="pin2Sabitle" class="hayalet kucukbtn">2'ye sabitle</button></div></div>
+</div>
+<div id="pinEklePanel" style="display:none">
+<div class="satir"><div><label>Ad</label><input id="pinEkleAd" placeholder="örn. gece sokağı"></div></div>
+<div class="satir"><div><button id="pinEkleKaydet" class="hayalet kucukbtn">Kaydet ve üret</button></div></div>
+</div>
+</div>
+
+<div class="kart" id="kartCoz">
+<h3>Çözünürlük</h3>
+<div class="kucuk" id="olcuBilgi"></div>
+<div class="satir" id="oranBlok">
+<div><label>Preset</label>
+<select id="preset">
+<option value="1024x1024">Kare 1:1 (1024)</option>
+<option value="1536x1024">Yatay 3:2</option>
+<option value="1024x1536">Dikey 2:3</option>
+<option value="1344x768">Yatay 16:9</option>
+<option value="768x1344">Dikey 9:16</option>
+<option value="ozel">Özel...</option>
+</select></div>
+<div><label>Genişlik</label><input id="w" type="number" value="1024" step="16"></div>
+<div><label>Yükseklik</label><input id="h" type="number" value="1024" step="16"></div>
+<div><label>Oran kilidi</label><button id="oranKilit" class="hayalet kucukbtn">Oran: kilitli</button></div>
+</div>
+<div class="satir" id="olcekBlok">
+<div><label>En uzun kenar (maks)</label><input id="maxside" type="number" value="1536" step="16"></div>
+<div><label>&nbsp;</label><label style="display:flex;gap:8px;align-items:center;color:var(--yazi)"><input id="maxolcek" type="checkbox" checked> Maksimum boyuta ölçekle</label></div>
+</div>
+<div class="kucuk" id="olcekAciklama">Ölçü fotoğraftan alınır; en uzun kenar “maks” değere eşitlenir (oran korunur, 16’nın katına yuvarlanır).</div>
+</div>
+
+<div class="kart" id="kartOrn">
+<h3>Örnekleme</h3>
+<div class="satir">
+<div><label>Adım</label><input id="steps" type="number" value="8" min="1" max="50"></div>
+<div style="display:none"><label>CFG</label><input id="cfg" type="number" value="1" step="0.5"></div>
+<div style="display:none"><label>Sampler</label><select id="sampler"><option>euler</option><option>euler_ancestral</option><option>dpmpp_2m</option><option>uni_pc</option><option selected>res_multistep</option></select></div>
+<div><label>Seed (-1 rastgele)</label><input id="seed" type="number" value="-1"></div>
+</div>
+<div id="animaModelSecim" hidden>
+<div class="satir">
+<label class="ayar-toggle"><input id="animaModel" type="checkbox"><span><b>Anima Turbo v1.1</b><small>Turbo model · 8 adım.</small></span></label>
+<label class="ayar-toggle"><input id="moodyAnimaModel" type="checkbox"><span><b>Anima Moody Mix v1.0</b><small>İndirilen Moody modeli · 4 adım.</small></span></label>
+</div>
+<div class="kucuk">Yalnız referanssız görsel üretiminde kullanılır. Aynı anda tek Anima modeli seçilebilir; düzenleme Flux2 kullanır.</div>
+</div>
+</div>
+
+<div class="kart" id="kartIs">
+<h3>Durum</h3>
+<div id="ilerleme" class="kucuk" role="status"></div>
+<div id="progBlok" style="display:none;margin-top:8px">
+<div class="ilerlebar"><div id="progBar"></div></div>
+<div class="kucuk" id="progYazi"></div>
+</div>
+</div>
+
+<div class="kart" id="kartSonuc" hidden><h3>Sonuç</h3></div>
+</section>
+</div>
+
+<div class="kart" id="kartKuyruk" data-menu="kuyruk"><h3>Kuyruk <span class="kucuk" id="kuyrukSayi"></span></h3><div id="kuyrukListe"><div class="kucuk">Kuyruk boş.</div></div><div class="kucuk">Üret'e her basış sıraya iş ekler; işler tek tek çalışır. Sayfa yenilense bile işler sunucuda sürer.</div></div>
+
+<div class="kart lib-arayuz" id="kartKutuphane" data-menu="kutuphane">
+<header class="lib-baslik">
+  <div><div class="lib-baslik-ust">GÖRSEL ARŞİVİ</div><h2>Kütüphane</h2><p>Üretimlerde kullandığın görselleri görüntüle, ara ve referans olarak yeniden ekle.</p></div>
+  <span id="libSayac" class="lib-rozet" aria-live="polite">Görseller yükleniyor</span>
+</header>
+<div class="lib-kontroller">
+  <div class="lib-arama-alani"><input id="libArama" type="search" placeholder="Görsel adına göre ara..." aria-label="Kütüphanede ara"></div>
+  <button id="libIzgaraBtn" class="gec-gorunum-btn aktif" type="button" title="Kutucuklar">⌃</button>
+  <button id="libAkisBtn" class="gec-gorunum-btn" type="button" title="Alt alta">≡</button>
+  <button id="libTemizle" class="hayalet" type="button" hidden>Kütüphaneyi temizle</button>
+</div>
+<div id="libHata" class="lib-hata" role="status" aria-live="polite"></div>
+<div class="lib-izgara" id="libIzgara"></div>
+<div class="lib-bos-kart" id="libBos" hidden>
+  <span class="lib-bos-ikon" aria-hidden="true">▧</span>
+  <b id="libBosBaslik">Henüz görsel yok</b>
+  <span id="libBosMetin">Üretim yaptığında kullanılan görseller burada görünür. Daha sonra kütüphaneden referans olarak ekleyebilirsin.</span>
+</div>
+</div>
+
+<div class="kart lib-arayuz" id="kartArsiv" data-menu="arsiv">
+<header class="lib-baslik">
+  <div><div class="lib-baslik-ust">TÜM FOTOĞRAFLAR</div><h2>Arşiv</h2><p>Üretim, kütüphane, geçmiş ve sohbetlerdeki her fotoğraf tek yerde. Aynı içerik yalnızca bir kez sayılır.</p></div>
+  <span id="arsivSayac" class="lib-rozet" aria-live="polite">Arşiv taranıyor</span>
+</header>
+<div class="lib-kontroller">
+  <div class="lib-arama-alani"><input id="arsivArama" type="search" placeholder="Ara: dosya adı, tarih..." aria-label="Arşivde ara"></div>
+  <button id="arsivIzgaraBtn" class="gec-gorunum-btn aktif" type="button" title="Kutucuklar">⌃</button>
+  <button id="arsivAkisBtn" class="gec-gorunum-btn" type="button" title="Alt alta">≡</button>
+  <button id="arsivIceAktarBtn" class="ayar-birincil" type="button">İçe aktar</button>
+  <input type="file" id="arsivIceAktar" accept="image/*" multiple hidden>
+</div>
+<div id="arsivHata" class="lib-hata" role="status" aria-live="polite"></div>
+<div class="lib-izgara" id="arsivIzgara"></div>
+<div class="lib-bos-kart" id="arsivBos" hidden>
+  <span class="lib-bos-ikon" aria-hidden="true">▧</span>
+  <b id="arsivBosBaslik">Henüz fotoğraf yok</b>
+  <span id="arsivBosMetin">Üretim yaptığında veya fotoğraf eklediğinde hepsi burada toplanır. Aynı fotoğraf iki kez eklenirse yalnızca bir kez gösterilir.</span>
+</div>
+<div id="arsivSayfalar" class="calisma-sayfalama" aria-label="Arşiv sayfaları"></div>
+</div>
+
+<div class="kart" id="kartPromptlar" data-menu="promptlar">
+<h3>Promptlarım</h3>
+<div class="kucuk">Yeni kayıt Üretim'deki prompt kutusunun altındaki + ile yapılır.</div>
+<div id="prListe"></div>
+</div>
+
+<div class="kart" id="kartAyar" data-menu="ayarlar">
+<div class="ayarlar-icerik">
+  <header class="ayarlar-hero">
+    <div class="ayarlar-hero-ikon" aria-hidden="true">⚙</div>
+    <div>
+      <span class="ayarlar-ustbaslik">KİŞİSEL ÇALIŞMA ALANI</span>
+      <h2>Ayarlar</h2>
+      <p>Güvenlik, üretim ve yapay zekâ tercihlerini kendi çalışma şekline göre düzenle.</p>
+    </div>
+  </header>
+
+  <div class="ayarlar-grid">
+    <section class="ayar-kart">
+      <div class="ayar-kart-baslik"><span class="ayar-ikon kasa" aria-hidden="true">▣</span><div><h3>Kayıtlar ve kasa</h3><p>Geçmişinin boyutunu ve kasa güvenliğini yönet.</p></div></div>
+      <div class="ayar-alan">
+        <label for="limitInput">Kayıt sınırı</label>
+        <p class="ayar-aciklama">0 sınırsızdır. Sınır dolduğunda en eski kayıtlar kaldırılır.</p>
+        <div class="ayar-eylem-satiri"><input id="limitInput" type="number" value="0" min="0"><button id="limitKaydet" class="hayalet">Sınırı kaydet</button></div>
+      </div>
+      <label class="ayar-toggle"><input id="historyAlbums" type="checkbox"><span><b>Geçmişi albümle</b><small>Aynı prompt, model ve referans görselle üretilen birden fazla görseli tek kutuda grupla.</small></span></label>
+      <label class="ayar-toggle"><input id="autoOpenResult" type="checkbox" checked><span><b>Üretilen görseli otomatik göster</b><small>Üretim bitince görsel otomatik olarak üretim sayfasında açılsın. Kapalıyken başka sekmede olsan da yerin değişmez.</small></span></label>
+      <div class="ayar-alan">
+        <label for="beklemeInput">Kasa otomatik kilidi</label>
+        <p class="ayar-aciklama">Kasa belirtilen süre boşta kaldığında otomatik kapanır.</p>
+        <div class="ayar-eylem-satiri"><div class="ayar-deger-birim"><input id="beklemeInput" type="number" value="15" min="1" max="1440"><span>dakika</span></div><button id="beklemeKaydet" class="hayalet">Süreyi kaydet</button></div>
+        <div class="ayar-bilgi" id="beklemeBilgi" role="status"></div>
+      </div>
+    </section>
+
+    <section class="ayar-kart">
+      <div class="ayar-kart-baslik"><span class="ayar-ikon uretim" aria-hidden="true">◉</span><div><h3>Sinematik renk teması</h3><p>Ekrandaki fotoğraflardan vurgu rengini alır; fotoğraf yoksa standart renkler kullanılır.</p></div></div>
+      <div class="ayar-alan"><label for="cinematicMode">Renk modu</label>
+        <select id="cinematicMode"><option value="off">Kapalı</option><option value="soft">Yumuşak film</option><option value="vivid">Canlı film</option></select>
+      </div>
+    </section>
+
+    <section class="ayar-kart">
+      <div class="ayar-kart-baslik"><span class="ayar-ikon guvenlik" aria-hidden="true">◇</span><div><h3>Hesap güvenliği</h3><p>Hesap şifreni güncelle. En az 8 karakter kullan.</p></div></div>
+      <div class="ayar-alan">
+        <label for="sfrEski">Mevcut şifre</label>
+        <div class="parola"><input id="sfrEski" type="password" autocomplete="current-password"><button type="button" class="parolaGoz" data-hedef="sfrEski" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div>
+      </div>
+      <div class="ayar-alan">
+        <label for="sfrYeni">Yeni şifre</label>
+        <div class="parola"><input id="sfrYeni" type="password" autocomplete="new-password"><button type="button" class="parolaGoz" data-hedef="sfrYeni" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div>
+      </div>
+      <div class="ayar-kart-alt"><button id="sfrBtn" class="hayalet">Şifreyi değiştir</button><div class="ayar-bilgi" id="sfrBilgi" role="status"></div></div>
+    </section>
+
+    <section class="ayar-kart">
+      <div class="ayar-kart-baslik"><span class="ayar-ikon yapayzeka" aria-hidden="true">✳</span><div><h3>Yapay zekâ bağlamı</h3><p>Bağlam büyüdükçe uzun konuşmalar daha iyi takip edilir; bellek kullanımı da artar.</p></div></div>
+      <div class="ayar-alan">
+        <label for="llmCtx">Bağlam boyutu</label>
+        <p class="ayar-aciklama">1024–32768 token · Varsayılan 8000. Tüm sohbet ve prompt görevlerinde kullanılır.</p>
+        <div class="ayar-eylem-satiri"><div class="ayar-deger-birim"><input id="llmCtx" type="number" value="8000" min="1024" max="32768" step="128"><span>token</span></div><button id="llmCtxKaydet" class="ayar-birincil">Bağlamı kaydet</button></div>
+        <div class="ayar-bilgi" id="llmCtxBilgi" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="ayar-kart">
+      <div class="ayar-kart-baslik"><span class="ayar-ikon prompt" aria-hidden="true">✎</span><div><h3>Prompt desteği varsayılanları</h3><p>Prompt Stüdyosu için başlangıç yaratıcılığını ve yanıt uzunluğunu seç.</p></div></div>
+      <div class="ayar-form-grid iki">
+        <div class="ayar-alan"><label for="promptDestekYaraticilik">Yaratıcılık</label><input id="promptDestekYaraticilik" type="number" value="0.7" min="0.2" max="1.2" step="0.1"></div>
+        <div class="ayar-alan"><label for="promptDestekUzunluk">Çıktı uzunluğu</label><select id="promptDestekUzunluk"><option value="kisa">Kısa</option><option value="orta" selected>Orta</option><option value="uzun">Uzun</option></select></div>
+      </div>
+      <div class="ayar-kart-alt"><button id="promptDestekKaydet" class="hayalet">Varsayılanları kaydet</button><div class="ayar-bilgi" id="promptDestekBilgi" role="status"></div></div>
+    </section>
+
+    <section class="ayar-kart">
+      <div class="ayar-kart-baslik"><span class="ayar-ikon uretim" aria-hidden="true">◈</span><div><h3>Hızlı üretim varsayılanları</h3><p>Yeni üretimlerinde kullanılacak temel değerleri belirle.</p></div></div>
+      <div class="ayar-form-grid uc">
+        <div class="ayar-alan"><label for="uretimVarsayilanSteps">Adım sayısı</label><input id="uretimVarsayilanSteps" type="number" value="8" min="1" max="50"></div>
+        <div class="ayar-alan"><label for="uretimVarsayilanSeed">Seed</label><input id="uretimVarsayilanSeed" type="number" value="-1"><span class="ayar-yardim">-1: rastgele</span></div>
+        <div class="ayar-alan"><label for="uretimVarsayilanMaxSide">Maksimum kenar</label><div class="ayar-deger-birim"><input id="uretimVarsayilanMaxSide" type="number" value="1536" min="256" max="4096" step="16"><span>px</span></div></div>
+      </div>
+      <div class="ayar-kart-alt"><button id="uretimVarsayilanKaydet" class="hayalet">Üretim varsayılanlarını kaydet</button><div class="ayar-bilgi" id="uretimVarsayilanBilgi" role="status"></div></div>
+    </section>
+
+    <section class="ayar-kart ayar-kart-genis">
+      <div class="ayar-kart-baslik"><span class="ayar-ikon yapayzeka" aria-hidden="true">✧</span><div><h3>Model talimatları ve yanıt tercihleri</h3><p>Boş alanlarda varsayılan talimatlar kullanılır. Mod talimatları varsayılan görev yönergelerine eklenir; sabit çıktı kuralları korunur. Referanslı düzenleme yalnızca istenen değişiklikleri prompta aktarır. İç düşünme bütçesi hız için sınırlıdır.</p></div></div>
+      <div class="ayar-alan">
+        <label for="llmSistem">Sistem promptu <span class="ayar-etiket">PROMPT ÜRETİMİ · EN FAZLA 4000 KARAKTER</span></label>
+        <p class="ayar-aciklama">Fikir, görsel, birleştirme ve çeviri modlarını yönlendirir. Alanda etkin varsayılan veya özel prompt görünür; JSON çıkış kuralları korunur.</p>
+        <textarea id="llmSistem" placeholder="Boş = varsayılan"></textarea>
+        <button class="hayalet kucukbtn llm-prompt-varsayilan" type="button" data-llm-varsayilan="llmSistem">Bu promptu varsayılana döndür</button>
+      </div>
+      <div class="ayar-alan">
+        <label for="llmSistemSohbet">Sohbet sistem promptu <span class="ayar-etiket">SERBEST SOHBET · EN FAZLA 4000 KARAKTER</span></label>
+        <p class="ayar-aciklama">Sohbet yanıtlarının tonunu ve yaklaşımını belirler. Alanda etkin varsayılan veya özel prompt görünür; JSON biçimi istenmez.</p>
+        <textarea id="llmSistemSohbet" placeholder="Boş = varsayılan"></textarea>
+        <button class="hayalet kucukbtn llm-prompt-varsayilan" type="button" data-llm-varsayilan="llmSistemSohbet">Bu promptu varsayılana döndür</button>
+      </div>
+      <div class="ayar-form-grid iki ayar-mod-grid">
+        <div class="ayar-alan"><label for="llmModFikir">Fikir modu talimatı</label><textarea id="llmModFikir" placeholder="Varsayılan yükleniyor..."></textarea><button class="hayalet kucukbtn llm-prompt-varsayilan" type="button" data-llm-varsayilan="llmModFikir">Bu talimatı varsayılana döndür</button></div>
+        <div class="ayar-alan"><label for="llmModGorsel">Görsel modu talimatı</label><textarea id="llmModGorsel" placeholder="Varsayılan yükleniyor..."></textarea><button class="hayalet kucukbtn llm-prompt-varsayilan" type="button" data-llm-varsayilan="llmModGorsel">Bu talimatı varsayılana döndür</button></div>
+        <div class="ayar-alan"><label for="llmModBirlestir">Birleştirme talimatı</label><textarea id="llmModBirlestir" placeholder="Varsayılan yükleniyor..."></textarea><button class="hayalet kucukbtn llm-prompt-varsayilan" type="button" data-llm-varsayilan="llmModBirlestir">Bu talimatı varsayılana döndür</button></div>
+        <div class="ayar-alan"><label for="llmModCeviri">Çeviri modu talimatı</label><textarea id="llmModCeviri" placeholder="Varsayılan yükleniyor..."></textarea><button class="hayalet kucukbtn llm-prompt-varsayilan" type="button" data-llm-varsayilan="llmModCeviri">Bu talimatı varsayılana döndür</button></div>
+        <div class="ayar-alan"><label for="llmModSohbet">Sohbet modu talimatı</label><textarea id="llmModSohbet" placeholder="Varsayılan yükleniyor..."></textarea><button class="hayalet kucukbtn llm-prompt-varsayilan" type="button" data-llm-varsayilan="llmModSohbet">Bu talimatı varsayılana döndür</button></div>
+      </div>
+      <div class="ayar-tercihler">
+        <label class="ayar-toggle"><input id="llmStreaming" type="checkbox" checked><span><b>Canlı yanıt aktarımı</b><small>Model yanıtını oluşturuldukça göster.</small></span></label>
+        <label class="ayar-toggle"><input id="llmLowBandwidth" type="checkbox"><span><b>Düşük bant genişliği modu</b><small>Görsel efektleri ve yükü azalt.</small></span></label>
+      </div>
+      <div class="ayar-kart-alt"><button id="llmSistemKaydet" class="ayar-birincil">Model tercihlerini kaydet</button><button id="llmSistemVarsayilan" class="hayalet">Varsayılan promptlara dön</button><div class="ayar-bilgi" id="llmSistemBilgi" role="status"></div></div>
+    </section>
+  </div>
+</div>
+</div>
+
+<div class="kart" id="adminPanel" data-menu="yonetim" style="display:none">
+<h3>Yönetim (yalnız admin)</h3>
+<div class="kucuk">Kullanıcı adı, rol, kota ve kullanım görünür. Başkasının fotoğraf/çıktısı burada ASLA gösterilmez.</div>
+<div id="adminListe"></div>
+<div class="satir"><div><label>Kullanıcı adı</label><input id="admAd" placeholder="kucuk-harf"></div></div>
+<div class="satir"><div><label>Şifre</label><div class="parola"><input id="admSifre" type="password" autocomplete="new-password"><button type="button" class="parolaGoz" data-hedef="admSifre" aria-label="Şifreyi göster" aria-pressed="false">Göster</button></div></div></div>
+<div class="satir">
+<div><label>Rol</label><select id="admRol"><option value="uye">üye</option><option value="admin">admin</option></select></div>
+<div><label>Kota MB (0=sınırsız)</label><input id="admKotaMb" type="number" value="0" min="0"></div>
+<div><label>Kota kayıt (0=sınırsız)</label><input id="admKotaKayit" type="number" value="0" min="0"></div>
+</div>
+<div class="satir"><div><button id="admEkle" class="hayalet kucukbtn">Kullanıcı ekle</button></div></div>
+<div class="kucuk" id="admBilgi"></div>
+</div>
+
+<div class="kart" id="kartModel" data-menu="model">
+  <div id="sohbetYanKararti" class="sohbet-yan-kararti" hidden></div>
+  <aside id="sohbetYanKenar" class="sohbet-yan-kenar" aria-label="Sohbet geçmişi">
+    <div class="sohbet-yan-baslik">
+      <div class="sohbet-yan-baslik-yazi">Sohbetler</div>
+      <button id="sohbetYanKapat" class="sohbet-yan-kapat" type="button" aria-label="Sohbet menüsünü kapat">×</button>
+      <button id="sohbetYeniSohbet" class="sohbet-yen-sohbet" type="button">+ Yeni sohbet</button>
+    </div>
+    <div class="sohbet-yan-ara">
+      <input id="sohbetArama" type="search" placeholder="Sohbetlerde ara..." aria-label="Sohbetlerde ara">
+    </div>
+    <div id="sohbetKayitListe" class="sohbet-kayit-listesi" aria-live="polite"></div>
+  </aside>
+
+  <section id="sohbetAna" class="sohbet-ana" aria-label="Sohbet">
+    <button id="sohbetBaglam" class="sohbet-baglam" type="button" hidden
+      aria-label="Bağlam kullanımı ayrıntısı" title="Bağlam kullanımı">
+      <svg viewBox="0 0 36 36" aria-hidden="true">
+        <circle class="sohbet-baglam-arka" cx="18" cy="18" r="15.5"></circle>
+        <circle class="sohbet-baglam-on" id="sohbetBaglamYay" cx="18" cy="18" r="15.5"></circle>
+      </svg>
+      <span id="sohbetBaglamYazi" class="sohbet-baglam-yazi">—</span>
+    </button>
+    <div class="sohbet-mobil-bar">
+      <button id="sohbetMenuBtn" class="sohbet-menu-btn" type="button"
+        aria-expanded="false" aria-controls="sohbetYanKenar">☰ Sohbetler</button>
+    </div>
+    <div id="sohbetIcerikAlani" class="sohbet-icerik-alani">
+      <div id="sohbetListe" class="sohbet-liste" aria-live="polite"></div>
+    </div>
+
+    <div id="sohbetGirdiKutusu" class="sohbet-girdi-kutusu">
+      <div id="sohbetDurumSatiri" class="sohbet-durum-satiri" hidden>
+        <span id="sohbetDurum" role="status" aria-live="polite"></span>
+        <span id="sohbetCanli" aria-live="polite"></span>
+        <button id="sohbetDusunmeOk" class="sohbet-dusunme-ok" type="button"
+          aria-expanded="false" aria-controls="sohbetDusunmePanel" hidden>▾</button>
+      </div>
+      <div id="sohbetDusunmePanel" class="sohbet-dusunme-panel" hidden>
+        <pre id="sohbetDusunmeMetin" tabindex="0"></pre>
+      </div>
+      <div id="sohbetFotoOnizleme" class="sohbet-foto-onizleme" hidden>
+        <img id="sohbetFotoImg" alt="Sohbete eklenecek görsel">
+        <button id="sohbetFotoKaldir" class="sohbet-foto-kaldir" type="button" aria-label="Görseli kaldır">×</button>
+      </div>
+      <div id="sohbetEkleMenu" class="sohbet-ekle-menu" hidden>
+        <button id="sohbetEkleDosya" type="button">Dosya seç</button>
+        <button id="sohbetEkleKutuphane" type="button">Kütüphaneden seç</button>
+        <button id="sohbetEklePromptCevir" type="button">Sohbeti prompta çevir</button>
+      </div>
+      <div class="sohbet-girdi-cerceve">
+        <button id="sohbetFotoEkle" class="sohbet-girdi-ekle" type="button" aria-label="Görsel ekle" title="Görsel ekle" aria-expanded="false" aria-controls="sohbetEkleMenu">+</button>
+        <input type="file" id="sohbetFoto" accept="image/*" hidden>
+        <textarea id="sohbetGirdi" rows="1" aria-label="Mesajınız" placeholder="Mesaj yaz..."></textarea>
+        <button id="sohbetGonder" class="sohbet-gönder" type="button" aria-label="Gönder" title="Gönder">↑</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="kart calisma" id="wsStudyo" data-menu="studyo">
+<div id="studyoKararti" class="calisma-kararti" hidden></div>
+<aside id="studyoYanKenar" class="sohbet-yan-kenar calisma-yan" aria-label="Prompt geçmişi">
+  <div class="sohbet-yan-baslik">
+    <div class="sohbet-yan-baslik-yazi">Prompt geçmişi</div>
+    <button id="studyoYanKapat" class="sohbet-yan-kapat" type="button" aria-label="Geçmişi kapat">×</button>
+  </div>
+  <div class="calisma-yan-ara">
+    <input id="psGecmisArama" placeholder="Ara: metin, prompt veya etiket">
+  </div>
+  <button id="psGecmisFavoriBtn" class="hayalet kucukbtn calisma-favori-filtre" type="button" aria-pressed="false">☆ Favoriler</button>
+  <div id="psGecmisListe" class="ps-gecmis-liste"></div>
+  <div id="psGecmisSayfalar" class="calisma-sayfalama" aria-label="Prompt geçmişi sayfaları"></div>
+  <div class="calisma-yan-alt">
+    <button id="psGecmisYenile" class="hayalet kucukbtn">Yenile</button>
+    <button id="psGecmisTemizle" class="tehlike kucukbtn">Tümünü sil</button>
+  </div>
+</aside>
+
+<section class="calisma-ana" aria-label="Prompt Stüdyosu">
+<div class="calisma-ustbar">
+  <button id="studyoMenuBtn" class="calisma-menu-btn" type="button" aria-expanded="true" aria-controls="studyoYanKenar" aria-label="Prompt geçmişi menüsünü aç/kapat">☰</button>
+  <div class="calisma-ustbar-bos"></div>
+  <span class="kucuk">Prompt Stüdyosu</span>
+</div>
+<div class="kart ps-kart" id="psKart">
+<div class="ps-ust">
+  <h3>Prompt Stüdyosu</h3>
+  <div class="ps-durum-satiri">
+    <span class="kucuk" id="psModelDurum">Kontrol ediliyor...</span>
+    <button id="psHazirla" class="hayalet kucukbtn" type="button">Modeli hazırla</button>
+  </div>
+</div>
+<div class="kucuk ps-mod-bilgi" id="psModBilgi">Referans yok · fikirden prompt üretilir</div>
+<div id="psGorselOnizleme" class="uretim-gorsel-onizleme" hidden>
+  <div class="uretim-ref-slot" id="psRefSlot1"><span>Referans 1</span><div id="psPreview1"></div></div>
+  <div class="uretim-ref-slot" id="psRefSlot2" hidden><span>Referans 2</span><div id="psPreview2"></div></div>
+</div>
+<div class="ps-giris-cerceve">
+  <div id="psGorselMenu" class="uretim-gorsel-menu" hidden>
+    <button id="psGorselSec1" class="uretim-ekle-kart" type="button">
+      <span class="uretim-ekle-kart-ikon" aria-hidden="true">↑</span>
+      <span><b>Dosya seç</b><small>Bilgisayarından ekle</small></span>
+    </button>
+    <button id="psGorselSec2" class="uretim-ekle-kart" type="button">
+      <span class="uretim-ekle-kart-ikon" aria-hidden="true">▧</span>
+      <span><b>Kütüphaneden seç</b><small>Kayıtlı görsellerinden ekle</small></span>
+    </button>
+  </div>
+  <button id="psGorselEkleBtn" class="hayalet composer-icon" type="button" aria-label="Görsel ekle" aria-expanded="false" aria-controls="psGorselMenu">+</button>
+  <textarea id="psMetin" rows="1" placeholder="Ne istiyorsun? Fikrini ya da değişikliği yaz..."></textarea>
+  <button id="psAyarBtn" class="hayalet composer-icon" type="button" aria-label="Prompt ayarları" aria-expanded="false" aria-controls="psAyarPanel">…</button>
+  <button id="psUret" class="uretim-gonder" type="button" aria-label="Prompt üret" title="Prompt üret">↑</button>
+  <button id="psDurdur" class="tehlike uretim-durdur" type="button" disabled aria-label="Durdur">■</button>
+</div>
+<input type="file" id="psGorsel1" accept="image/jpeg,image/png,image/webp" hidden>
+<input type="file" id="psGorsel2" accept="image/jpeg,image/png,image/webp" hidden>
+<div id="psAyarPanel" class="ps-ayar-panel" hidden>
+<div class="satir">
+<div><label>Yaratıcılık (0.2-1.2)</label><input id="psYaraticilik" type="number" value="0.7" min="0.2" max="1.2" step="0.1"></div>
+<div><label>Uzunluk</label><select id="psUzunluk"><option value="kisa">Kısa</option><option value="orta" selected>Orta</option><option value="uzun">Uzun</option></select></div>
+<div><label>Çıktı dili</label><select id="psDil"><option value="en" selected>İngilizce</option><option value="tr">Türkçe</option></select></div>
+</div>
+</div>
+<div class="kucuk" id="psDurum">Model hazır değilse ilk istekte yüklenir.</div>
+<div class="kucuk" id="psCanli"></div>
+<div class="ps-cikti-kart"><label>Prompt (İngilizce)</label><textarea id="psPozitif" readonly></textarea>
+  <div class="satir ps-cikti-eylem"><div><button id="psHizliUret" class="kucukbtn" disabled>Hızlı üret</button></div><div><button id="psUygula" class="hayalet kucukbtn" disabled>Prompt kutusuna ekle</button></div><div><button id="psKopyala" class="hayalet kucukbtn" disabled>Kopyala</button></div><div><button id="psKaydet" class="hayalet kucukbtn" disabled>Kaydet</button></div></div>
+</div>
+<details class="ps-detay" id="psTrDetay"><summary>Prompt (Türkçe)</summary><textarea id="psPozitifTr" readonly></textarea></details>
+<details class="ps-detay" id="psBilgiDetay"><summary>Oluşturma bilgisi</summary>
+  <div class="kucuk" id="psBilgi">—</div>
+  <div class="kucuk" id="psAciklama"></div>
+  <div class="kucuk" id="psEtiketler"></div>
+</details>
+<div style="display:none"><textarea id="psNegatif" readonly></textarea></div>
+</div>
+</section>
+</div>
+
+<div class="kart" id="kartIzleme" data-menu="izleme">
+<div class="izleme-baslik">
+  <div><div class="izleme-ust-baslik">SİSTEM GÖZETİMİ</div><h2>Kaynaklar ve süreçler</h2><p>GPU belleğini, sistem RAM’ini, LLM sürecini ve üretim kuyruğunu tek ekrandan takip et. Bellek düğmesi, boşta ComfyUI modellerini GPU belleğinden kaldırır.</p></div>
+  <div class="izleme-kontroller">
+    <label class="izleme-otomatik"><input id="izlemeOtomatik" type="checkbox"> 5 sn’de otomatik yenile</label>
+    <button id="izlemeYenile" class="izleme-yenile">↻ <span>Şimdi yenile</span></button>
+    <button id="izlemeBellekBosalt" class="izleme-bellek-bosalt" title="Yalnız kuyruk boşken ComfyUI modellerini GPU belleğinden kaldırır">Belleği boşalt</button>
+  </div>
+</div>
+<div class="izleme-meta"><span id="izlemeDurum" class="izleme-durum" role="status" aria-live="polite">Veriler yükleniyor</span><span id="izlemeSonGuncelleme">Henüz güncellenmedi</span></div>
+<div class="izleme-metrikler" aria-label="Sistem özeti">
+  <article class="izleme-metrik" id="izlemeRamKart">
+    <div class="izleme-metrik-ust"><span class="izleme-ikon ram">R</span><span class="izleme-etiket">SİSTEM RAM</span><span id="izlemeRamRozet" class="izleme-rozet">—</span></div>
+    <strong id="izlemeRamDeger">—</strong><span id="izlemeRamDetay" class="izleme-metrik-detay">Kullanılabilir bellek bekleniyor</span>
+    <div id="izlemeRamBar" class="izleme-bar" role="progressbar" aria-label="Kullanılan sistem RAM yüzdesi" aria-valuemin="0" aria-valuemax="100"><span id="izlemeRamDolgu"></span></div>
+  </article>
+  <article class="izleme-metrik" id="izlemeVramKart">
+    <div class="izleme-metrik-ust"><span class="izleme-ikon vram">G</span><span class="izleme-etiket">COMFYUI VRAM</span><span id="izlemeVramRozet" class="izleme-rozet">—</span></div>
+    <strong id="izlemeVramDeger">—</strong><span id="izlemeVramDetay" class="izleme-metrik-detay">GPU bilgisi bekleniyor</span>
+    <div id="izlemeVramBar" class="izleme-bar" role="progressbar" aria-label="Kullanılan ComfyUI VRAM yüzdesi" aria-valuemin="0" aria-valuemax="100"><span id="izlemeVramDolgu"></span></div>
+  </article>
+  <article class="izleme-metrik">
+    <div class="izleme-metrik-ust"><span class="izleme-ikon kuyruk">Q</span><span class="izleme-etiket">ÜRETİM KUYRUĞU</span><span id="izlemeKuyrukRozet" class="izleme-rozet">—</span></div>
+    <strong id="izlemeKuyrukDeger">—</strong><span id="izlemeKuyrukDetay" class="izleme-metrik-detay">İş durumu bekleniyor</span>
+    <div class="izleme-kuyruk-alt"><span>Bekleyen iş</span><b id="izlemeKuyrukBekleyen">—</b></div>
+  </article>
+  <article class="izleme-metrik">
+    <div class="izleme-metrik-ust"><span class="izleme-ikon llm">L</span><span class="izleme-etiket">LLAMA-SERVER</span><span id="izlemeLlmRozet" class="izleme-rozet">—</span></div>
+    <strong id="izlemeLlmDeger">—</strong><span id="izlemeLlmDetay" class="izleme-metrik-detay">Süreç durumu bekleniyor</span>
+    <div class="izleme-kuyruk-alt"><span>Sağlık</span><b id="izlemeLlmSaglik">—</b></div>
+  </article>
+</div>
+<div class="izleme-paneller">
+  <section class="izleme-panel">
+    <div class="izleme-panel-baslik"><div><h3>GPU aygıtları</h3><p>ComfyUI tarafından bildirilen bellek kullanımı</p></div><span class="izleme-panel-simge">▰</span></div>
+    <div id="izlemeCihazlar" class="izleme-cihazlar"><div class="izleme-bos">GPU bilgisi yükleniyor…</div></div>
+  </section>
+  <section class="izleme-panel">
+    <div class="izleme-panel-baslik"><div><h3>LLM süreç ayrıntıları</h3><p>Çalışma zamanı ve son üretim ölçümleri</p></div><span class="izleme-panel-simge">⌘</span></div>
+    <dl id="izlemeLlmDetaylari" class="izleme-detaylar"><div><dt>Veri bekleniyor</dt><dd>—</dd></div></dl>
+    <details class="izleme-komut"><summary>Başlatma komutunu göster</summary><pre id="izlemeKomut">—</pre></details>
+  </section>
+</div>
+</div>
+
+<div class="kart" id="kartLog" data-menu="izleme">
+<div class="izleme-log-baslik"><div><div class="izleme-ust-baslik">TANI VE OLAYLAR</div><h2>Süreç logları</h2><p>Yalnızca süreç satırları gösterilir; prompt ve görsel içerikleri loglanmaz.</p></div><span id="logSatirSayisi" class="izleme-log-sayisi">Henüz yüklenmedi</span></div>
+<div class="izleme-log-kontroller">
+  <div><label for="logKaynak">Log kaynağı</label><select id="logKaynak"><option value="llama">llama-server</option><option value="comfy">ComfyUI</option><option value="webui">WebUI</option></select></div>
+  <div><label for="logSatir">Gösterilecek satır</label><input id="logSatir" type="number" value="200" min="10" max="500" step="10"></div>
+  <button id="logYenile" class="izleme-yenile">Logları getir</button>
+  <button id="logKopyala" class="izleme-kopyala" disabled>Kopyala</button>
+</div>
+<div class="izleme-log-kutu"><div class="izleme-log-ust"><span><i></i> Canlı çıktı</span><span id="logKaynakEtiketi">llama-server</span></div><pre id="logCikti" tabindex="0" aria-label="Süreç log satırları">Loglar yüklenmedi.</pre></div>
+</div>
+</main>
+
+<div id="bildirim" role="status"></div>
+<div class="altbar"><div class="ic">
+<button id="uretBar">Üret</button>
+<button id="durdurBar" class="tehlike" disabled>Durdur</button>
+<div class="ilerlebar"><div id="progBarBar"></div></div>
+</div></div>
+
+<div class="kapla" id="kapla"><div class="kutu">
+<div id="kaplaIcerik"></div>
+<div class="satir"><div><button id="kaplaKapat" class="hayalet">Kapat</button></div></div>
+</div></div>
+
+<script>
+  // Keep the startup screen visible until the app confirms that its API is ready.
+  (function(){
+    const g = document.getElementById('girisAlani');
+    const u = document.getElementById('uygulama');
+    const k = document.getElementById('kasaAlani');
+    if (g) g.style.display = 'none';
+    if (u) u.style.display = 'none';
+    if (k) k.style.display = 'none';
+  })();
+</script>
+<script src="/static/app.js"></script>
+</html>
