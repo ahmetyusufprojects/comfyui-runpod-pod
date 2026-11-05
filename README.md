@@ -26,6 +26,22 @@ requires authentication.
 - Do not use Docker Compose; the image runs all services through
   `docker/start.sh`.
 
+## Build without downloading the 5 GB base image on Windows
+
+The official Runpod image contains the CUDA, Python, PyTorch, and ComfyUI
+runtime. It is not a model and must not be copied into this repository.
+Building locally downloads that large base layer. The repository therefore
+also includes a GitHub Actions build that performs the build remotely and
+pushes only the resulting image layers to GitHub Container Registry:
+
+1. Push to `main`, or run **Build Runpod image** from the Actions tab.
+2. Use `ghcr.io/ahmetyusufprojects/comfyui-runpod-pod:latest` as the Pod
+   image after making the package public in GitHub Packages.
+
+The workflow uses GitHub Actions layer caching, so later application-only
+changes do not rebuild or upload the large base layer from the Windows
+machine.
+
 Runpod's HTTP proxy URL is:
 `https://<POD_ID>-8189.proxy.runpod.net`
 
