@@ -1,10 +1,10 @@
 """ComfyUI API-format graph builders for the local image models."""
 import random
 
-DIFFUSION_FILE = "flux2-klein-turbo-fp8.safetensors"
-TEXT_ENCODER_FILE = "qwen_3_8b_fp8mixed.safetensors"
+DIFFUSION_FILE = "flux-2-klein-4b.safetensors"
+TEXT_ENCODER_FILE = "qwen_3_4b.safetensors"
 VAE_FILE = "flux2-vae.safetensors"
-Z_IMAGE_DIFFUSION_FILE = "z-image-turbo-fp8.safetensors"
+Z_IMAGE_DIFFUSION_FILE = "z_image_turbo_bf16.safetensors"
 Z_IMAGE_TEXT_ENCODER_FILE = "qwen_3_4b.safetensors"
 Z_IMAGE_VAE_FILE = "ae.safetensors"
 ANIMA_DIFFUSION_FILE = "anima-turbo-v1.1.safetensors"

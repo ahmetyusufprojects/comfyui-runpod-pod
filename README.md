@@ -5,7 +5,7 @@ application.
 
 ## What is included
 
-- Official `runpod/comfyui:latest` CUDA 12 base image.
+- Official `runpod/worker-comfyui:main-base` CUDA base image.
 - ComfyUI source pinned to the tested local revision.
 - `webui_flux2` application source.
 - llama.cpp server built with CUDA support.
@@ -22,7 +22,10 @@ when Hugging Face access requires authentication.
 The model downloader is strict by default. For a service-only boot test, set
 `SKIP_MODEL_DOWNLOAD=1`; for a real deployment leave it at `0`. If a model
 repository returns Hugging Face `401`, add a valid `HF_TOKEN` environment
-variable to the Pod. The token is used only for the download process.
+variable to the Pod. The token is used only for the download process. The
+current core manifest uses the public `Comfy-Org/Flux-2-Klein-4B` and
+`Comfy-Org/Z-Image-Turbo` repositories. Gemma files are downloaded only when
+`DOWNLOAD_LLM_MODELS=1` is set, because that repository requires authorization.
 
 ## Runpod settings
 
