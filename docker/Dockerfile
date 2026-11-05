@@ -1,6 +1,6 @@
 FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS llama-builder
 
-ARG LLAMA_CPP_REF=45b6604b20f17b7d7638042306c0cd1b6af5999c
+ARG LLAMA_CPP_REF=master
 ARG COMFYUI_REF=b0b743566f65daafc423b4fea8a2fbda94b3384a
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates git cmake ninja-build build-essential \
