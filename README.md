@@ -32,8 +32,8 @@ when Hugging Face access requires authentication.
 
 ## Build-free deployment
 
-Use the official `runpod/comfyui:latest` image directly. It contains the
-CUDA, Python, PyTorch, and ComfyUI runtime and is not a model. The template's
+Use the official `runpod/worker-comfyui:main-base` image directly. It contains
+the CUDA, Python, PyTorch, and ComfyUI runtime and is not a model. The template's
 startup command downloads `docker/bootstrap-runpod.sh` from this repository,
 installs the application source and a CUDA 12.8 llama-server release, and then
 starts both services. No local Docker build or 5 GB base-image download is
@@ -42,9 +42,9 @@ needed on Windows.
 Runpod's HTTP proxy URL is:
 `https://<POD_ID>-8189.proxy.runpod.net`
 
-The official Runpod base image uses `/workspace/runpod-slim/ComfyUI` and
-already supplies the CUDA/Python runtime. The startup script preserves that
-layout and only overlays this application's files.
+The official Runpod worker image uses `/comfyui` and already supplies the
+CUDA/Python runtime. The startup script overlays this application's files
+without placing runtime files on Network Storage.
 
 ## Sources
 

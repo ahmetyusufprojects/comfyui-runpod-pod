@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 REPO_ROOT="https://github.com/ahmetyusufprojects/comfyui-runpod-pod/archive/refs/heads/main.tar.gz"
 WORK_ROOT="/tmp/runpod-pod-source"
-COMFY_ROOT="/workspace/runpod-slim/ComfyUI"
+COMFY_ROOT="/comfyui"
 MODEL_ROOT="${MODEL_ROOT:-/models}"
 WEBUI_ROOT="/opt/webui_flux2"
 LLAMA_ROOT="/opt/llama"
