@@ -20,7 +20,7 @@ $bootstrap = 'bash,-lc,curl https://raw.githubusercontent.com/ahmetyusufprojects
     --image $Image `
     --container-disk-in-gb 120 `
     --volume-in-gb $VolumeInGb `
-    --volume-mount-path "/workspace" `
+    --volume-mount-path "/workspace/user-data" `
     --ports "8189/http,8188/http" `
     --port-labels "8189=webui,8188=comfyui" `
     --docker-start-cmd $bootstrap `

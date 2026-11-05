@@ -9,18 +9,22 @@ application.
 - ComfyUI source pinned to the tested local revision.
 - `webui_flux2` application source.
 - llama.cpp server built with CUDA support.
-- Runtime model downloads to ephemeral container storage.
-- User vaults and history under `/workspace/user-data`.
+- Runtime model downloads to ephemeral container storage at `/models`.
+- User vaults and history under the only Network Volume path,
+  `/workspace/user-data`.
 
-Models are intentionally not committed to this repository or stored on the
-Network Volume. Set `HF_TOKEN` in the Pod environment when Hugging Face access
-requires authentication.
+Models, llama.cpp runtime files, source checkout, and service logs are
+intentionally kept on the container disk. They are not stored on the Network
+Volume and may be downloaded again when a new Pod is created. Only
+`/workspace/user-data` is persistent. Set `HF_TOKEN` in the Pod environment
+when Hugging Face access requires authentication.
 
 ## Runpod settings
 
 - Pod, not Serverless.
 - Container disk: 120 GB.
-- Network Volume: small, mounted at `/workspace`.
+- Network Volume: mounted at `/workspace/user-data`; this is the only
+  intentionally persistent path.
 - Expose HTTP port: `8189`.
 - Optional internal diagnostics: `8188`.
 - Do not use Docker Compose; the image runs all services through

@@ -2,11 +2,11 @@
 set -Eeuo pipefail
 
 REPO_ROOT="https://github.com/ahmetyusufprojects/comfyui-runpod-pod/archive/refs/heads/main.tar.gz"
-WORK_ROOT="/workspace/runpod-pod-source"
+WORK_ROOT="/tmp/runpod-pod-source"
 COMFY_ROOT="/workspace/runpod-slim/ComfyUI"
 MODEL_ROOT="${MODEL_ROOT:-/models}"
 WEBUI_ROOT="/opt/webui_flux2"
-LLAMA_ROOT="/workspace/llama"
+LLAMA_ROOT="/opt/llama"
 
 log() { printf '[pod] %s\n' "$*"; }
 fail() { printf '[pod] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -70,13 +70,13 @@ if [ "${SKIP_MODEL_DOWNLOAD:-0}" != "1" ]; then
 fi
 
 log "Starting ComfyUI"
-python3 "$COMFY_ROOT/main.py" --listen 127.0.0.1 --port 8188 > /workspace/comfyui.log 2>&1 &
+python3 "$COMFY_ROOT/main.py" --listen 127.0.0.1 --port 8188 > /tmp/comfyui.log 2>&1 &
 comfy_pid=$!
 trap 'kill "$comfy_pid" 2>/dev/null || true' EXIT INT TERM
 
 for attempt in $(seq 1 180); do
     kill -0 "$comfy_pid" 2>/dev/null || {
-        tail -n 80 /workspace/comfyui.log >&2 || true
+        tail -n 80 /tmp/comfyui.log >&2 || true
         fail "ComfyUI stopped during startup"
     }
     if curl -fsS http://127.0.0.1:8188/system_stats >/dev/null; then
