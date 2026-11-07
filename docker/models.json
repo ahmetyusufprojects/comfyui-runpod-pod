@@ -41,9 +41,13 @@
           "group": "video_quality",
           "lora_file": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
           "steps": 8
+        },
+        "normal": {
+          "group": "video",
+          "steps": 20
         }
       },
-      "default_profile": "fast"
+      "default_profile": "quality"
     },
     "llama": {
       "group": "llama",
@@ -103,7 +107,7 @@
       ]
     },
     "video": {
-      "label": "MiniMax H3 hızlı video (4 adım)",
+      "label": "MiniMax H3 video temel dosyaları",
       "engine": "comfy",
       "files": [
         {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors","dir":"diffusion_models","name":"minimax_h3_ref2va_pruned_int8_convrot.safetensors"},
@@ -114,7 +118,7 @@
       ]
     },
     "video_quality": {
-      "label": "MiniMax H3 daha ayrıntılı video (8 adım)",
+      "label": "MiniMax H3 turbo video (8 adım)",
       "engine": "comfy",
       "depends_on": ["video"],
       "files": [

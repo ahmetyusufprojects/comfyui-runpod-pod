@@ -145,4 +145,17 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     assert "synthetic ComfyUI output" in comfy_logs, comfy_logs
     assert "WebUI 8189 portunda hazır" in webui_logs, webui_logs
 
+    # Both selectable video modes must build valid graphs from the real catalog.
+    pod_setup.status = lambda: {"gruplar": [
+        {"id": "video", "durum": "ready"},
+        {"id": "video_quality", "durum": "ready"},
+    ]}
+    turbo = server._video_sablon_yukle("quality")
+    normal = server._video_sablon_yukle("normal")
+    assert turbo["124"]["inputs"]["steps"] == 8
+    assert turbo["126"]["inputs"]["model"] == ["145", 0]
+    assert normal["124"]["inputs"]["steps"] == 20
+    assert normal["126"]["inputs"]["model"] == ["127", 0]
+    assert "145" not in normal
+
 print("model download, cancellation, GPU diagnostics, and log retrieval checks passed")

@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl ffmpeg git gnupg libgomp1 python3 python3-venv tini \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/webui-venv \
-    && /opt/webui-venv/bin/pip install --no-cache-dir Pillow==12.2.0 huggingface-hub==0.36.2 uv==0.13.7
+    && /opt/webui-venv/bin/pip install --no-cache-dir Pillow==12.2.0 huggingface-hub==0.36.2 uv==0.13.7 psutil==7.0.0
 
 ENV WEBUI_RUNPOD=1 PYTHONUNBUFFERED=1 \
     POD_RUNTIME_ROOT=/opt/runtime POD_VOLUME_MOUNT=/workspace \

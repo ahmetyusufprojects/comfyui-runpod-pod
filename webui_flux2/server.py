@@ -73,6 +73,40 @@ def _system_event(message):
         pass
 
 
+def _ram_bilgi():
+    """Report the container limit and reclaimable cache when a limit exists."""
+    import psutil
+    ram = psutil.virtual_memory()
+    total, available = ram.total, ram.available
+    if RUNPOD_MODE:
+        for limit_path, usage_path, stat_path in (
+                ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current",
+                 "/sys/fs/cgroup/memory.stat"),
+                ("/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                 "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+                 "/sys/fs/cgroup/memory/memory.stat")):
+            try:
+                with open(limit_path, encoding="ascii") as stream:
+                    limit = int(stream.read().strip())
+                with open(usage_path, encoding="ascii") as stream:
+                    used = int(stream.read().strip())
+                cache = 0
+                with open(stat_path, encoding="ascii") as stream:
+                    for line in stream:
+                        parts = line.split()
+                        if len(parts) == 2 and parts[0] in ("inactive_file", "total_inactive_file"):
+                            cache = max(cache, int(parts[1]))
+                if 0 < limit < total:
+                    total = limit
+                    available = min(limit, max(0, limit - used + cache))
+                break
+            except (OSError, ValueError):
+                continue
+    return {"toplam_mb": round(total / (1024 * 1024)),
+            "bos_mb": round(available / (1024 * 1024)),
+            "yuzde": round(100 * (total - available) / total, 1) if total else None}
+
+
 def _log_tail(source, count):
     """Read bounded operational logs and redact credentials before returning them."""
     runtime = os.environ.get("POD_RUNTIME_ROOT", "/opt/runtime")
@@ -372,7 +406,7 @@ def _form_temizle(ham):
                 if v in ("tek", "cift", "video"):
                     temiz[k] = v
             elif k == "video_profile":
-                if v in ("fast", "quality"):
+                if v in ("fast", "quality", "normal"):
                     temiz[k] = v
             elif k == "model":
                 if v in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_ANIMA,
@@ -615,8 +649,8 @@ def _video_sablon_yukle(profile_name=None):
     if RUNPOD_MODE:
         workflow = pod_setup.workflow("video")
         profiles = workflow.get("profiles") or {}
-        requested = profile_name or workflow.get("default_profile", "fast")
-        profile = profiles.get(requested) or profiles.get(workflow.get("default_profile", "fast"))
+        requested = "quality" if profile_name == "fast" else (profile_name or workflow.get("default_profile", "quality"))
+        profile = profiles.get(requested) or profiles.get(workflow.get("default_profile", "quality"))
         if not profile:
             raise RuntimeError("Video modeli models.json içinde tanımlı değil.")
         group_state = {item["id"]: item["durum"] for item in pod_setup.status()["gruplar"]}
@@ -628,8 +662,12 @@ def _video_sablon_yukle(profile_name=None):
                                  ("120", "vae_name", "audio_vae_file")):
             if workflow.get(key):
                 ham[node]["inputs"][field] = workflow[key]
-        ham["145"]["inputs"]["lora_name"] = profile["lora_file"]
-        ham["124"]["inputs"]["steps"] = int(profile.get("steps", 4))
+        if profile.get("lora_file"):
+            ham["145"]["inputs"]["lora_name"] = profile["lora_file"]
+        else:
+            ham["126"]["inputs"]["model"] = ["127", 0]
+            ham.pop("145", None)
+        ham["124"]["inputs"]["steps"] = int(profile.get("steps", 20))
         # Sessiz taslak üretiminde örneklenen ses latent'ini çözmek ve eklemek gereksizdir.
         ham.pop("121", None)
         ham["130"]["inputs"].pop("audio", None)
@@ -749,7 +787,7 @@ def _video_uret(job, req):
             # varsayılanı gereksiz yere çok daha fazla GPU belleği ve hesap ister.
             w0, h0 = kaynak_boyutu
             w, h = _video_boyut(w0, h0, vmax)
-        profile_name = (req.get("video_profile") or "fast") if RUNPOD_MODE else None
+        profile_name = (req.get("video_profile") or "quality") if RUNPOD_MODE else None
         sablon = _video_sablon_yukle(profile_name)
         g = sablon["136"]["inputs"]
         g["prompt"] = prompt
@@ -1567,7 +1605,9 @@ def _ws_ilerleme_dinle(prompt_id, client_id, nodlar):
 # case; starting llama with far less makes the WDDM driver spill allocations
 # into shared GPU memory, which turns every load and every token into a
 # PCIe crawl. Gate high and stop waiting once VRAM stops growing.
-LLM_VRAM_GEREK_MB = 2600
+# RunPod loads the full Gemma model, projection and context onto the GPU.
+# Leave headroom for CUDA allocations after ComfyUI releases its models.
+LLM_VRAM_GEREK_MB = 9000 if RUNPOD_MODE else 2600
 GPU_BOSALTMA_TAVAN_SN = 20
 GPU_BOSALTMA_BEKLE = 0.25   # nvidia-smi tek cagri ~80ms; sik poll yuklemeyi hizlandirir
 LLM_KAPATMA_BEKLE_SN = 30  # llama durmazsa goruntu isi bu kadar bekler
@@ -3180,11 +3220,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 bos = None
             try:
-                import psutil as _psutil
-                ram = _psutil.virtual_memory()
-                ram_bilgi = {"toplam_mb": round(ram.total / (1024 * 1024)),
-                             "bos_mb": round(ram.available / (1024 * 1024)),
-                             "yuzde": ram.percent}
+                ram_bilgi = _ram_bilgi()
             except Exception:
                 ram_bilgi = {"toplam_mb": None, "bos_mb": None,
                              "yuzde": None}

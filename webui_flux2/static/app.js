@@ -114,7 +114,7 @@ function menuUygula(){
 function kullaniciAyarlariniVarsayilanaAl(){
   const degerler = {
     prompt: '', negatif: '', w: 1024, h: 1024, maxside: 1536,
-    maxolcek: true, vmax: 1344, vsure: 5, vfps: '24', videoProfile: 'fast', steps: 8,
+    maxolcek: true, vmax: 1344, vsure: 5, vfps: '24', videoProfile: 'quality', steps: 8,
     cfg: 1, sampler: 'res_multistep', seed: -1, wf: 'otomatik',
     preset: '1024x1024', animaModel: false, moodyAnimaModel: false,
     uretimPromptDestek: false, uretimPromptCeviri: false,
@@ -857,7 +857,7 @@ function formVerisi(istekSecenekleri){
     width: +$('w').value, height: +$('h').value,
     max_side: +$('maxside').value, max_olcek: $('maxolcek').checked,
     video_max_side: vm ? +($('vmax') ? $('vmax').value : (RUNPOD_WEBUI ? 320 : 1344)) : 0,
-    video_profile: vm && $('videoProfile') ? $('videoProfile').value : 'fast',
+    video_profile: vm && $('videoProfile') ? ($('videoProfile').value || 'quality') : 'quality',
     steps: +$('steps').value, cfg: +$('cfg').value,
     sampler: $('sampler').value, seed: +$('seed').value,
     workflow: otomatikWorkflow(), image_base64: fotoB64, image2_base64: fotoB64_2,
@@ -2723,7 +2723,7 @@ function formUygulaKayitli(f){
   }
   koy('vmax', f.video_max_side); koy('steps', f.steps); koy('seed', f.seed);
   koy('vsure', f.suresn); koy('vfps', f.fps);
-  koy('videoProfile', f.video_profile);
+  koy('videoProfile', f.video_profile === 'fast' ? 'quality' : f.video_profile);
   if(f.workflow && $('wf')){ $('wf').value = f.workflow === 'video' ? 'video' : 'otomatik'; try{ $('wf').onchange({target: $('wf')}); }catch(e){} }
   if(f.width != null && f.height != null && $('preset')){
     const hedef = f.width + 'x' + f.height;
