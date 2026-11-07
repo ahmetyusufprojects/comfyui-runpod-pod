@@ -102,6 +102,27 @@ def start(group):
             _thread.start()
 
 
+def remove(group):
+    if not isinstance(group, str) or group not in CATALOG:
+        raise ValueError("Bilinmeyen model grubu.")
+    with _lock:
+        if _active is not None or _queue:
+            raise RuntimeError("Devam eden model hazırlıkları tamamlanmalı.")
+        item = CATALOG[group]
+        if item["engine"] == "llama":
+            import llm
+
+            llm.durdur()
+        shared = {(file["dir"], file["name"])
+                  for other, config in CATALOG.items()
+                  if other != group and _state.get(other, ("idle",))[0] == "ready"
+                  for file in config["files"]}
+        for file in item["files"]:
+            if (file["dir"], file["name"]) not in shared:
+                (MODELS / file["dir"] / file["name"]).unlink(missing_ok=True)
+        _state.pop(group, None)
+
+
 def _progress(group, detail):
     with _lock:
         _state[group] = ("running", detail)

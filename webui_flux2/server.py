@@ -3261,9 +3261,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             req = self._json_oku()
             try:
-                pod_setup.start(req.get("grup"))
+                if req.get("islem") == "kaldir":
+                    with _isler_kilit:
+                        if _kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu:
+                            raise RuntimeError("Modeli kaldırmak için işlerin bitmesini bekleyin.")
+                        pod_setup.remove(req.get("grup"))
+                else:
+                    pod_setup.start(req.get("grup"))
             except ValueError as hata:
                 self._send(400, json.dumps({"hata": str(hata)}))
+            except (OSError, RuntimeError) as hata:
+                self._send(409, json.dumps({"hata": str(hata)}))
             else:
                 self._send(202, json.dumps(pod_setup.status(), ensure_ascii=False))
             return
@@ -3386,6 +3394,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 shutil.rmtree(_ham_kullanici_koku(hedef), ignore_errors=True)
             except Exception:
                 pass
+            if RUNPOD_MODE:
+                pod_setup.checkpoint()
             self._send(200, '{"silindi":true}')
             return
         if parsed.path == "/api/kullanici/kota":
@@ -4158,6 +4168,7 @@ if __name__ == "__main__":
         os.umask(0o077)
         pod_setup.prepare_data(DATA_ROOT, _auth_store)
         kasa.kalici_kopya = pod_setup.checkpoint
+        _auth_store.kalici_kopya = pod_setup.checkpoint
         signal.signal(signal.SIGTERM, signal.default_int_handler)
     with WebUIServer(("0.0.0.0", 8189), Handler) as httpd:
         _httpd = httpd

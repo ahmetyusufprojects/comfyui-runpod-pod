@@ -4590,8 +4590,9 @@ async function podKurulumYukle() {
       const satir = document.createElement('p');
       const dugme = document.createElement('button');
       dugme.className = 'izleme-yenile';
-      dugme.textContent = grup.durum === 'error' ? 'Tekrar dene' : 'Hazırla';
-      dugme.disabled = ['queued', 'running', 'ready'].includes(grup.durum);
+      dugme.textContent = grup.durum === 'ready' ? 'Modeli kaldır'
+        : grup.durum === 'error' ? 'Tekrar dene' : 'Hazırla';
+      dugme.disabled = ['queued', 'running'].includes(grup.durum);
       dugme.onclick = async () => {
         hata.textContent = '';
         dugme.disabled = true;
@@ -4599,7 +4600,7 @@ async function podKurulumYukle() {
           const sonuc = await fetch('/api/pod-kurulum', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({grup: grup.id})
+            body: JSON.stringify({grup: grup.id, islem: grup.durum === 'ready' ? 'kaldir' : 'hazirla'})
           });
           if (!sonuc.ok) throw new Error((await sonuc.json()).hata || 'Kurulum başlatılamadı.');
           await podKurulumYukle();

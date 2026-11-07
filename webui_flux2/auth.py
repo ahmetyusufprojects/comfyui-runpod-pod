@@ -72,6 +72,7 @@ class AuthStore:
     def __init__(self, dosya_yolu):
         self.dosya = dosya_yolu
         self._kilit = _threading.Lock()
+        self.kalici_kopya = None
 
     def _oku(self):
         try:
@@ -86,10 +87,14 @@ class AuthStore:
         return {"kullanicilar": {}, "oturumlar": {}}
 
     def _yaz(self, veri):
+        hesap_degisti = (self.kalici_kopya is not None
+                         and self._oku().get("kullanicilar") != veri.get("kullanicilar"))
         tmp = self.dosya + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             _json.dump(veri, f, ensure_ascii=False, indent=2)
         _os.replace(tmp, self.dosya)
+        if hesap_degisti:
+            self.kalici_kopya()
 
     def _budanmis(self, veri):
         """Suresi dolan oturumlari tembelce at."""
