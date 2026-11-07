@@ -159,9 +159,6 @@ def _run():
             group = _active = _queue.pop(0)
         try:
             item = CATALOG[group]
-            if group == "moody":
-                _progress(group, "Civitai anahtarı kontrol ediliyor")
-                _check_civitai_token()
             if item["engine"] == "comfy":
                 _progress(group, "ComfyUI hazırlanıyor")
                 _install_comfy()
@@ -337,24 +334,6 @@ def _civitai_model(target, file):
         temp.replace(target)
     finally:
         temp.unlink(missing_ok=True)
-
-
-def _check_civitai_token():
-    token = os.environ.get("CIVITAI_TOKEN")
-    if not token or token.startswith("{{"):
-        raise RuntimeError("Moody Anima için Pod’a CIVITAI_TOKEN ekleyin.")
-    request = urllib.request.Request(
-        "https://civitai.com/api/v1/me",
-        headers={"Authorization": "Bearer " + token})
-    try:
-        response = urllib.request.urlopen(request, timeout=20)
-    except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            raise RuntimeError("Civitai anahtarı kabul edilmedi. RunPod Secret’taki anahtarı yenileyin.") from None
-        raise RuntimeError(f"Civitai anahtar kontrolü: HTTP {exc.code}.") from None
-    with response:
-        if response.status != 200:
-            raise RuntimeError(f"Civitai anahtar kontrolü: HTTP {response.status}.")
 
 
 def _valid_model(path, file):
