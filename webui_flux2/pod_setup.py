@@ -65,8 +65,12 @@ def prepare_data(data_root, accounts):
         _flex.restore()
     password = os.environ.pop("WEBUI_BOOTSTRAP_PASSWORD", "")
     if not accounts.kurulu_mu():
-        if Path(accounts.dosya).exists() or not password:
-            raise RuntimeError("Kullanıcı kaydı eksik veya boş. İlk hesap ayrı olarak kurulmalı.")
+        if Path(accounts.dosya).exists():
+            raise RuntimeError("Kullanıcı kaydı boş veya okunamıyor; yeni hesap oluşturulmadı.")
+        if not password:
+            raise RuntimeError("Hesap kaydı bulunamadı. İlk kurulumda bu Pod'a WEBUI_BOOTSTRAP_PASSWORD Secret'ı ekleyin; mevcut hesap bekliyorsanız Flex seçimini kontrol edin.")
+        if password.startswith("{{") and password.endswith("}}"):
+            raise RuntimeError("Başlangıç parolası için RunPod Secret çözülemedi; Secret adını kontrol edin.")
         accounts.ilk_admin(os.environ.get("WEBUI_BOOTSTRAP_USER", "user"), password)
         checkpoint()
 

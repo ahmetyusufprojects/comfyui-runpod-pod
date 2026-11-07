@@ -30,4 +30,4 @@ COPY webui_flux2/static/app.css webui_flux2/static/app.js /opt/webui_flux2/stati
 COPY docker/models.json /opt/pod/models.json
 WORKDIR /opt/webui_flux2
 EXPOSE 8189
-ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/opt/webui-venv/bin/python", "server.py"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/opt/webui-venv/bin/python", "server.py"]
