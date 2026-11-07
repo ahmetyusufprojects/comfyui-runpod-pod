@@ -4706,9 +4706,13 @@ if __name__ == "__main__":
             _auth_store.kalici_kopya = pod_setup.checkpoint
         except Exception as exc:
             _startup_error = type(exc).__name__
-            _system_event("Pod hazırlığı tamamlanamadı (" + _startup_error + ").")
+            detail = " ".join(str(exc).split())
+            detail = re.sub(r"(?i)(hf_[a-z0-9_-]{12,}|(?:token|password|secret)\s*[=:]\s*\S+)",
+                            "[REDACTED]", detail)[:240]
+            diagnostic = _startup_error + (": " + detail if detail else "")
+            _system_event("Pod hazırlığı tamamlanamadı (" + diagnostic + ").")
             print("Pod hazırlığı tamamlanamadı (%s); 8192 portundaki durum ekranı açık kalacak."
-                  % _startup_error, flush=True)
+                  % diagnostic, flush=True)
         signal.signal(signal.SIGTERM, signal.default_int_handler)
     with WebUIServer(("0.0.0.0", 8189), Handler) as httpd:
         _httpd = httpd
