@@ -4572,6 +4572,31 @@ async function izlemeYukle(){
 }
 let podKurulumEtkin = null;
 let podKurulumMesgul = false;
+let podKurulumSonDurum = '';
+function podKurulumDugme(baslik, veri) {
+  const dugme = document.createElement('button');
+  dugme.className = 'izleme-yenile';
+  dugme.textContent = baslik;
+  dugme.onclick = async () => {
+    const hata = $('podKurulumHata');
+    hata.textContent = '';
+    dugme.disabled = true;
+    try {
+      const yanit = await fetch('/api/pod-kurulum', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(veri)
+      });
+      if (!yanit.ok) throw new Error((await yanit.json()).hata || 'İşlem tamamlanamadı.');
+      await podKurulumYukle();
+    } catch (e) {
+      hata.textContent = e.message;
+    } finally {
+      dugme.disabled = false;
+    }
+  };
+  return dugme;
+}
 async function podKurulumYukle() {
   if (podKurulumEtkin === false || podKurulumMesgul || !BEN || aktifMenu !== 'izleme') return;
   podKurulumMesgul = true;
@@ -4584,33 +4609,34 @@ async function podKurulumYukle() {
     const bilgi = await yanit.json();
     podKurulumEtkin = true;
     panel.hidden = false;
+    const sonDurum = JSON.stringify(bilgi);
+    if (podKurulumSonDurum === sonDurum) return;
+    podKurulumSonDurum = sonDurum;
     const durumlar = {idle: 'Kurulu değil', queued: 'Sırada', running: 'Hazırlanıyor',
       ready: 'Hazır', error: 'Kurulum tamamlanamadı'};
-    const satirlar = bilgi.gruplar.map(grup => {
+    const kuyruk = bilgi.sirada;
+    const bekleyen = kuyruk.map(id => bilgi.gruplar.find(grup => grup.id === id));
+    const gruplar = [...bilgi.gruplar.filter(grup => grup.id === bilgi.aktif),
+      ...bekleyen, ...bilgi.gruplar.filter(grup => grup.id !== bilgi.aktif && !kuyruk.includes(grup.id))];
+    const satirlar = gruplar.map(grup => {
       const satir = document.createElement('p');
-      const dugme = document.createElement('button');
-      dugme.className = 'izleme-yenile';
-      dugme.textContent = grup.durum === 'ready' ? 'Modeli kaldır'
-        : grup.durum === 'error' ? 'Tekrar dene' : 'Hazırla';
-      dugme.disabled = ['queued', 'running'].includes(grup.durum);
-      dugme.onclick = async () => {
-        hata.textContent = '';
-        dugme.disabled = true;
-        try {
-          const sonuc = await fetch('/api/pod-kurulum', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({grup: grup.id, islem: grup.durum === 'ready' ? 'kaldir' : 'hazirla'})
-          });
-          if (!sonuc.ok) throw new Error((await sonuc.json()).hata || 'Kurulum başlatılamadı.');
-          await podKurulumYukle();
-        } catch (e) {
-          hata.textContent = e.message;
-          dugme.disabled = false;
+      const index = kuyruk.indexOf(grup.id);
+      satir.append((index >= 0 ? (index + 1) + '. ' : '') + grup.ad + ' · ' +
+        durumlar[grup.durum] + (grup.ayrinti ? ' · ' + grup.ayrinti : '') + ' ');
+      if (index >= 0) {
+        for (const [yon, etiket, uygun] of [['yukari', 'Yukarı al', index > 0],
+          ['asagi', 'Aşağı al', index < kuyruk.length - 1]]) {
+          const dugme = podKurulumDugme(etiket, {grup: grup.id, islem: 'sira', yon});
+          dugme.setAttribute('aria-label', grup.ad + ' · ' + etiket);
+          dugme.disabled = !uygun;
+          satir.append(dugme);
         }
-      };
-      satir.append(grup.ad + ' · ' + durumlar[grup.durum] +
-        (grup.ayrinti ? ' · ' + grup.ayrinti : '') + ' ', dugme);
+      } else if (grup.durum !== 'running') {
+        const hazir = grup.durum === 'ready';
+        satir.append(podKurulumDugme(hazir ? 'Modeli kaldır'
+          : grup.durum === 'error' ? 'Tekrar dene' : 'Hazırla',
+        {grup: grup.id, islem: hazir ? 'kaldir' : 'hazirla'}));
+      }
       return satir;
     });
     $('podKurulumGruplar').replaceChildren(...satirlar);

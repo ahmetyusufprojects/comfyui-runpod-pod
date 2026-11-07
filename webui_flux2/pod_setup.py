@@ -102,6 +102,18 @@ def start(group):
             _thread.start()
 
 
+def move(group, direction):
+    if direction not in ("yukari", "asagi"):
+        raise ValueError("Bilinmeyen sıra yönü.")
+    with _lock:
+        if group not in _queue:
+            raise RuntimeError("Yalnızca bekleyen modellerin sırası değiştirilebilir.")
+        index = _queue.index(group)
+        destination = index + (-1 if direction == "yukari" else 1)
+        if 0 <= destination < len(_queue):
+            _queue[index], _queue[destination] = _queue[destination], _queue[index]
+
+
 def remove(group):
     if not isinstance(group, str) or group not in CATALOG:
         raise ValueError("Bilinmeyen model grubu.")
@@ -142,6 +154,8 @@ def _run():
             if item["engine"] == "comfy":
                 _progress(group, "ComfyUI hazırlanıyor")
                 _install_comfy()
+                _progress(group, "ComfyUI başlatılıyor, model indirmeleri başlıyor")
+                _launch_comfy()
             elif item["engine"] == "llama":
                 _progress(group, "llama-server hazırlanıyor")
                 _install_llama()
@@ -151,8 +165,8 @@ def _run():
                 _progress(group, "İndiriliyor: " + file["name"])
                 _model(file)
             if item["engine"] == "comfy":
-                _progress(group, "ComfyUI başlatılıyor")
-                _start_comfy()
+                _progress(group, "ComfyUI bağlantısı kontrol ediliyor")
+                _wait_comfy()
             result = ("ready", "")
         except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
             detail = str(exc) if type(exc) is RuntimeError else type(exc).__name__
@@ -203,7 +217,7 @@ def _gpu_memory():
         raise RuntimeError("NVIDIA GPU belleği tespit edilemedi.") from None
 
 
-def _start_comfy():
+def _launch_comfy():
     global _comfy_process
     if _comfy_process is not None and _comfy_process.poll() is None:
         return
@@ -217,6 +231,9 @@ def _start_comfy():
             [str(ROOT / "comfy-venv/bin/python"), str(COMFY / "main.py"),
              "--listen", "127.0.0.1", "--port", "8188", *args],
             cwd=COMFY, stdout=log, stderr=subprocess.STDOUT)
+
+
+def _wait_comfy():
     for _ in range(180):
         if _comfy_process.poll() is not None:
             raise RuntimeError("ComfyUI başlatılamadı.")

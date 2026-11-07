@@ -3271,6 +3271,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         if _kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu:
                             raise RuntimeError("Modeli kaldırmak için işlerin bitmesini bekleyin.")
                         pod_setup.remove(req.get("grup"))
+                elif req.get("islem") == "sira":
+                    pod_setup.move(req.get("grup"), req.get("yon"))
                 else:
                     pod_setup.start(req.get("grup"))
             except ValueError as hata:
