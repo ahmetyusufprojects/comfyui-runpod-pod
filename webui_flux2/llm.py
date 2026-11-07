@@ -21,10 +21,31 @@ from PIL import Image, ImageOps
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
+RUNPOD_MODE = os.environ.get("WEBUI_RUNPOD") == "1"
 LLAMA_SERVER = os.environ.get("LLAMA_SERVER_PATH", os.path.join(
     PROJECT_ROOT, "llama.cpp", "llama-server.exe"))
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _linux_process = None
+
+
+def _runpod_llama_settings():
+    if not RUNPOD_MODE:
+        return {}
+    try:
+        with open(os.environ["POD_MODEL_CATALOG"], "r", encoding="utf-8") as stream:
+            workflow = json.load(stream).get("workflows", {}).get("llama", {})
+        model_root = os.path.join(os.environ["COMFYUI_ROOT"], "models", "llm")
+        return {
+            "model": os.path.join(model_root, workflow["model_file"]),
+            "mmproj": os.path.join(model_root, workflow["mmproj_file"]),
+            "gpu_device": workflow.get("gpu_device", "CUDA0"),
+            "gpu_layers": workflow.get("gpu_layers", "all"),
+        }
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+_RUNPOD_LLAMA = _runpod_llama_settings()
 
 def _llm_dbg(msg):
     try:
@@ -32,10 +53,11 @@ def _llm_dbg(msg):
             f.write(f"[LLMDBG {time.time():.0f}] {msg}\n")
     except Exception:
         pass
-MODEL_PATH = os.environ.get("LLM_MODEL_PATH", os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
+MODEL_PATH = os.environ.get("LLM_MODEL_PATH", _RUNPOD_LLAMA.get("model") or os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
                           "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"))
-MMPROJ_PATH = os.environ.get("LLM_MMPROJ_PATH", os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
-                           "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf"))
+MMPROJ_PATH = os.environ.get("LLM_MMPROJ_PATH", _RUNPOD_LLAMA.get("mmproj") or os.path.join(
+    PROJECT_ROOT, "Gemma-4E4B-3",
+    "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf"))
 # Q8_0 ayristirmasi: f16 mmproj'in yarisi boyutunda. llama-quantize'un
 # a.conv1d f32-tenensorlerinde boyut asserasyonu catirdigindan bu tensorler
 # f32 birakildi. Yarim boyut -> yuklemede yaklasik 3 sn kazanc.
@@ -48,8 +70,12 @@ MMPROJ_BEYIT = 990288832
 MODEL_KOD = "D0027DD3A9128D9323E9F282C8BF010A8526C46477584535991DC1A869B56E96"
 MMPROJ_KOD = "DEBAD39AB9C1152AB67695A674FB35E8375B2320C57BFD5075835D3CCB16C7DB"
 PORT = 8191
-# RTX 3050 Ti 4 GB: 38 layers loads faster; 42 layers decodes faster but loads slower.
-GPU_KATMAN = int(os.environ.get("LLAMA_GPU_LAYERS", "38"))
+# Windows keeps its existing 38-layer setting. RunPod reads its GPU target and
+# full-layer choice from the versioned model catalog.
+GPU_KATMAN = os.environ.get("LLAMA_GPU_LAYERS",
+                            str(_RUNPOD_LLAMA.get("gpu_layers", "all" if RUNPOD_MODE else 38)))
+GPU_DEVICE = os.environ.get("LLAMA_GPU_DEVICE",
+                            _RUNPOD_LLAMA.get("gpu_device", "CUDA0"))
 CTX = 8000                 # varsayilan; kullanicinin llm_ctx ayari ile guncellenir
 BAGLAM_ALT = 1024
 BAGLAM_UST = 32768
@@ -337,6 +363,8 @@ def durum(detayli=False):
             "-ngl", str(GPU_KATMAN), "-t", "8", "-b", "4096",
             "-ub", "1024", "-np", "1",
         ]
+        if os.name != "nt":
+            komut_parcalar += ["--device", GPU_DEVICE]
         if REASONING_MODE == "off":
             komut_parcalar += ["-rea", "off"]
         else:
@@ -349,6 +377,7 @@ def durum(detayli=False):
         komut_parcalar += ["--no-webui", "--cache-reuse", "256", "-lm", "mmap",
                            "--no-warmup"]
         d.update({"port": PORT, "ngl": GPU_KATMAN, "ctx": CTX,
+                  "gpu_device": GPU_DEVICE if os.name != "nt" else None,
                   "calisan_ctx": _calisan_ctx,
                   "komut": " ".join(komut_parcalar),
                   "ram_byt": _surec_mem_byt(pid),
@@ -386,22 +415,75 @@ def _hazir_bekle(pid, baslama):
     return None
 
 
+def _gpu_backend_dogrula():
+    """RunPod must see a CUDA device; never quietly fall back to CPU."""
+    if os.name == "nt":
+        return
+    try:
+        output = subprocess.check_output([LLAMA_SERVER, "--list-devices"],
+                                         stderr=subprocess.STDOUT, text=True,
+                                         timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        raise LLMHatasi("llama-server GPU aygıtlarını listeleyemedi; CUDA kurulumu kontrol edilmeli.",
+                        "surec") from None
+    if not re.search(r"(?m)^\s*" + re.escape(GPU_DEVICE) + r":", output):
+        raise LLMHatasi("llama-server " + GPU_DEVICE +
+                        " GPU'sunu göremedi; CPU ile yavaş çalışması engellendi.", "surec")
+
+
+def _linux_llama_command(pid):
+    if os.name == "nt" or not pid:
+        return []
+    try:
+        raw = open("/proc/%d/cmdline" % int(pid), "rb").read()
+        return [item.decode("utf-8", "replace") for item in raw.split(b"\0") if item]
+    except (OSError, ValueError):
+        return []
+
+
+def _gpu_sureci_mi(pid):
+    """A healthy RunPod llama process must explicitly target CUDA and all layers."""
+    if os.name == "nt":
+        return True
+    args = _linux_llama_command(pid)
+    if not args or "llama-server" not in os.path.basename(args[0]):
+        return False
+    try:
+        device = args[args.index("--device") + 1]
+        layers = args[args.index("-ngl") + 1]
+    except (ValueError, IndexError):
+        return False
+    return device == GPU_DEVICE and layers.lower() == "all"
+
+
 def baslat(*, gpu_hazirla=None):
     """Sunucuyu hazirlar. Donus: bu cagrida gecen yukleme ms (0 = zaten hazir)."""
     global _calisan_ctx, _linux_process
     baslama = time.monotonic()
     _llm_dbg("baslat_basla")
+    _gpu_backend_dogrula()
     saglik = _saglik()
     pid = _pid_oku()
 
     if saglik == "ok":
-        if pid is None or not _surec_yasiyor(pid):
-            sahibi = _port_sahibi()
+        sahibi = _port_sahibi()
+        if sahibi is None and _surec_yasiyor(pid):
+            sahibi = pid
+        if sahibi is None:
+            raise LLMHatasi("llama-server süreci ve GPU kullanımı doğrulanamadı.", "surec")
+        if sahibi is not None and not _gpu_sureci_mi(sahibi):
+            if "llama-server" not in os.path.basename((_linux_llama_command(sahibi) or [""])[0]):
+                raise LLMHatasi("8191 portunu llama-server dışı bir süreç kullanıyor.", "surec")
+            _pid_yaz(sahibi, _pid_ctx_oku())
+            durdur()
+            saglik = "hata"
+            _llm_dbg("GPU kullanmayan eski llama süreci GPU ayarlarıyla yenileniyor")
+        else:
             if sahibi is not None:
                 _pid_yaz(sahibi)
-        _calisan_ctx = _pid_ctx_oku()
-        _llm_dbg(f"baslat_zaten_hazir ms={int((time.monotonic()-baslama)*1000)}")
-        return 0
+            _calisan_ctx = _pid_ctx_oku()
+            _llm_dbg(f"baslat_zaten_hazir ms={int((time.monotonic()-baslama)*1000)}")
+            return 0
 
     if saglik == "loading":
         sahibi = _port_sahibi()
@@ -419,7 +501,6 @@ def baslat(*, gpu_hazirla=None):
         durdur()
 
     model_dogrula()
-
     sahibi = _port_sahibi()
     if sahibi is not None:
         if sahibi != pid:
@@ -449,6 +530,8 @@ def baslat(*, gpu_hazirla=None):
         # graph'lar olusur. Atlaninca model acilisi yaklasik ikiye katlanir.
         "--no-warmup",
     ]
+    if os.name != "nt":
+        komut += ["--device", GPU_DEVICE]
     if REASONING_MODE == "off":
         komut += ["-rea", "off"]
     else:
@@ -458,7 +541,7 @@ def baslat(*, gpu_hazirla=None):
         if isinstance(REASONING_BUDGET, int) and REASONING_BUDGET > 0:
             komut += ["--reasoning-budget", str(REASONING_BUDGET)]
         komut += ["--reasoning-format", "deepseek"]
-    if GPU_KATMAN == 0:
+    if str(GPU_KATMAN) == "0":
         komut += ["-nkvo", "--no-mmproj-offload"]
     _dosyalari_isit()
     if gpu_hazirla is not None:
@@ -537,12 +620,19 @@ def durdur():
     pid = _pid_oku()
     if os.name != "nt" and _surec_yasiyor(pid):
         try:
-            _linux_process.terminate()
-            _linux_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _linux_process.kill()
-            _linux_process.wait()
-        except ProcessLookupError:
+            if _linux_process is not None and _linux_process.pid == pid:
+                _linux_process.terminate()
+                _linux_process.wait(timeout=5)
+            elif _gpu_sureci_mi(pid) or "llama-server" in os.path.basename(
+                    (_linux_llama_command(pid) or [""])[0]):
+                os.kill(pid, 15)
+                for _ in range(10):
+                    if not _surec_yasiyor(pid):
+                        break
+                    time.sleep(0.5)
+                if _surec_yasiyor(pid):
+                    os.kill(pid, 9)
+        except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
             pass
     if pid is not None and _surec_yasiyor(pid):
         try:

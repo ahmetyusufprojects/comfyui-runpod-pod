@@ -160,13 +160,14 @@
 
 <div class="kart" id="videoKart" style="display:none">
 <h3>Video (referans → video, sessiz)</h3>
-<div class="kucuk">En az 1 referans fotoğraf gerekir. Ölçü, en uzun kenara göre alınır.</div>
+<div class="kucuk" id="videoBilgi">En az 1 referans fotoğraf gerekir. Ölçü, en uzun kenara göre alınır.</div>
 <div class="satir">
-<div><label>Süre (sn, 1-10)</label><input id="vsure" type="number" value="5" min="1" max="10"></div>
+<div><label id="videoSureLabel">Süre (sn, 1-10)</label><input id="vsure" type="number" value="5" min="0.25" max="10" step="0.25"></div>
 <div><label>FPS (8/12/24)</label><select id="vfps"><option>8</option><option>12</option><option selected>24</option></select></div>
 <div><label>En uzun kenar (320-1344)</label><input id="vmax" type="number" value="1344" min="320" max="1344" step="32"></div>
 </div>
-<div class="kucuk">Kare = süre×fps (17k+5 ızgarasına yuvarlanır) · tek işçi sırayla çalışır.</div>
+<div class="satir" id="videoProfileBlok" hidden><div><label for="videoProfile">Video profili</label><select id="videoProfile"><option value="fast">Hızlı taslak · 4 adım</option><option value="quality">Ayrıntılı · 8 adım (ayrıca kurulur)</option></select></div></div>
+<div class="kucuk" id="videoKareNotu">Kare sayısı 17k+5 ızgarasına yuvarlanır · tek işçi sırayla çalışır.</div>
 <div class="satir"><div><button id="videoUret">Video Üret</button></div></div>
 </div>
 
@@ -644,7 +645,7 @@
 <div class="kart" id="kartLog" data-menu="izleme">
 <div class="izleme-log-baslik"><div><div class="izleme-ust-baslik">TANI VE OLAYLAR</div><h2>Süreç logları</h2><p>Yalnızca süreç satırları gösterilir; prompt ve görsel içerikleri loglanmaz.</p></div><span id="logSatirSayisi" class="izleme-log-sayisi">Henüz yüklenmedi</span></div>
 <div class="izleme-log-kontroller">
-  <div><label for="logKaynak">Log kaynağı</label><select id="logKaynak"><option value="llama">llama-server</option><option value="comfy">ComfyUI</option><option value="webui">WebUI</option></select></div>
+  <div><label for="logKaynak">Log kaynağı</label><select id="logKaynak"><option value="llama">llama-server</option><option value="comfy">ComfyUI</option><option value="webui">WebUI</option><option value="setup">Kurulum</option></select></div>
   <div><label for="logSatir">Gösterilecek satır</label><input id="logSatir" type="number" value="200" min="10" max="500" step="10"></div>
   <button id="logYenile" class="izleme-yenile">Logları getir</button>
   <button id="logKopyala" class="izleme-kopyala" disabled>Kopyala</button>

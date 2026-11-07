@@ -71,14 +71,17 @@ def choose_gpu(limit):
 
 def wait_webui(pod_id, open_browser):
     url = f"https://{pod_id}-8189.proxy.runpod.net"
+    setup_url = f"https://{pod_id}-8192.proxy.runpod.net"
+    print(f"Model kurulumu: {setup_url}", flush=True)
     print(f"WebUI: {url}", flush=True)
+    if open_browser:
+        webbrowser.open(setup_url)
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
         try:
-            if request(url + "/api/sunucu-hazir").get("hazir"):
-                print("WebUI hazır. Sistem Gözetimi ekranından modelleri seçebilirsiniz.")
-                if open_browser:
-                    webbrowser.open(url)
+            setup = request(setup_url + "/api/setup-state")
+            if setup.get("hazir") and request(url + "/api/sunucu-hazir").get("hazir"):
+                print("WebUI ve ayrı model kurulum ekranı hazır.")
                 return
         except (OSError, ValueError):
             pass
@@ -133,7 +136,7 @@ def main():
             "name": NAME, "templateId": TEMPLATE_ID, "image": image,
             "cloud": "SECURE", "disk": 120,
             "gpu": {"id": gpu_id, "count": 1, "minCudaVersion": "12.8"},
-            "ports": ["8189/http"], "env": env,
+            "ports": ["8189/http", "8192/http"], "env": env,
             "mounts": {"global": [{"volumeId": FLEX, "path": "/workspace"}]},
         }
         try:

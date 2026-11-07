@@ -1,17 +1,44 @@
 """ComfyUI API-format graph builders for the local image models."""
+import json
 import os
 import random
 
-DIFFUSION_FILE = os.environ.get("WEBUI_FLUX_UNET", "flux2-klein-turbo-fp8.safetensors")
-TEXT_ENCODER_FILE = os.environ.get("WEBUI_FLUX_ENCODER", "qwen_3_8b_fp8mixed.safetensors")
-VAE_FILE = "flux2-vae.safetensors"
-Z_IMAGE_DIFFUSION_FILE = os.environ.get("WEBUI_ZIMAGE_UNET", "z-image-turbo-fp8.safetensors")
-Z_IMAGE_TEXT_ENCODER_FILE = "qwen_3_4b.safetensors"
-Z_IMAGE_VAE_FILE = "ae.safetensors"
-ANIMA_DIFFUSION_FILE = "anima-turbo-v1.1.safetensors"
-MOODY_ANIMA_DIFFUSION_FILE = "anima-moody-mix-v10.safetensors"
-ANIMA_TEXT_ENCODER_FILE = "qwen_3_06b_base.safetensors"
-ANIMA_VAE_FILE = "qwen_image_vae.safetensors"
+
+def _runpod_workflows():
+    if os.environ.get("WEBUI_RUNPOD") != "1":
+        return {}
+    try:
+        with open(os.environ["POD_MODEL_CATALOG"], "r", encoding="utf-8") as stream:
+            return json.load(stream).get("workflows", {})
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+RUNPOD_WORKFLOWS = _runpod_workflows()
+
+
+def _model_file(workflow, key, fallback, env=None):
+    configured = RUNPOD_WORKFLOWS.get(workflow, {}).get(key)
+    return os.environ.get(env) or configured or fallback
+
+
+DIFFUSION_FILE = _model_file(
+    "flux2", "diffusion_file", "flux2-klein-turbo-fp8.safetensors", "WEBUI_FLUX_UNET")
+TEXT_ENCODER_FILE = _model_file(
+    "flux2", "text_encoder_file", "qwen_3_8b_fp8mixed.safetensors", "WEBUI_FLUX_ENCODER")
+VAE_FILE = _model_file("flux2", "vae_file", "flux2-vae.safetensors")
+Z_IMAGE_DIFFUSION_FILE = _model_file(
+    "z_image", "diffusion_file", "z-image-turbo-fp8.safetensors", "WEBUI_ZIMAGE_UNET")
+Z_IMAGE_TEXT_ENCODER_FILE = _model_file(
+    "z_image", "text_encoder_file", "qwen_3_4b.safetensors")
+Z_IMAGE_VAE_FILE = _model_file("z_image", "vae_file", "ae.safetensors")
+ANIMA_DIFFUSION_FILE = _model_file(
+    "anima", "diffusion_file", "anima-turbo-v1.1.safetensors")
+MOODY_ANIMA_DIFFUSION_FILE = _model_file(
+    "moody_anima", "diffusion_file", "anima-moody-mix-v10.safetensors")
+ANIMA_TEXT_ENCODER_FILE = _model_file(
+    "anima", "text_encoder_file", "qwen_3_06b_base.safetensors")
+ANIMA_VAE_FILE = _model_file("anima", "vae_file", "qwen_image_vae.safetensors")
 
 
 def build_prompt(p, image_name=None, image_name2=None):

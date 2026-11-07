@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl ffmpeg git gnupg libgomp1 python3 python3-venv tini \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/webui-venv \
-    && /opt/webui-venv/bin/pip install --no-cache-dir Pillow==12.2.0 huggingface-hub==0.36.2
+    && /opt/webui-venv/bin/pip install --no-cache-dir Pillow==12.2.0 huggingface-hub==0.36.2 uv==0.13.7
 
 ENV WEBUI_RUNPOD=1 PYTHONUNBUFFERED=1 \
     POD_RUNTIME_ROOT=/opt/runtime POD_VOLUME_MOUNT=/workspace \
@@ -12,22 +12,16 @@ ENV WEBUI_RUNPOD=1 PYTHONUNBUFFERED=1 \
     WEBUI_DATA_ROOT=/workspace/user-data \
     GPG_HOME=/opt/runtime/gnupg GPG_PATH=/usr/bin/gpg \
     HF_HOME=/opt/runtime/hf-cache XDG_CACHE_HOME=/opt/runtime/cache \
+    UV_BIN=/opt/webui-venv/bin/uv UV_CACHE_DIR=/opt/runtime/uv-cache \
     COMFYUI_ROOT=/opt/runtime/ComfyUI COMFYUI_URL=127.0.0.1:8188 \
-    WEBUI_FLUX_UNET=flux-2-klein-4b.safetensors WEBUI_FLUX_ENCODER=qwen_3_4b.safetensors \
-    WEBUI_ZIMAGE_UNET=z_image_turbo_bf16.safetensors \
-    WEBUI_VIDEO_UNET=minimax_h3_ref2va_pruned_int8_convrot.safetensors \
-    WEBUI_VIDEO_CLIP=qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors \
-    WEBUI_VIDEO_VAE=minimax_h3_video_vae_int8_convrot.safetensors \
-    WEBUI_TRANSLATION_MODEL_DIR=/opt/runtime/ComfyUI/models/opus_mt_tr_en \
-    LLAMA_SERVER_PATH=/opt/runtime/bin/llama-server LLAMA_GPU_LAYERS=99 \
-    LLM_MODEL_PATH=/opt/runtime/ComfyUI/models/llm/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf \
-    LLM_MMPROJ_PATH=/opt/runtime/ComfyUI/models/llm/mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf \
-    LLM_MMPROJ_Q8_PATH=/opt/runtime/ComfyUI/models/llm/mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf \
+    LLAMA_SERVER_PATH=/opt/runtime/bin/llama-server \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/flex_store.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/server.py webui_flux2/video_r2v_api.json /opt/webui_flux2/
 COPY webui_flux2/static/app.css webui_flux2/static/app.js /opt/webui_flux2/static/
+COPY webui_flux2/setup.html /opt/webui_flux2/
+COPY webui_flux2/static/setup.css webui_flux2/static/setup.js /opt/webui_flux2/static/
 COPY docker/models.json /opt/pod/models.json
 WORKDIR /opt/webui_flux2
-EXPOSE 8189
+EXPOSE 8189 8192
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/opt/webui-venv/bin/python", "server.py"]

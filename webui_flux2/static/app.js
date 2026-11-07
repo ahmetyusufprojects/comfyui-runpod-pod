@@ -2,6 +2,7 @@
 /* İş tipi seçim noktası (E): video arayüzü YOK, ama şema hazır.
    Yeni tip eklenince sadece bu fonksiyon + sunucudaki is_tipini_belirle büyür. */
 const VIDEO_HAZIRLIK = {suresn: 0, fps: 0};
+let RUNPOD_WEBUI = false;
 let fotoB64 = null, fotoB64_2 = null, fotoMime = null, fotoMime2 = null, takipIs = null;
 let gecSayfa = 1, gecListe = [], gecIdx = 0, gecToplam = 0, gecGorunum = 'izgara', prOnbellek = [];
 let gecFavoriler = false;
@@ -63,7 +64,9 @@ function uretimModGuncelle(){
   $('animaModelSecim').hidden = !!refSayisi() || videoMu();
   const bilgi = $('uretimModBilgi');
   if(bilgi){
-    if(videoMu()) bilgi.textContent = 'Video iş akışı: MiniMax H3; model seçimi bu akışta etkisizdir.';
+    if(videoMu()) bilgi.textContent = RUNPOD_WEBUI
+      ? 'MiniMax H3 hızlı taslak: 4 adım, küçük çözünürlük ve kısa klip. Ayrıntılı 8 adım profili ayrıca kurulabilir.'
+      : 'Video iş akışı: MiniMax H3; model seçimi bu akışta etkisizdir.';
     else if(refSayisi() >= 2) bilgi.textContent = 'Otomatik: Flux2 Klein · çift referans düzenleme · ' + $('steps').value + ' adım';
     else if(refSayisi() === 1) bilgi.textContent = 'Otomatik: Flux2 Klein · düzenleme (1 referans) · ' + $('steps').value + ' adım';
     else if(model === 'anima') bilgi.textContent = 'Anima Turbo v1.1 · saf görsel üretimi · ' + $('steps').value + ' adım';
@@ -111,7 +114,7 @@ function menuUygula(){
 function kullaniciAyarlariniVarsayilanaAl(){
   const degerler = {
     prompt: '', negatif: '', w: 1024, h: 1024, maxside: 1536,
-    maxolcek: true, vmax: 1344, vsure: 5, vfps: '24', steps: 8,
+    maxolcek: true, vmax: 1344, vsure: 5, vfps: '24', videoProfile: 'fast', steps: 8,
     cfg: 1, sampler: 'res_multistep', seed: -1, wf: 'otomatik',
     preset: '1024x1024', animaModel: false, moodyAnimaModel: false,
     uretimPromptDestek: false, uretimPromptCeviri: false,
@@ -362,6 +365,13 @@ async function boot(){
       if(!kurulumYaniti.ok) throw new Error('Kurulum durumu alınamadı (HTTP ' + kurulumYaniti.status + ').');
       const k = await kurulumYaniti.json();
       if(!k){ girisEkraniAc(); bootCalisiyor = false; return; }
+      RUNPOD_WEBUI = k.runpod === true;
+      if(RUNPOD_WEBUI){
+        $('vsure').value = '0.5'; $('vfps').value = '8'; $('vmax').value = '320';
+        $('videoProfileBlok').hidden = false;
+        $('videoSureLabel').textContent = 'Taslak klip süresi (sn)';
+        $('videoBilgi').textContent = 'Hızlı önizleme varsayılanı: 320 px, 5 kareye yuvarlanan kısa klip. Ayrıntılı sonuç için süreyi/çözünürlüğü artırın. Model 17k+5 kare kuralını uygular.';
+      }
       if(!k.kurulu){ gorunum('kurulum'); bootCalisiyor = false; return; }
       const ben = await _fetch('/api/ben');
       if(ben.status === 401){ girisEkraniAc(); bootCalisiyor = false; return; }
@@ -837,8 +847,8 @@ function formVerisi(istekSecenekleri){
   const vm = videoMu();
   let suresn = VIDEO_HAZIRLIK.suresn, fps = VIDEO_HAZIRLIK.fps;
   if(vm){
-    suresn = +($('vsure') ? $('vsure').value : 5);
-    fps = +($('vfps') ? $('vfps').value : 24);
+    suresn = +($('vsure') ? $('vsure').value : (RUNPOD_WEBUI ? 0.5 : 5));
+    fps = +($('vfps') ? $('vfps').value : (RUNPOD_WEBUI ? 8 : 24));
     VIDEO_HAZIRLIK.suresn = suresn; VIDEO_HAZIRLIK.fps = fps;
   }
   return Object.assign({
@@ -846,7 +856,8 @@ function formVerisi(istekSecenekleri){
     model: otomatikModel(),
     width: +$('w').value, height: +$('h').value,
     max_side: +$('maxside').value, max_olcek: $('maxolcek').checked,
-    video_max_side: vm ? +($('vmax') ? $('vmax').value : 1344) : 0,
+    video_max_side: vm ? +($('vmax') ? $('vmax').value : (RUNPOD_WEBUI ? 320 : 1344)) : 0,
+    video_profile: vm && $('videoProfile') ? $('videoProfile').value : 'fast',
     steps: +$('steps').value, cfg: +$('cfg').value,
     sampler: $('sampler').value, seed: +$('seed').value,
     workflow: otomatikWorkflow(), image_base64: fotoB64, image2_base64: fotoB64_2,
@@ -2712,6 +2723,7 @@ function formUygulaKayitli(f){
   }
   koy('vmax', f.video_max_side); koy('steps', f.steps); koy('seed', f.seed);
   koy('vsure', f.suresn); koy('vfps', f.fps);
+  koy('videoProfile', f.video_profile);
   if(f.workflow && $('wf')){ $('wf').value = f.workflow === 'video' ? 'video' : 'otomatik'; try{ $('wf').onchange({target: $('wf')}); }catch(e){} }
   if(f.width != null && f.height != null && $('preset')){
     const hedef = f.width + 'x' + f.height;
@@ -2733,6 +2745,7 @@ function formPaketle(){
     max_side: v.max_side, max_olcek: v.max_olcek, video_max_side: v.video_max_side,
     steps: v.steps, cfg: v.cfg, sampler: v.sampler, seed: v.seed,
     workflow: v.workflow, suresn: v.suresn, fps: v.fps,
+    video_profile: v.video_profile,
     aspect_ratio: kilitOran};
 }
 async function formSimdiKaydet(){
@@ -2940,7 +2953,7 @@ ayariDegisinceKaydet(['llmSistem','llmSistemSohbet','llmModFikir',
   'llmModGorsel','llmModBirlestir','llmModCeviri','llmModSohbet',
   'llmStreaming','llmLowBandwidth'], 'llmSistemKaydet');
 /* Form kaliciligi: her degisimde (gecikmeli) sunucuya yazilir. */
-['prompt','negatif','w','h','maxside','maxolcek','vmax','vsure','vfps','steps','cfg','seed','wf','preset','sampler'].forEach(id => {
+['prompt','negatif','w','h','maxside','maxolcek','vmax','vsure','vfps','videoProfile','steps','cfg','seed','wf','preset','sampler'].forEach(id => {
   const el = $(id);
   if(!el) return;
   el.addEventListener('input', formKaydet);
@@ -4613,7 +4626,8 @@ async function podKurulumYukle() {
     if (podKurulumSonDurum === sonDurum) return;
     podKurulumSonDurum = sonDurum;
     const durumlar = {idle: 'Kurulu değil', queued: 'Sırada', running: 'Hazırlanıyor',
-      ready: 'Hazır', error: 'Kurulum tamamlanamadı'};
+      ready: 'Hazır', installed: 'Dosyalar hazır', cancelled: 'İptal edildi',
+      error: 'Kurulum tamamlanamadı'};
     const kuyruk = bilgi.sirada;
     const bekleyen = kuyruk.map(id => bilgi.gruplar.find(grup => grup.id === id));
     const gruplar = [...bilgi.gruplar.filter(grup => grup.id === bilgi.aktif),
@@ -4623,6 +4637,11 @@ async function podKurulumYukle() {
       const index = kuyruk.indexOf(grup.id);
       satir.append((index >= 0 ? (index + 1) + '. ' : '') + grup.ad + ' · ' +
         durumlar[grup.durum] + (grup.ayrinti ? ' · ' + grup.ayrinti : '') + ' ');
+      if (bilgi.aktif === grup.id && bilgi.ilerleme) {
+        const il = bilgi.ilerleme;
+        if (il.file) satir.append(document.createTextNode(
+          il.file + (Number.isFinite(il.rate_mib_s) ? ' · ' + il.rate_mib_s.toFixed(1) + ' MiB/sn' : '') + ' '));
+      }
       if (index >= 0) {
         for (const [yon, etiket, uygun] of [['yukari', 'Yukarı al', index > 0],
           ['asagi', 'Aşağı al', index < kuyruk.length - 1]]) {
@@ -4631,12 +4650,20 @@ async function podKurulumYukle() {
           dugme.disabled = !uygun;
           satir.append(dugme);
         }
-        satir.append(podKurulumDugme('Sıradan çıkar', {grup: grup.id, islem: 'kaldir'}));
-      } else if (grup.durum !== 'running') {
-        const hazir = grup.durum === 'ready';
-        satir.append(podKurulumDugme(hazir ? 'Modeli kaldır'
-          : grup.durum === 'error' ? 'Tekrar dene' : 'Hazırla',
-        {grup: grup.id, islem: hazir ? 'kaldir' : 'hazirla'}));
+        satir.append(podKurulumDugme('Sıradan çıkar', {grup: grup.id, islem: 'iptal'}));
+      } else if (grup.durum === 'running') {
+        satir.append(podKurulumDugme('İptal et', {grup: grup.id, islem: 'iptal'}));
+      } else if (grup.durum !== 'ready' && grup.durum !== 'installed') {
+        satir.append(podKurulumDugme(grup.durum === 'error' || grup.durum === 'cancelled'
+          ? 'Tekrar dene' : 'Hazırla', {grup: grup.id, islem: 'hazirla'}));
+        if (grup.durum === 'error' || grup.durum === 'cancelled')
+          satir.append(podKurulumDugme('Kısmi indirmeyi sil', {grup: grup.id, islem: 'kaldir'}));
+      } else if (grup.durum === 'installed' && !grup.calisma_hazir) {
+        satir.append(podKurulumDugme('Çalışma ortamını başlat',
+                                     {grup: grup.id, islem: 'hazirla'}));
+        satir.append(podKurulumDugme('Modeli kaldır', {grup: grup.id, islem: 'kaldir'}));
+      } else {
+        satir.append(podKurulumDugme('Modeli kaldır', {grup: grup.id, islem: 'kaldir'}));
       }
       return satir;
     });

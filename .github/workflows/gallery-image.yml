@@ -33,10 +33,12 @@ jobs:
           env = dict(os.environ, WEBUI_BOOTSTRAP_PASSWORD=secrets.token_urlsafe(32))
           subprocess.run(["docker", "run", "-d", "--name", "gallery-check",
                           "--tmpfs", "/workspace", "-e", "WEBUI_BOOTSTRAP_PASSWORD",
-                          "-p", "127.0.0.1:8189:8189", "webui-gallery"],
+                          "-p", "127.0.0.1:8189:8189", "-p", "127.0.0.1:8192:8192", "webui-gallery"],
                          check=True, env=env, stdout=subprocess.DEVNULL)
           for _ in range(40):
               try:
+                  setup = urllib.request.urlopen("http://127.0.0.1:8192/", timeout=2).read()
+                  assert b"Model kurulumu" in setup
                   assert urllib.request.urlopen("http://127.0.0.1:8189/api/sunucu-hazir").status == 200
                   assert b"podKurulum" in urllib.request.urlopen("http://127.0.0.1:8189/").read()
                   break

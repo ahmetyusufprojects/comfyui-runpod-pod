@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>WebUI Kurulum Paneli</title>
+  <link rel="stylesheet" href="/static/setup.css">
+</head>
+<body>
+  <header>
+    <div class="mark" aria-hidden="true">W</div>
+    <div><p class="eyebrow">RUNPOD · AYRI KURULUM EKRANI</p><h1>Model kurulumu</h1></div>
+    <span id="connection" class="connection">Bağlanıyor…</span>
+  </header>
+  <main>
+    <section id="preparing" class="panel preparing">
+      <span class="spinner" aria-hidden="true"></span>
+      <div><h2 id="prepareTitle">Pod hazırlanıyor</h2><p id="prepareText">Bu ekran, ana WebUI açılmadan da kullanılabilir. Sistem durumu kontrol ediliyor.</p></div>
+    </section>
+
+    <section id="loginPanel" class="panel login" hidden>
+      <div><p class="eyebrow">YÖNETİCİ GİRİŞİ</p><h2>Model indirmelerini yönet</h2><p>Bu giriş yalnızca kurulum paneli içindir.</p></div>
+      <form id="loginForm">
+        <label for="username">Kullanıcı adı</label><input id="username" autocomplete="username" value="user" required>
+        <label for="password">Parola</label><input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Giriş yap</button><p id="loginError" class="error" role="status"></p>
+      </form>
+    </section>
+
+    <section id="dashboard" hidden>
+      <div class="panel intro">
+        <div><p class="eyebrow">MODEL VE ÇALIŞMA ORTAMI</p><h2>Kurulum sırasını yönet</h2><p>İndirilecek grubu ekleyin. Kuyruktaki bağımsız grupların sırasını değiştirebilir, çalışan veya bekleyen indirmeyi iptal edebilirsiniz. İptalde indirilen kısım saklanırsa yeniden başlatınca devam eder.</p></div>
+        <div class="account"><span id="whoami"></span><button id="logout" class="quiet" type="button">Çıkış</button></div>
+      </div>
+      <div id="errorBox" class="notice error" role="status" hidden></div>
+      <div id="progressPanel" class="panel progress" hidden>
+        <div class="progress-title"><div><p class="eyebrow">ŞU AN ÇALIŞIYOR</p><h2 id="progressStage"></h2></div><span id="progressSpeed"></span></div>
+        <p id="progressFile" class="muted"></p>
+        <div class="track"><span id="progressBar"></span></div>
+        <p id="progressAmount" class="muted"></p>
+      </div>
+      <div class="section-title"><div><p class="eyebrow">MODEL LİSTESİ</p><h2>Hazırlık ve indirme</h2></div><button id="refresh" class="quiet" type="button">Yenile</button></div>
+      <div id="groups" class="groups"></div>
+      <section class="panel logs">
+        <div class="section-title"><div><p class="eyebrow">TANI KAYITLARI</p><h2>Sistem logları</h2></div><div class="log-controls"><select id="logSource" aria-label="Log kaynağı"><option value="setup">Kurulum</option><option value="comfy">ComfyUI</option><option value="webui">WebUI</option><option value="llama">Sohbet modeli</option></select><button id="loadLogs" class="quiet" type="button">Yükle</button></div></div>
+        <pre id="logs" aria-live="polite">Loglar henüz alınmadı.</pre>
+      </section>
+      <footer>Kurulum dosyaları geçici Pod diskinde hazırlanır. Bu panel yalnızca seçilen modelleri yönetir.</footer>
+    </section>
+  </main>
+  <script src="/static/setup.js" defer></script>
+</body>
+</html>

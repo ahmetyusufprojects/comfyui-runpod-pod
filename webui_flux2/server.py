@@ -53,8 +53,63 @@ _AYARLAR_KILIT = threading.RLock()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_ROOT = os.path.abspath(os.environ.get("WEBUI_DATA_ROOT", BASE_DIR))
 RUNPOD_MODE = os.environ.get("WEBUI_RUNPOD") == "1"
+SETUP_PORT = 8192
+_setup_httpd = None
+_startup_error = None
 if RUNPOD_MODE:
     import pod_setup
+
+
+def _system_event(message):
+    """Write only short operational events; never include prompts or account names."""
+    if not RUNPOD_MODE:
+        return
+    try:
+        path = os.path.join(os.environ.get("POD_RUNTIME_ROOT", "/opt/runtime"), "webui.log")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as stream:
+            stream.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), message))
+    except OSError:
+        pass
+
+
+def _log_tail(source, count):
+    """Read bounded operational logs and redact credentials before returning them."""
+    runtime = os.environ.get("POD_RUNTIME_ROOT", "/opt/runtime")
+    if RUNPOD_MODE:
+        paths = {"llama": llm.LOG_PATH,
+                 "comfy": os.path.join(runtime, "comfyui.log"),
+                 "webui": os.path.join(runtime, "webui.log"),
+                 "setup": os.path.join(runtime, "setup.log")}
+    else:
+        paths = {"llama": llm.LOG_PATH,
+                 "comfy": os.path.join(BASE_DIR, "..", "baslatici", "comfy.log"),
+                 "webui": os.path.join(BASE_DIR, "..", "baslatici", "webui.log"),
+                 "setup": os.path.join(BASE_DIR, "..", "baslatici", "webui.log")}
+    if source not in paths:
+        raise ValueError("Bilinmeyen log kaynağı.")
+    try:
+        with open(paths[source], "rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - 30000))
+            lines = [line for line in stream.read().decode("utf-8", "replace").splitlines()
+                     if line.strip()]
+    except OSError:
+        lines = []
+    secrets = sorted((value for name, value in os.environ.items()
+                      if any(part in name.upper() for part in
+                             ("TOKEN", "PASSWORD", "API_KEY", "SECRET"))
+                      and len(value) >= 6), key=len, reverse=True)
+    secret_pattern = re.compile(
+        r"(?i)([\w.-]*(?:token|password|secret|api[_-]?key)[\w.-]*\s*[=:]\s*)[^\s,;]+")
+    cleaned = []
+    for line in lines[-count:]:
+        for secret in secrets:
+            line = line.replace(secret, "[REDACTED]")
+        line = secret_pattern.sub(r"\1[REDACTED]", line)
+        cleaned.append(line[:2000])
+    return cleaned
 
 def _dbg(msg):
     try:
@@ -78,7 +133,7 @@ IS_TIPLERI = (IS_TIPI_GORUNTU, IS_TIPI_DUZENLEME, IS_TIPI_VIDEO)
 # --- Video (MiniMax H3 referans-video): sablon + sinirlar ---
 # Sablon, UI workflow'una dokunulmadan video_r2v_api.json'dan okunur.
 VIDEO_SABLON_DOSYA = os.path.join(BASE_DIR, "video_r2v_api.json")
-VIDEO_SURESN_MIN, VIDEO_SURESN_MAX = 1, 10
+VIDEO_SURESN_MIN, VIDEO_SURESN_MAX = (0.25 if RUNPOD_MODE else 1), 10
 VIDEO_FPSLER = (8, 12, 24)
 VIDEO_MAX_KENAR = 1344  # en uzun kenar; 32'nin kati (dugum semasi adim=32)
 
@@ -242,12 +297,12 @@ def _ayar_yaz(kullanici, ayar):
 # disindakiler atilir, sayilar araliga cekilir (kullanici dostu).
 _FORM_SAYI = {"width": (64, 4096), "height": (64, 4096),
               "max_side": (256, 4096), "video_max_side": (0, 1344),
-              "steps": (1, 50), "seed": (-1, 2 ** 31 - 1), "suresn": (1, 10)}
+              "steps": (1, 50), "seed": (-1, 2 ** 31 - 1)}
 _UI_ENUM = {
     "ps_length": ("kisa", "orta", "uzun"),
     "ps_language": ("en", "tr"),
     "history_view": ("izgara", "akis"),
-    "log_source": ("llama", "comfy", "webui"),
+    "log_source": ("llama", "comfy", "webui", "setup"),
     "cinematic_mode": ("off", "soft", "vivid"),
     "active_menu": ("uretim", "studyo", "kuyruk", "kutuphane", "arsiv",
                     "promptlar", "model", "izleme", "ayarlar", "yonetim"),
@@ -304,6 +359,9 @@ def _form_temizle(ham):
             elif k in ("workflow",):
                 if v in ("tek", "cift", "video"):
                     temiz[k] = v
+            elif k == "video_profile":
+                if v in ("fast", "quality"):
+                    temiz[k] = v
             elif k == "model":
                 if v in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_ANIMA,
                          MODEL_MOODY_ANIMA):
@@ -325,6 +383,11 @@ def _form_temizle(ham):
                 n = float(v)
                 if 0 <= n <= 100:
                     temiz[k] = n
+            elif k == "suresn":
+                n = float(v)
+                lo = VIDEO_SURESN_MIN if RUNPOD_MODE else 1
+                if lo <= n <= VIDEO_SURESN_MAX:
+                    temiz[k] = round(n, 2)
             elif k == "aspect_ratio":
                 if v is None:
                     temiz[k] = None
@@ -533,18 +596,31 @@ def _video_boyut(w, h, max_kenar=VIDEO_MAX_KENAR):
     return w2, h2
 
 
-def _video_sablon_yukle():
+def _video_sablon_yukle(profile_name=None):
     """video_r2v_api.json'u okur; '_' ile baslayan aciklama anahtarlarini atar."""
     with open(VIDEO_SABLON_DOSYA, "r", encoding="utf-8") as f:
         ham = json.load(f)
     if RUNPOD_MODE:
-        for node, field, env in (
-            ("127", "unet_name", "WEBUI_VIDEO_UNET"),
-            ("128", "clip_name", "WEBUI_VIDEO_CLIP"),
-            ("119", "vae_name", "WEBUI_VIDEO_VAE"),
-        ):
-            if os.environ.get(env):
-                ham[node]["inputs"][field] = os.environ[env]
+        workflow = pod_setup.workflow("video")
+        profiles = workflow.get("profiles") or {}
+        requested = profile_name or workflow.get("default_profile", "fast")
+        profile = profiles.get(requested) or profiles.get(workflow.get("default_profile", "fast"))
+        if not profile:
+            raise RuntimeError("Video modeli models.json içinde tanımlı değil.")
+        group_state = {item["id"]: item["durum"] for item in pod_setup.status()["gruplar"]}
+        if group_state.get(profile.get("group")) not in ("ready", "installed"):
+            raise RuntimeError("Seçilen video profili kurulu değil. Önce ayrı kurulum ekranından model grubunu hazırlayın.")
+        for node, field, key in (("127", "unet_name", "unet_file"),
+                                 ("128", "clip_name", "text_encoder_file"),
+                                 ("119", "vae_name", "video_vae_file"),
+                                 ("120", "vae_name", "audio_vae_file")):
+            if workflow.get(key):
+                ham[node]["inputs"][field] = workflow[key]
+        ham["145"]["inputs"]["lora_name"] = profile["lora_file"]
+        ham["124"]["inputs"]["steps"] = int(profile.get("steps", 4))
+        # Sessiz taslak üretiminde örneklenen ses latent'ini çözmek ve eklemek gereksizdir.
+        ham.pop("121", None)
+        ham["130"]["inputs"].pop("audio", None)
     return {k: v for k, v in ham.items() if not k.startswith("_")}
 
 
@@ -563,7 +639,6 @@ _VIDEO_ASAMA = {
     "BasicGuider": "Yonlendirici hazirlaniyor",
     "SamplerCustomAdvanced": "Video ornekleniyor",
     "VAEDecode": "Video cozuluyor",
-    "VAEDecodeAudio": "Ses cozuluyor",
     "CreateVideo": "Video birlestiriliyor",
     "SaveVideo": "Video kaydediliyor",
 }
@@ -605,11 +680,12 @@ def _video_uret(job, req):
     try:
         vid = video_parametreleri(req)
         try:
-            suresn = float(vid.get("suresn") or 5)
+            default_duration = 0.5 if RUNPOD_MODE else 5
+            suresn = float(vid.get("suresn") or default_duration)
         except Exception:
-            suresn = 5
+            suresn = 0.5 if RUNPOD_MODE else 5
         suresn = max(VIDEO_SURESN_MIN, min(VIDEO_SURESN_MAX, suresn))
-        fps = _video_fps_yuvarla(vid.get("fps") or 24)
+        fps = _video_fps_yuvarla(vid.get("fps") or (8 if RUNPOD_MODE else 24))
         try:
             w0 = int(req.get("width", VIDEO_MAX_KENAR))
         except Exception:
@@ -619,7 +695,7 @@ def _video_uret(job, req):
         except Exception:
             h0 = 768
         try:
-            vmax = int(req.get("video_max_side") or VIDEO_MAX_KENAR)
+            vmax = int(req.get("video_max_side") or (320 if RUNPOD_MODE else VIDEO_MAX_KENAR))
         except Exception:
             vmax = VIDEO_MAX_KENAR
         vmax = max(320, min(VIDEO_MAX_KENAR, vmax))
@@ -638,12 +714,15 @@ def _video_uret(job, req):
         yuklenen = []
         kutular = []
         hamlar = []
+        kaynak_boyutu = None
         for anahtar in ("image_base64", "image2_base64"):
             if not req.get(anahtar):
                 continue
             ham = base64.b64decode(req[anahtar])
             hamlar.append(ham)
-            hazir, _, _, _ = _fotograf_hazirla(ham, VIDEO_MAX_KENAR, False)
+            hazir, boyut, _, _ = _fotograf_hazirla(ham, VIDEO_MAX_KENAR, False)
+            if kaynak_boyutu is None and boyut:
+                kaynak_boyutu = boyut
             fn = "webui_video_%s.png" % uuid.uuid4().hex[:8]
             up = upload_image_to_comfy(hazir, fn)
             yuklenen.append(up.get("name", fn))
@@ -653,7 +732,13 @@ def _video_uret(job, req):
             job["hata"] = "video-uretim icin en az 1 referans fotograf gerekli"
             job["bitis"] = time.time()
             return
-        sablon = _video_sablon_yukle()
+        if RUNPOD_MODE and kaynak_boyutu:
+            # H3 çıktısını referans fotoğrafın en-boy oranında tut; kare 1344 px
+            # varsayılanı gereksiz yere çok daha fazla GPU belleği ve hesap ister.
+            w0, h0 = kaynak_boyutu
+            w, h = _video_boyut(w0, h0, vmax)
+        profile_name = (req.get("video_profile") or "fast") if RUNPOD_MODE else None
+        sablon = _video_sablon_yukle(profile_name)
         g = sablon["136"]["inputs"]
         g["prompt"] = prompt
         g["width"] = w
@@ -2798,7 +2883,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         Baslik yoksa (curl) gecer. Uymazsa 403 doner, True/False verir."""
         host = (self.headers.get("Host") or "").split(":")[0].lower()
         pod_id = os.environ.get("RUNPOD_POD_ID", "") if RUNPOD_MODE else ""
-        proxy_host = f"{pod_id.lower()}-8189.proxy.runpod.net" if pod_id else None
+        proxy_port = getattr(self.server, "server_port", 8189)
+        proxy_host = f"{pod_id.lower()}-{proxy_port}.proxy.runpod.net" if pod_id else None
         for baslik in ("Origin", "Referer"):
             deger = self.headers.get(baslik)
             if not deger:
@@ -2816,6 +2902,116 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return False
         return True
 
+    def _setup_get(self, parsed):
+        if parsed.path in ("/", "/index.html"):
+            with open(os.path.join(BASE_DIR, "setup.html"), "rb") as stream:
+                self._send(200, stream.read(), "text/html; charset=utf-8")
+            return
+        if parsed.path.startswith("/static/"):
+            name = parsed.path[len("/static/"):]
+            if name not in ("setup.js", "setup.css"):
+                self._send(404, '{"hata":"bulunamadi"}')
+                return
+            try:
+                with open(os.path.join(BASE_DIR, "static", name), "rb") as stream:
+                    body = stream.read()
+            except OSError:
+                self._send(404, '{"hata":"bulunamadi"}')
+                return
+            content_type = ("application/javascript; charset=utf-8" if name.endswith(".js")
+                            else "text/css; charset=utf-8")
+            self._send(200, body, content_type)
+            return
+        if parsed.path in ("/api/sunucu-hazir", "/api/setup-state"):
+            ready = pod_setup.is_ready()
+            self._send(200, json.dumps({"hazir": ready,
+                                       "hata": bool(_startup_error)}, ensure_ascii=False))
+            return
+        if parsed.path == "/api/kurulum-durumu":
+            if not pod_setup.is_ready():
+                self._send(503, '{"hata":"Sistem hazırlanıyor."}')
+            else:
+                self._send(200, json.dumps({"kurulu": _auth_store.kurulu_mu(),
+                                           "runpod": True}))
+            return
+        if not pod_setup.is_ready():
+            self._send(503, '{"hata":"Sistem hazırlanıyor."}')
+            return
+        if parsed.path == "/api/ben":
+            kullanici = self._oturum_kullanici()
+            if kullanici is None:
+                self._send(401, '{"hata":"giris gerekli"}')
+            else:
+                self._send(200, json.dumps({"kullanici": kullanici,
+                                            "rol": _auth_store.rol(kullanici)}))
+            return
+        if parsed.path == "/api/pod-kurulum":
+            if self._admin_gerekli() is not None:
+                self._send(200, json.dumps(pod_setup.status(), ensure_ascii=False))
+            return
+        if parsed.path == "/api/log":
+            if self._admin_gerekli() is None:
+                return
+            query = urllib.parse.parse_qs(parsed.query or "")
+            source = (query.get("kaynak") or ["setup"])[0]
+            try:
+                count = max(10, min(500, int((query.get("satir") or ["200"])[0])))
+                lines = _log_tail(source, count)
+            except ValueError as exc:
+                self._send(400, json.dumps({"hata": str(exc)}))
+                return
+            self._send(200, json.dumps({"kaynak": source, "satirlar": lines},
+                                       ensure_ascii=False))
+            return
+        self._send(404, '{"hata":"bulunamadi"}')
+
+    def _setup_post(self, parsed):
+        if not self._origin_kontrol():
+            return
+        if not pod_setup.is_ready():
+            self._send(503, '{"hata":"Sistem hazırlanıyor."}')
+            return
+        if parsed.path == "/api/giris":
+            req = self._json_oku()
+            if "__hata__" in req:
+                self._send(400, json.dumps({"hata": req["__hata__"]}))
+                return
+            try:
+                username = (req.get("kullanici") or "").strip()
+                token, role = _auth_store.giris(username, req.get("sifre") or "",
+                                                self.client_address[0])
+            except auth.AuthHatasi:
+                self._send(401, '{"hata":"Kullanıcı adı veya şifre hatalı."}')
+                return
+            self._send(200, json.dumps({"kullanici": username, "rol": role}),
+                       ek_baslik=self._oturum_cerezi(token))
+            return
+        if parsed.path == "/api/cikis":
+            _auth_store.cikis(self._cerez_token())
+            self._send(200, '{"cikis":true}', ek_baslik=self._cerez_sil())
+            return
+        if parsed.path == "/api/pod-kurulum":
+            if self._admin_gerekli() is None:
+                return
+            req = self._json_oku()
+            try:
+                if req.get("islem") == "iptal":
+                    pod_setup.cancel(req.get("grup"))
+                elif req.get("islem") == "kaldir":
+                    pod_setup.remove(req.get("grup"))
+                elif req.get("islem") == "sira":
+                    pod_setup.move(req.get("grup"), req.get("yon"))
+                else:
+                    pod_setup.start(req.get("grup"))
+            except ValueError as exc:
+                self._send(400, json.dumps({"hata": str(exc)}, ensure_ascii=False))
+            except (OSError, RuntimeError) as exc:
+                self._send(409, json.dumps({"hata": str(exc)}, ensure_ascii=False))
+            else:
+                self._send(202, json.dumps(pod_setup.status(), ensure_ascii=False))
+            return
+        self._send(404, '{"hata":"bulunamadi"}')
+
     @staticmethod
     def _oturum_cerezi(token):
         return [("Set-Cookie", "%s=%s; HttpOnly; Path=/; SameSite=Lax; Max-Age=%d"
@@ -2832,10 +3028,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if RUNPOD_MODE and getattr(self.server, "server_port", 8189) == SETUP_PORT:
+            self._setup_get(parsed)
+            return
         if parsed.path == "/api/sunucu-hazir":
             kapaniyor = _kapatma_istegi.is_set()
+            hazir = not kapaniyor and (not RUNPOD_MODE or pod_setup.is_ready())
             self._send(503 if kapaniyor else 200,
-                       json.dumps({"pid": os.getpid(), "hazir": not kapaniyor}))
+                       json.dumps({"pid": os.getpid(), "hazir": hazir}))
+            return
+        if (RUNPOD_MODE and not pod_setup.is_ready()
+                and parsed.path not in ("/", "/index.html", "/static/app.css",
+                                        "/static/app.js")):
+            self._send(503, '{"hata":"Sistem hazırlanıyor."}')
             return
         if _kapatma_istegi.is_set() and parsed.path not in (
                 "/", "/index.html", "/static/app.css", "/static/app.js"):
@@ -2902,7 +3107,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 pass
             self._send(200, json.dumps(info))
         elif parsed.path == "/api/kurulum-durumu":
-            self._send(200, json.dumps({"kurulu": _auth_store.kurulu_mu()}))
+            if RUNPOD_MODE and not pod_setup.is_ready():
+                self._send(503, json.dumps({"hata": "Sistem hazırlanıyor."}))
+            else:
+                self._send(200, json.dumps({"kurulu": _auth_store.kurulu_mu(),
+                                           "runpod": RUNPOD_MODE}))
         elif parsed.path == "/api/ben":
             kullanici = self._oturum_kullanici()
             if kullanici is None:
@@ -3002,10 +3211,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ensure_ascii=False))
             return
         elif parsed.path == "/api/log":
-            kullanici = self._auth_gerekli()
-            if kullanici is None:
-                return
-            if self._kasa_gerekli(kullanici) is None:
+            if self._admin_gerekli() is None:
                 return
             qs = urllib.parse.parse_qs(parsed.query or "")
             hangi = (qs.get("kaynak") or ["llama"])[0]
@@ -3013,24 +3219,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 satir = max(10, min(500, int((qs.get("satir") or ["200"])[0])))
             except Exception:
                 satir = 200
-            if hangi == "comfy":
-                yol = os.path.join(BASE_DIR, "..", "baslatici", "comfy.log")
-            elif hangi == "webui":
-                yol = os.path.join(BASE_DIR, "..", "baslatici", "webui.log")
-            else:
-                hangi = "llama"
-                yol = llm.LOG_PATH
             try:
-                with open(yol, "rb") as f:
-                    f.seek(0, os.SEEK_END)
-                    boyut = f.tell()
-                    f.seek(max(0, boyut - 20000))
-                    parca = f.read().decode("utf-8", "replace")
-                    satirlar = [s for s in parca.splitlines() if s.strip()]
-            except OSError:
-                satirlar = []
+                satirlar = _log_tail(hangi, satir)
+            except ValueError as exc:
+                self._send(400, json.dumps({"hata": str(exc)}))
+                return
             self._send(200, json.dumps({"kaynak": hangi,
-                                        "satirlar": satirlar[-satir:]},
+                                        "satirlar": satirlar},
                                        ensure_ascii=False))
             return
         elif parsed.path == "/api/prompt-gecmisi":
@@ -3243,6 +3438,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if RUNPOD_MODE and getattr(self.server, "server_port", 8189) == SETUP_PORT:
+            self._setup_post(parsed)
+            return
         if parsed.path == "/api/sunucu-kapat":
             self._do_POST(parsed)
             return
@@ -3275,7 +3473,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             req = self._json_oku()
             try:
-                if req.get("islem") == "kaldir":
+                if req.get("islem") == "iptal":
+                    pod_setup.cancel(req.get("grup"))
+                elif req.get("islem") == "kaldir":
                     with _isler_kilit:
                         if _kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu:
                             raise RuntimeError("Modeli kaldırmak için işlerin bitmesini bekleyin.")
@@ -4137,6 +4337,8 @@ def _sunucu_kapat_arka(muhurlensin=True):
     try:
         if _httpd is not None:
             _httpd.shutdown()
+            if _setup_httpd is not None:
+                _setup_httpd.shutdown()
     except Exception as e:
         print("WebUI sunucusu durdurulamadı: %s" % e, flush=True)
 
@@ -4182,9 +4384,21 @@ class WebUIServer(http.server.ThreadingHTTPServer):
 if __name__ == "__main__":
     if RUNPOD_MODE:
         os.umask(0o077)
-        pod_setup.prepare_data(DATA_ROOT, _auth_store)
-        kasa.kalici_kopya = pod_setup.checkpoint
-        _auth_store.kalici_kopya = pod_setup.checkpoint
+        pod_setup.validate_mount()
+        _setup_httpd = WebUIServer(("0.0.0.0", SETUP_PORT), Handler)
+        threading.Thread(target=_setup_httpd.serve_forever,
+                         kwargs={"poll_interval": 0.2}, daemon=True,
+                         name="setup-webui").start()
+        print("Kurulum arayüzü: http://0.0.0.0:%d" % SETUP_PORT, flush=True)
+        try:
+            pod_setup.prepare_data(DATA_ROOT, _auth_store)
+            kasa.kalici_kopya = pod_setup.checkpoint
+            _auth_store.kalici_kopya = pod_setup.checkpoint
+        except Exception as exc:
+            _startup_error = type(exc).__name__
+            _system_event("Pod hazırlığı tamamlanamadı (" + _startup_error + ").")
+            print("Pod hazırlığı tamamlanamadı (%s); 8192 portundaki durum ekranı açık kalacak."
+                  % _startup_error, flush=True)
         signal.signal(signal.SIGTERM, signal.default_int_handler)
     with WebUIServer(("0.0.0.0", 8189), Handler) as httpd:
         _httpd = httpd

@@ -1,5 +1,6 @@
 """Local Turkish-to-English prompt translation with Helsinki-NLP OPUS-MT."""
 import os
+import json
 import re
 import site
 import sys
@@ -9,7 +10,16 @@ from collections import OrderedDict
 
 MODEL_NAME = "Helsinki-NLP/opus-mt-tr-en"
 MODEL_REVISION = "19c65427cc2af5f191337d4899e0348c4af25902"
-MODEL_DIR = os.environ.get("WEBUI_TRANSLATION_MODEL_DIR", os.path.join(
+_RUNPOD_MODEL_DIR = None
+if os.environ.get("WEBUI_RUNPOD") == "1":
+    try:
+        with open(os.environ["POD_MODEL_CATALOG"], "r", encoding="utf-8") as stream:
+            _RUNPOD_MODEL_DIR = os.path.join(
+                os.environ["COMFYUI_ROOT"], "models",
+                json.load(stream)["workflows"]["translation"]["model_dir"])
+    except (OSError, ValueError, KeyError, TypeError):
+        _RUNPOD_MODEL_DIR = None
+MODEL_DIR = os.environ.get("WEBUI_TRANSLATION_MODEL_DIR", _RUNPOD_MODEL_DIR or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "models", "opus_mt_tr_en"))
 MODEL_WEIGHT = os.path.join(MODEL_DIR, "pytorch_model.bin")
 MODEL_WEIGHT_SIZE = 306727185

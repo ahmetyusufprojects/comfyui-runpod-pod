@@ -1,70 +1,138 @@
 {
-  "zimage": {
-    "label": "Z-Image Turbo",
-    "engine": "comfy",
-    "files": [
-      {"repo":"Comfy-Org/Z-Image-Turbo","revision":"6fc90a3b1b653e935a0d175e260736de25b84df5","path":"split_files/diffusion_models/z_image_turbo_bf16.safetensors","dir":"diffusion_models","name":"z_image_turbo_bf16.safetensors"},
-      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
-      {"repo":"Comfy-Org/Z-Image-Turbo","revision":"6fc90a3b1b653e935a0d175e260736de25b84df5","path":"split_files/vae/ae.safetensors","dir":"vae","name":"ae.safetensors"}
-    ]
+  "schema": 2,
+  "workflows": {
+    "flux2": {
+      "group": "flux",
+      "diffusion_file": "flux-2-klein-4b.safetensors",
+      "text_encoder_file": "qwen_3_4b.safetensors",
+      "vae_file": "flux2-vae.safetensors"
+    },
+    "z_image": {
+      "group": "zimage",
+      "diffusion_file": "z_image_turbo_bf16.safetensors",
+      "text_encoder_file": "qwen_3_4b.safetensors",
+      "vae_file": "ae.safetensors"
+    },
+    "anima": {
+      "group": "anima",
+      "diffusion_file": "anima-turbo-v1.1.safetensors",
+      "text_encoder_file": "qwen_3_06b_base.safetensors",
+      "vae_file": "qwen_image_vae.safetensors"
+    },
+    "moody_anima": {
+      "group": "moody",
+      "diffusion_file": "anima-moody-mix-v10.safetensors",
+      "text_encoder_file": "qwen_3_06b_base.safetensors",
+      "vae_file": "qwen_image_vae.safetensors"
+    },
+    "video": {
+      "group": "video",
+      "unet_file": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "text_encoder_file": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "video_vae_file": "minimax_h3_video_vae_int8_convrot.safetensors",
+      "audio_vae_file": "minimax_h3_audio_vae_fp32.safetensors",
+      "profiles": {
+        "fast": {
+          "group": "video",
+          "lora_file": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "steps": 4
+        },
+        "quality": {
+          "group": "video_quality",
+          "lora_file": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+          "steps": 8
+        }
+      },
+      "default_profile": "fast"
+    },
+    "llama": {
+      "group": "llama",
+      "model_file": "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
+      "mmproj_file": "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf",
+      "gpu_device": "CUDA0",
+      "gpu_layers": "all"
+    },
+    "translation": {
+      "group": "translation",
+      "model_dir": "opus_mt_tr_en"
+    }
   },
-  "flux": {
-    "label": "Flux 2 Klein",
-    "engine": "comfy",
-    "files": [
-      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/diffusion_models/flux-2-klein-4b.safetensors","dir":"diffusion_models","name":"flux-2-klein-4b.safetensors"},
-      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
-      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/vae/flux2-vae.safetensors","dir":"vae","name":"flux2-vae.safetensors"}
-    ]
-  },
-  "llama": {
-    "label": "Gemma 4 E4B sohbet",
-    "engine": "llama",
-    "files": [
-      {"repo":"HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive","path":"Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf","dir":"llm","name":"Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf","sha256":"d0027dd3a9128d9323e9f282c8bf010a8526c46477584535991dc1a869b56e96","revision":"45b6a334b4bcd1d7f37179df58b3b1d66a184e5d"},
-      {"repo":"HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive","path":"mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf","dir":"llm","name":"mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf","sha256":"debad39ab9c1152ab67695a674fb35e8375b2320c57bfd5075835d3ccb16c7db","revision":"45b6a334b4bcd1d7f37179df58b3b1d66a184e5d"}
-    ]
-  },
-  "anima": {
-    "label": "Anima Turbo v1.1",
-    "engine": "comfy",
-    "files": [
-      {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/diffusion_models/anima-turbo-v1.1.safetensors","dir":"diffusion_models","name":"anima-turbo-v1.1.safetensors"},
-      {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/text_encoders/qwen_3_06b_base.safetensors","dir":"text_encoders","name":"qwen_3_06b_base.safetensors"},
-      {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/vae/qwen_image_vae.safetensors","dir":"vae","name":"qwen_image_vae.safetensors"}
-    ]
-  },
-  "moody": {
-    "label": "Moody Anima Mix v1.0",
-    "engine": "comfy",
-    "files": [
-      {"source":"civitai","version":3032115,"dir":"diffusion_models","name":"anima-moody-mix-v10.safetensors","sha256":"5368c9b1318c783d7215492002cd1bca94895d1dca8c780ef24f75536fd341f8"},
-      {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/text_encoders/qwen_3_06b_base.safetensors","dir":"text_encoders","name":"qwen_3_06b_base.safetensors"},
-      {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/vae/qwen_image_vae.safetensors","dir":"vae","name":"qwen_image_vae.safetensors"}
-    ]
-  },
-  "video": {
-    "label": "MiniMax H3 referans video",
-    "engine": "comfy",
-    "files": [
-      {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors","dir":"diffusion_models","name":"minimax_h3_ref2va_pruned_int8_convrot.safetensors"},
-      {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors","dir":"text_encoders","name":"qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"},
-      {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"vae/minimax_h3_video_vae_int8_convrot.safetensors","dir":"vae","name":"minimax_h3_video_vae_int8_convrot.safetensors"},
-      {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"vae/minimax_h3_audio_vae_fp32.safetensors","dir":"vae","name":"minimax_h3_audio_vae_fp32.safetensors"},
-      {"repo":"lightx2v/Minimax-h3-Turbo","revision":"30f485ed874aa44c8183348ad361c5eabad318da","path":"minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors","dir":"loras","name":"minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"}
-    ]
-  },
-  "translation": {
-    "label": "OPUS-MT Turkce-Ingilizce",
-    "engine": "translation",
-    "files": [
-      {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"config.json","dir":"opus_mt_tr_en","name":"config.json"},
-      {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"generation_config.json","dir":"opus_mt_tr_en","name":"generation_config.json"},
-      {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"pytorch_model.bin","dir":"opus_mt_tr_en","name":"pytorch_model.bin","sha256":"e2b820f31c9348b0ae33d77ac23bd1686fa60a8afa0b9511bc7d9a35c125b534"},
-      {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"source.spm","dir":"opus_mt_tr_en","name":"source.spm"},
-      {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"target.spm","dir":"opus_mt_tr_en","name":"target.spm"},
-      {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"tokenizer_config.json","dir":"opus_mt_tr_en","name":"tokenizer_config.json"},
-      {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"vocab.json","dir":"opus_mt_tr_en","name":"vocab.json"}
-    ]
+  "groups": {
+    "zimage": {
+      "label": "Z-Image Turbo",
+      "engine": "comfy",
+      "files": [
+        {"repo":"Comfy-Org/Z-Image-Turbo","revision":"6fc90a3b1b653e935a0d175e260736de25b84df5","path":"split_files/diffusion_models/z_image_turbo_bf16.safetensors","dir":"diffusion_models","name":"z_image_turbo_bf16.safetensors"},
+        {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
+        {"repo":"Comfy-Org/Z-Image-Turbo","revision":"6fc90a3b1b653e935a0d175e260736de25b84df5","path":"split_files/vae/ae.safetensors","dir":"vae","name":"ae.safetensors"}
+      ]
+    },
+    "flux": {
+      "label": "Flux 2 Klein",
+      "engine": "comfy",
+      "files": [
+        {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/diffusion_models/flux-2-klein-4b.safetensors","dir":"diffusion_models","name":"flux-2-klein-4b.safetensors"},
+        {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
+        {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/vae/flux2-vae.safetensors","dir":"vae","name":"flux2-vae.safetensors"}
+      ]
+    },
+    "llama": {
+      "label": "Gemma 4 E4B sohbet",
+      "engine": "llama",
+      "files": [
+        {"repo":"HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive","path":"Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf","dir":"llm","name":"Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf","sha256":"d0027dd3a9128d9323e9f282c8bf010a8526c46477584535991dc1a869b56e96","revision":"45b6a334b4bcd1d7f37179df58b3b1d66a184e5d"},
+        {"repo":"HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive","path":"mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf","dir":"llm","name":"mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf","sha256":"debad39ab9c1152ab67695a674fb35e8375b2320c57bfd5075835d3ccb16c7db","revision":"45b6a334b4bcd1d7f37179df58b3b1d66a184e5d"}
+      ]
+    },
+    "anima": {
+      "label": "Anima Turbo v1.1",
+      "engine": "comfy",
+      "files": [
+        {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/diffusion_models/anima-turbo-v1.1.safetensors","dir":"diffusion_models","name":"anima-turbo-v1.1.safetensors"},
+        {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/text_encoders/qwen_3_06b_base.safetensors","dir":"text_encoders","name":"qwen_3_06b_base.safetensors"},
+        {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/vae/qwen_image_vae.safetensors","dir":"vae","name":"qwen_image_vae.safetensors"}
+      ]
+    },
+    "moody": {
+      "label": "Moody Anima Mix v1.0",
+      "engine": "comfy",
+      "files": [
+        {"source":"civitai","version":3032115,"dir":"diffusion_models","name":"anima-moody-mix-v10.safetensors","sha256":"5368c9b1318c783d7215492002cd1bca94895d1dca8c780ef24f75536fd341f8"},
+        {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/text_encoders/qwen_3_06b_base.safetensors","dir":"text_encoders","name":"qwen_3_06b_base.safetensors"},
+        {"repo":"circlestone-labs/Anima","revision":"f973fc41ec7545364ac9776c2440285f43ff2a30","path":"split_files/vae/qwen_image_vae.safetensors","dir":"vae","name":"qwen_image_vae.safetensors"}
+      ]
+    },
+    "video": {
+      "label": "MiniMax H3 hızlı video (4 adım)",
+      "engine": "comfy",
+      "files": [
+        {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors","dir":"diffusion_models","name":"minimax_h3_ref2va_pruned_int8_convrot.safetensors"},
+        {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors","dir":"text_encoders","name":"qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"},
+        {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"vae/minimax_h3_video_vae_int8_convrot.safetensors","dir":"vae","name":"minimax_h3_video_vae_int8_convrot.safetensors"},
+        {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"vae/minimax_h3_audio_vae_fp32.safetensors","dir":"vae","name":"minimax_h3_audio_vae_fp32.safetensors"},
+        {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors","dir":"loras","name":"minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"}
+      ]
+    },
+    "video_quality": {
+      "label": "MiniMax H3 daha ayrıntılı video (8 adım)",
+      "engine": "comfy",
+      "depends_on": ["video"],
+      "files": [
+        {"repo":"lightx2v/Minimax-h3-Turbo","revision":"30f485ed874aa44c8183348ad361c5eabad318da","path":"minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors","dir":"loras","name":"minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"}
+      ]
+    },
+    "translation": {
+      "label": "OPUS-MT Türkçe-İngilizce",
+      "engine": "translation",
+      "files": [
+        {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"config.json","dir":"opus_mt_tr_en","name":"config.json"},
+        {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"generation_config.json","dir":"opus_mt_tr_en","name":"generation_config.json"},
+        {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"pytorch_model.bin","dir":"opus_mt_tr_en","name":"pytorch_model.bin","sha256":"e2b820f31c9348b0ae33d77ac23bd1686fa60a8afa0b9511bc7d9a35c125b534"},
+        {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"source.spm","dir":"opus_mt_tr_en","name":"source.spm"},
+        {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"target.spm","dir":"opus_mt_tr_en","name":"target.spm"},
+        {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"tokenizer_config.json","dir":"opus_mt_tr_en","name":"tokenizer_config.json"},
+        {"repo":"Helsinki-NLP/opus-mt-tr-en","revision":"19c65427cc2af5f191337d4899e0348c4af25902","path":"vocab.json","dir":"opus_mt_tr_en","name":"vocab.json"}
+      ]
+    }
   }
 }
