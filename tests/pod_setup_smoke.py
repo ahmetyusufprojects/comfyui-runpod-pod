@@ -240,7 +240,9 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     profile_prompt = server.llm._uretim_sistem_mesaji(
         "fikir", "en", "orta", model_prompt_profile="flux3", bbox_mode=True)
     assert "element table" in profile_prompt and "positive_tr" in profile_prompt
-    bbox_caption, bbox_elements = server._flux3_layout_elements(
+    from image_graphs import _flux3_layout_elements
+
+    bbox_caption, bbox_elements = _flux3_layout_elements(
         'A harbor at dawn. [{"id":"obj_1","desc":"red boat",'
         '"bbox":[120,180,640,820]}]', 1024, 1024)
     assert bbox_caption == "A harbor at dawn."
