@@ -1,4 +1,5 @@
 import http.server
+import os
 import pathlib
 import sys
 import tempfile
@@ -100,4 +101,48 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     assert isinstance(result.get("error"), pod_setup.DownloadCancelled), result
     assert partial.stat().st_size < payload_size, "cancel did not stop the transfer"
 
-print("model download and cancellation smoke checks passed")
+    # CUDA discovery must preserve the real diagnostic instead of turning every
+    # failure into an unexplained empty result.
+    fake_llama = scratch / "fake-llama-server"
+    fake_llama.write_text(
+        "#!" + real_python + "\n"
+        "import sys\n"
+        "print('CUDA backend unavailable: synthetic missing driver', file=sys.stderr)\n"
+        "raise SystemExit(17)\n",
+        encoding="utf-8",
+    )
+    fake_llama.chmod(0o755)
+    devices = pod_setup._llama_cuda_devices(fake_llama)
+    assert "synthetic missing driver" in devices and "17" in devices, devices
+
+    # Exercise the same bounded log reader used by both WebUI log screens with
+    # only temporary, synthetic files. No account or user data is opened.
+    log_root = scratch / "runtime-logs"
+    log_root.mkdir()
+    os.environ["WEBUI_RUNPOD"] = "1"
+    os.environ["POD_RUNTIME_ROOT"] = str(log_root)
+    os.environ["WEBUI_DATA_ROOT"] = str(scratch / "synthetic-user-data")
+    os.environ["COMFYUI_ROOT"] = str(scratch / "ComfyUI")
+    os.environ["LLAMA_SERVER_PATH"] = str(fake_llama)
+    os.environ["SYNTHETIC_TOKEN"] = "synthetic-secret-value"
+    (log_root / "setup.log").write_text(
+        "[llama] --list-devices çıktısı:\n"
+        "[llama] CUDA backend unavailable: synthetic missing driver\n"
+        "[llama] hf_token=synthetic-secret-value\n"
+        "[llama] tokenizers==4.57.6\n",
+        encoding="utf-8",
+    )
+    (log_root / "comfyui.log").write_text("synthetic ComfyUI output\n", encoding="utf-8")
+    (log_root / "webui.log").write_text("WebUI 8189 portunda hazır.\n", encoding="utf-8")
+    import server
+    server.llm.LOG_PATH = str(log_root / "llm_server.log")
+    llama_logs = "\n".join(server._log_tail("llama", 20))
+    comfy_logs = "\n".join(server._log_tail("comfy", 20))
+    webui_logs = "\n".join(server._log_tail("webui", 20))
+    assert "synthetic missing driver" in llama_logs, llama_logs
+    assert "[REDACTED]" in llama_logs and "synthetic-secret-value" not in llama_logs, llama_logs
+    assert "tokenizers==4.57.6" in llama_logs, llama_logs
+    assert "synthetic ComfyUI output" in comfy_logs, comfy_logs
+    assert "WebUI 8189 portunda hazır" in webui_logs, webui_logs
+
+print("model download, cancellation, GPU diagnostics, and log retrieval checks passed")

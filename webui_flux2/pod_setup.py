@@ -558,12 +558,28 @@ def _wait_comfy(cancel):
 def _llama_cuda_devices(target=None):
     target = Path(target or os.environ["LLAMA_SERVER_PATH"])
     try:
-        output = subprocess.check_output([str(target), "--list-devices"],
-                                         stderr=subprocess.STDOUT, text=True,
-                                         timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return output
+        result = subprocess.run([str(target), "--list-devices"],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, timeout=30, check=False)
+        output = (result.stdout or "").strip()
+        if result.returncode:
+            output += ("\n" if output else "") + "[çıkış kodu: %d]" % result.returncode
+        return output
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", "replace")
+        return (str(output).strip() + "\n" if output else "") + "[GPU listeleme 30 saniyede tamamlanmadı]"
+    except OSError as exc:
+        return "[GPU listeleme komutu başlatılamadı: %s: %s]" % (
+            type(exc).__name__, str(exc)[:300])
+
+
+def _record_llama_cuda_scan(output):
+    """Record only the short device probe so GPU setup failures are diagnosable."""
+    with (ROOT / "setup.log").open("a", encoding="utf-8") as log:
+        log.write("[llama] --list-devices çıktısı:\n")
+        log.write((output or "[boş çıktı]")[:4000] + "\n")
 
 
 def _install_llama(cancel):
@@ -599,8 +615,11 @@ def _install_llama(cancel):
     target.chmod(0o755)
     _command([str(target), "--version"], "llama-server doğrulaması", cancel=cancel)
     devices = _llama_cuda_devices(target)
+    _record_llama_cuda_scan(devices)
     if not re.search(r"(?m)^\s*CUDA0:", devices):
-        raise RuntimeError("llama-server CUDA0 aygıtını göremedi; CPU ile yavaş çalışması engellendi.")
+        detail = (devices or "llama-server cihaz listesi döndürmedi.").strip()[-1200:]
+        raise RuntimeError("llama-server CUDA0 aygıtını göremedi; CPU ile yavaş çalışması "
+                           "engellendi. Tanı: " + detail)
     with (ROOT / "setup.log").open("a", encoding="utf-8") as log:
         log.write("[llama] GPU aygıtı doğrulandı: " +
                   next(line.strip() for line in devices.splitlines()

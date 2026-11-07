@@ -88,21 +88,33 @@ def _log_tail(source, count):
                  "setup": os.path.join(BASE_DIR, "..", "baslatici", "webui.log")}
     if source not in paths:
         raise ValueError("Bilinmeyen log kaynağı.")
-    try:
-        with open(paths[source], "rb") as stream:
-            stream.seek(0, os.SEEK_END)
-            size = stream.tell()
-            stream.seek(max(0, size - 30000))
-            lines = [line for line in stream.read().decode("utf-8", "replace").splitlines()
-                     if line.strip()]
-    except OSError:
-        lines = []
+
+    def read_lines(path):
+        try:
+            with open(path, "rb") as stream:
+                stream.seek(0, os.SEEK_END)
+                size = stream.tell()
+                stream.seek(max(0, size - 30000))
+                return [line for line in stream.read().decode("utf-8", "replace").splitlines()
+                        if line.strip()]
+        except OSError:
+            return []
+
+    lines = read_lines(paths[source])
+    if RUNPOD_MODE and source == "llama":
+        # Before llama-server starts, its own log is empty. Include the small,
+        # tagged GPU installation diagnostics so failed CUDA setup is visible.
+        setup_lines = read_lines(paths["setup"])
+        diagnostics = [line for line in setup_lines
+                       if line.startswith("[llama]") or line.startswith("[timing] llama-server")]
+        lines = (diagnostics + lines)[-count:]
     secrets = sorted((value for name, value in os.environ.items()
                       if any(part in name.upper() for part in
                              ("TOKEN", "PASSWORD", "API_KEY", "SECRET"))
                       and len(value) >= 6), key=len, reverse=True)
     secret_pattern = re.compile(
-        r"(?i)([\w.-]*(?:token|password|secret|api[_-]?key)[\w.-]*\s*[=:]\s*)[^\s,;]+")
+        r"(?i)(\b(?:token|[a-z0-9_.-]+[_-]token|password|secret|api[_-]?key)"
+        r"\s*[=:]\s*)[^\s,;]+")
     cleaned = []
     for line in lines[-count:]:
         for secret in secrets:
@@ -4389,6 +4401,7 @@ if __name__ == "__main__":
         threading.Thread(target=_setup_httpd.serve_forever,
                          kwargs={"poll_interval": 0.2}, daemon=True,
                          name="setup-webui").start()
+        _system_event("Kurulum ekranı 8192 portunda hazır.")
         print("Kurulum arayüzü: http://0.0.0.0:%d" % SETUP_PORT, flush=True)
         try:
             pod_setup.prepare_data(DATA_ROOT, _auth_store)
@@ -4403,6 +4416,8 @@ if __name__ == "__main__":
     with WebUIServer(("0.0.0.0", 8189), Handler) as httpd:
         _httpd = httpd
         httpd.allow_reuse_address = True
+        if RUNPOD_MODE:
+            _system_event("WebUI 8189 portunda hazır.")
         if not RUNPOD_MODE:
             prompt_translation.onisit()
         print("Flux2 WebUI: http://0.0.0.0:8189  (yerel agdan telefonla erisim acik; ComfyUI: %s)" % COMFY,

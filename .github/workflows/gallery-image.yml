@@ -20,6 +20,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+      - name: Check Python and setup UI syntax
+        run: |
+          set -eu
+          python3 -m py_compile webui_flux2/*.py
+          node --check webui_flux2/static/setup.js
       - name: Build Linux image
         run: docker build -f docker/Dockerfile.gallery -t webui-gallery .
       - name: Verify mount guard and gallery HTTP start
