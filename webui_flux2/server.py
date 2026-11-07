@@ -625,6 +625,7 @@ def _video_uret(job, req):
         vmax = max(320, min(VIDEO_MAX_KENAR, vmax))
         w, h = _video_boyut(w0, h0, vmax)
         frames = _video_kare_sayisi(suresn, fps)
+        gercek_suresn = round(frames / fps, 3)
         try:
             seed = int(req.get("seed", -1))
         except Exception:
@@ -742,7 +743,7 @@ def _video_uret(job, req):
         gecmis_kayit, gecmis_dosyalar = None, []
         try:
             meta = {"prompt": prompt, "width": w, "height": h, "seed": seed,
-                    "frames": frames, "suresn": suresn, "fps": fps,
+                    "frames": frames, "suresn": gercek_suresn, "istenen_suresn": suresn, "fps": fps,
                     "mod": "referans-video", "is_tipi": IS_TIPI_VIDEO,
                     "workflow": "video",
                     "foto_kutuphane": kut1, "foto_kutuphane2": kut2}
@@ -753,7 +754,7 @@ def _video_uret(job, req):
         job["sonuc"] = {"video_url": ("/gecmis/%s" % urllib.parse.quote(gecmis_dosyalar[0])
                                       if gecmis_dosyalar else None),
                         "seed": seed, "width": w, "height": h,
-                        "frames": frames, "suresn": suresn, "fps": fps,
+                        "frames": frames, "suresn": gercek_suresn, "istenen_suresn": suresn, "fps": fps,
                         "mod": "referans-video", "is_tipi": IS_TIPI_VIDEO,
                         "kutuphane": kut1, "kutuphane2": kut2,
                         "gecmis": gecmis_kayit,
