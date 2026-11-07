@@ -541,6 +541,8 @@ def _launch_comfy():
     args = ["--reserve-vram", "1" if vram < 24576 else "1.5"]
     if vram < 12288:
         args += ["--lowvram"]
+    if os.environ.get("POD_COMFY_FP16_ACCUMULATION") == "1":
+        args += ["--fast", "fp16_accumulation"]
     print(f"[pod-setup] ComfyUI: {vram} MiB VRAM, {' '.join(args)}", flush=True)
     with (ROOT / "comfyui.log").open("ab") as log:
         _comfy_process = subprocess.Popen(
