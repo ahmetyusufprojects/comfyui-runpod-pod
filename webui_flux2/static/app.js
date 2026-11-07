@@ -366,9 +366,9 @@ async function boot(){
       const k = await kurulumYaniti.json();
       if(!k){ girisEkraniAc(); bootCalisiyor = false; return; }
       RUNPOD_WEBUI = k.runpod === true;
+      $('videoProfileBlok').hidden = false;
       if(RUNPOD_WEBUI){
         $('vsure').value = '0.5'; $('vfps').value = '8'; $('vmax').value = '320';
-        $('videoProfileBlok').hidden = false;
         $('videoSureLabel').textContent = 'Taslak klip süresi (sn)';
         $('videoBilgi').textContent = 'Hızlı önizleme varsayılanı: 320 px, 5 kareye yuvarlanan kısa klip. Ayrıntılı sonuç için süreyi/çözünürlüğü artırın. Model 17k+5 kare kuralını uygular.';
       }

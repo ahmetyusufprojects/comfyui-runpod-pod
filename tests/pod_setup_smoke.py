@@ -157,5 +157,13 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     assert normal["124"]["inputs"]["steps"] == 20
     assert normal["126"]["inputs"]["model"] == ["127", 0]
     assert "145" not in normal
+    server.RUNPOD_MODE = False
+    windows_normal = server._video_sablon_yukle("normal")
+    windows_turbo = server._video_sablon_yukle("quality")
+    assert windows_normal["124"]["inputs"]["steps"] == 20
+    assert windows_normal["126"]["inputs"]["model"] == ["127", 0]
+    assert "145" not in windows_normal
+    assert windows_turbo["124"]["inputs"]["steps"] == 8
+    assert windows_turbo["126"]["inputs"]["model"] == ["145", 0]
 
 print("model download, cancellation, GPU diagnostics, and log retrieval checks passed")

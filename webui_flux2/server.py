@@ -671,6 +671,10 @@ def _video_sablon_yukle(profile_name=None):
         # Sessiz taslak üretiminde örneklenen ses latent'ini çözmek ve eklemek gereksizdir.
         ham.pop("121", None)
         ham["130"]["inputs"].pop("audio", None)
+    elif profile_name == "normal":
+        ham["126"]["inputs"]["model"] = ["127", 0]
+        ham.pop("145", None)
+        ham["124"]["inputs"]["steps"] = 20
     return {k: v for k, v in ham.items() if not k.startswith("_")}
 
 
@@ -787,7 +791,7 @@ def _video_uret(job, req):
             # varsayılanı gereksiz yere çok daha fazla GPU belleği ve hesap ister.
             w0, h0 = kaynak_boyutu
             w, h = _video_boyut(w0, h0, vmax)
-        profile_name = (req.get("video_profile") or "quality") if RUNPOD_MODE else None
+        profile_name = req.get("video_profile") or "quality"
         sablon = _video_sablon_yukle(profile_name)
         g = sablon["136"]["inputs"]
         g["prompt"] = prompt
