@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV WEBUI_RUNPOD=1 PYTHONUNBUFFERED=1 \
     POD_RUNTIME_ROOT=/opt/runtime POD_VOLUME_MOUNT=/workspace \
     POD_MODEL_CATALOG=/opt/pod/models.json \
-    WEBUI_DATA_ROOT=/workspace/user-data \
+    WEBUI_DATA_ROOT=/opt/runtime/user-data \
     GPG_HOME=/opt/runtime/gnupg GPG_PATH=/usr/bin/gpg \
     HF_HOME=/opt/runtime/hf-cache XDG_CACHE_HOME=/opt/runtime/cache \
     UV_BIN=/opt/webui-venv/bin/uv UV_CACHE_DIR=/opt/runtime/uv-cache \
@@ -21,6 +21,7 @@ COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_
 COPY webui_flux2/static/app.css webui_flux2/static/app.js /opt/webui_flux2/static/
 COPY webui_flux2/setup.html /opt/webui_flux2/
 COPY webui_flux2/static/setup.css webui_flux2/static/setup.js /opt/webui_flux2/static/
+COPY webui_flux2/model_prompts/ /opt/webui_flux2/model_prompts/
 COPY docker/models.json /opt/pod/models.json
 WORKDIR /opt/webui_flux2
 EXPOSE 8189 8192

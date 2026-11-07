@@ -44,7 +44,9 @@ from image_graphs import (DIFFUSION_FILE, TEXT_ENCODER_FILE, VAE_FILE,
                           Z_IMAGE_VAE_FILE, ANIMA_DIFFUSION_FILE,
                           MOODY_ANIMA_DIFFUSION_FILE,
                           ANIMA_TEXT_ENCODER_FILE, ANIMA_VAE_FILE,
-                          build_prompt, build_z_image_prompt, build_anima_prompt)
+                          build_prompt, build_z_image_prompt, build_anima_prompt,
+                          build_flux3_prompt, build_krea2_prompt,
+                          build_illustrious_prompt)
 from image_utils import (exif_duzelt as _exif_duzelt,
                          fotograf_hazirla as _fotograf_hazirla,
                          scale_to_max_side)
@@ -168,6 +170,9 @@ MODEL_FLUX2 = "flux2"
 MODEL_Z_IMAGE = "z_image"
 MODEL_ANIMA = "anima"
 MODEL_MOODY_ANIMA = "moody_anima"
+MODEL_FLUX3 = "flux3"
+MODEL_KREA2 = "krea2"
+MODEL_ILLUSTRIOUS = "illustrious"
 
 # --- Moduler is sistemi: yeni is tipi eklemek mevcut kodu kirmamali ---
 # "goruntu-uretim" / "goruntu-duzenleme" simdi; "video-uretim" yakinda (sadece hazirlik).
@@ -410,8 +415,32 @@ def _form_temizle(ham):
                     temiz[k] = v
             elif k == "model":
                 if v in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_ANIMA,
-                         MODEL_MOODY_ANIMA):
+                         MODEL_MOODY_ANIMA, MODEL_FLUX3, MODEL_KREA2,
+                         MODEL_ILLUSTRIOUS):
                     temiz[k] = v
+            elif k == "image_model":
+                if v in ("auto", MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_FLUX3,
+                         MODEL_KREA2, MODEL_ILLUSTRIOUS):
+                    temiz[k] = v
+            elif k == "flux3_bbox_mode":
+                if isinstance(v, bool):
+                    temiz[k] = v
+            elif k == "loras":
+                if isinstance(v, list) and len(v) <= 8:
+                    selected = []
+                    for item in v:
+                        if not isinstance(item, dict):
+                            continue
+                        identifier = item.get("id")
+                        if not isinstance(identifier, str) or not re.fullmatch(
+                                r"(?:[a-f0-9]{12}|anime-desire-illustrious)", identifier):
+                            continue
+                        try:
+                            weight = max(0.0, min(2.0, float(item.get("weight", 1))))
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        selected.append({"id": identifier, "weight": round(weight, 2)})
+                    temiz[k] = selected
             elif k in ("fps",):
                 n = int(v)
                 if n in (8, 12, 24):
@@ -515,6 +544,56 @@ def _ayar_degisikliklerini_uygula(ayar, req):
         if ctx_deger < 1024 or ctx_deger > 32768:
             raise ValueError("llm_ctx 1024-32768 araliginda olmali")
         ayar["llm_ctx"] = ctx_deger
+    if "llm_model" in req:
+        model = req.get("llm_model")
+        if model not in ("auto", "llama", "llm_12b", "llm_26b"):
+            raise ValueError("llm_model seçimi geçersiz")
+        ayar["llm_model"] = model
+    for key, low, high in (("llm_threads", 1, 64), ("llm_batch", 128, 8192),
+                           ("llm_top_k", 0, 1000)):
+        if key in req:
+            try:
+                value = int(req[key])
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(key + " sayı olmalı")
+            if not low <= value <= high:
+                raise ValueError(key + " aralık dışında")
+            ayar[key] = value
+    for key, low, high in (("llm_top_p", 0.05, 1.0),
+                           ("llm_repeat_penalty", 0.8, 2.0)):
+        if key in req:
+            try:
+                value = float(req[key])
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(key + " sayı olmalı")
+            if not low <= value <= high:
+                raise ValueError(key + " aralık dışında")
+            ayar[key] = round(value, 3)
+    if "llm_temperature" in req:
+        try:
+            temperature = float(req["llm_temperature"])
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("llm_temperature sayı olmalı")
+        if not 0.1 <= temperature <= 2.0:
+            raise ValueError("llm_temperature 0.1-2.0 aralığında olmalı")
+        ayar["llm_temperature"] = round(temperature, 3)
+    if "llm_gpu_layers" in req:
+        value = req.get("llm_gpu_layers")
+        if value == "all":
+            ayar["llm_gpu_layers"] = value
+        else:
+            try:
+                layers = int(value)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("GPU katman sayısı geçersiz")
+            if not 0 <= layers <= 512:
+                raise ValueError("GPU katmanı 0-512 aralığında olmalı")
+            ayar["llm_gpu_layers"] = layers
+    for key in ("llm_use_mtp", "llm_multimodal"):
+        if key in req:
+            if not isinstance(req[key], bool):
+                raise ValueError(key + " boolean olmalı")
+            ayar[key] = req[key]
     if "llm_prompt_destek_yaraticilik" in req:
         try:
             sicaklik = float(req.get("llm_prompt_destek_yaraticilik"))
@@ -880,18 +959,23 @@ def _video_uret(job, req):
         except Exception:
             kut2 = None
         gecmis_kayit, gecmis_dosyalar = None, []
+        video_poster = None
         try:
             meta = {"prompt": prompt, "width": w, "height": h, "seed": seed,
                     "frames": frames, "suresn": gercek_suresn, "istenen_suresn": suresn, "fps": fps,
                     "mod": "referans-video", "is_tipi": IS_TIPI_VIDEO,
                     "workflow": "video",
                     "foto_kutuphane": kut1, "foto_kutuphane2": kut2}
-            gecmis_kayit, gecmis_dosyalar = gecmise_kaydet(sahip, [mp4], meta,
-                                                           video=True)
+            video_poster = _video_kapak_uret(mp4)
+            gecmis_kayit, gecmis_dosyalar = gecmise_kaydet(
+                sahip, [mp4], meta, video=True, poster_blob=video_poster)
         except Exception:
             gecmis_kayit, gecmis_dosyalar = None, []
         job["sonuc"] = {"video_url": ("/gecmis/%s" % urllib.parse.quote(gecmis_dosyalar[0])
                                       if gecmis_dosyalar else None),
+                        "video_poster_url": ("/gecmis/%s" % urllib.parse.quote(
+                            gecmis_kayit + "_poster.jpg")
+                            if gecmis_kayit and video_poster else None),
                         "seed": seed, "width": w, "height": h,
                         "frames": frames, "suresn": gercek_suresn, "istenen_suresn": suresn, "fps": fps,
                         "mod": "referans-video", "is_tipi": IS_TIPI_VIDEO,
@@ -956,6 +1040,23 @@ def _is_dogrula(req):
             return {"hata": "video-uretim icin en az 1 referans fotograf gerekli",
                     "is_tipi": IS_TIPI_VIDEO}
         return None
+    model = req.get("model", MODEL_FLUX2)
+    if model in (MODEL_ANIMA, MODEL_MOODY_ANIMA) and RUNPOD_MODE:
+        return {"hata": "Anima kapatıldı. Görsel üretim ayarlarından Illustrious veya başka bir modeli seç."}
+    if model not in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_ANIMA,
+                     MODEL_MOODY_ANIMA, MODEL_FLUX3, MODEL_KREA2,
+                     MODEL_ILLUSTRIOUS):
+        return {"hata": "Görsel modeli tanınmadı."}
+    if model in (MODEL_KREA2, MODEL_ILLUSTRIOUS) and n_ref:
+        return {"hata": "Seçilen model şu anda yalnızca sıfırdan görsel üretir. Referansla Flux 2 veya Flux 3 kullan."}
+    if req.get("flux3_bbox_mode") and model != MODEL_FLUX3:
+        return {"hata": "Kutu yerleşimi yalnızca Flux 3 Klein ile kullanılabilir."}
+    runpod_workflow = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
+                       MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
+                       MODEL_ILLUSTRIOUS: "illustrious"}.get(model)
+    if RUNPOD_MODE and runpod_workflow:
+        if not pod_setup.workflow_ready(runpod_workflow):
+            return {"hata": "Bu görsel modeli henüz hazır değil. 8192 portundaki Kurulum panelinden modeli indir."}
     return None
 
 
@@ -1060,7 +1161,6 @@ def _llm_kuyruk_isini_calistir(job):
             raise RuntimeError("İş durduruldu")
         _aktif_llm = {"is_id": job["is_id"], "sahip": sahip, "tur": tur,
                       "durum": "Hazırlanıyor", "baslangic": job["baslangic"]}
-    canli = llm.durum()["canli"]
     def gpu_hazirla():
         _dbg("chat_bosalti_basla")
         ok, neden = _comfy_bosalti_ve_dogrula(job=job)
@@ -1072,6 +1172,36 @@ def _llm_kuyruk_isini_calistir(job):
         if job.get("iptal"):
             raise RuntimeError("iptal edildi")
         ayar = _ayar_oku(sahip)
+        llm_secimi = ayar.get("llm_model", "auto")
+        if RUNPOD_MODE:
+            if llm_secimi == "auto":
+                sohbet_isi = tur in ("llm_chat", "llm_preload")
+                model_ad = req.get("model")
+                if tur == "llm_prompt" and not model_ad:
+                    model_ad = ((ayar.get("form") or {}).get("image_model") or "z_image")
+                model_ad = {MODEL_Z_IMAGE: "z_image", MODEL_FLUX2: "flux2",
+                            MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
+                            MODEL_ILLUSTRIOUS: "illustrious"}.get(model_ad, model_ad)
+                secilecek = pod_setup.default_llm_for(model_ad, chat=sohbet_isi)
+                # İstenen profil henüz indirilmediyse uygun, hazır bir yedek kullan.
+                adaylar = ([secilecek, "llama", "llm_12b", "llm_26b"]
+                           if not sohbet_isi else
+                           [secilecek, "llama", "llm_12b"])
+                secilecek = next((name for name in dict.fromkeys(adaylar)
+                                  if pod_setup.workflow_ready(name)), None)
+                if secilecek is None:
+                    raise RuntimeError(
+                        "Sohbet modeli henüz indirilmedi. Ayrı Kurulum sayfasından "
+                        "Gemma grubunu ekleyin; model dosyaları bu işlem sırasında inmeye başlar.")
+            else:
+                secilecek = llm_secimi
+                if not pod_setup.workflow_ready(secilecek):
+                    raise RuntimeError(
+                        "Seçili Gemma modeli henüz hazır değil. 8192 portundaki "
+                        "Kurulum sayfasından ilgili modeli indirin.")
+            llm.model_ayarla(secilecek)
+            llm.ayarlarini_uygula(ayar)
+        canli = llm.durum()["canli"]
         try:
             llm.baglam_ayarla(ayar.get("llm_ctx") or _LLM_VARSAYILAN_CTX)
         except llm.LLMHatasi:
@@ -1103,6 +1233,10 @@ def _llm_kuyruk_isini_calistir(job):
                              req.get("yaraticilik"), req.get("uzunluk"),
                              sistem_ozel=ayar.get("llm_sistem"),
                              mod_ozel=(ayar.get("llm_mod") or {}).get(req.get("mod")),
+                             model_prompt_profile=(req.get("model_prompt_profile")
+                                                   if req.get("model_prompt_profile") in
+                                                   ("z_image", "flux3", "krea2", "minimaxh3") else None),
+                             bbox_mode=bool(req.get("bbox_mode")),
                              gpu_hazirla=gpu_hazirla)
             _is_sonucu_baslat(job)
             _llm_prompt_gecmisine_yaz(sahip, req, sonuc)
@@ -1113,7 +1247,9 @@ def _llm_kuyruk_isini_calistir(job):
             _aktif_llm["durum"] = "AI prompt oluşturuyor"
             metin = str(req.get("prompt") or "").strip()
             n_ref = (1 if req.get("image_base64") else 0) + (1 if req.get("image2_base64") else 0)
-            mod = "birlestir" if n_ref == 2 else ("gorsel" if n_ref else "fikir")
+            is_video = is_tipini_belirle(req, n_ref) == IS_TIPI_VIDEO
+            mod = ("video" if is_video else
+                   ("birlestir" if n_ref == 2 else ("gorsel" if n_ref else "fikir")))
             gorseller = []
             if req.get("image_base64"):
                 gorseller.append({"mime": req.get("image_mime") or "image/jpeg",
@@ -1127,7 +1263,12 @@ def _llm_kuyruk_isini_calistir(job):
                 mod, metin, gorseller, "en", yaraticilik, uzunluk,
                 sistem_ozel=ayar.get("llm_sistem"),
                 mod_ozel=(ayar.get("llm_mod") or {}).get(mod),
-                gpu_hazirla=gpu_hazirla)
+                gpu_hazirla=gpu_hazirla,
+                model_prompt_profile=(
+                    "minimaxh3" if is_video else
+                    (req.get("model") if req.get("model") in
+                     ("z_image", "flux3", "krea2") else None)),
+                bbox_mode=bool(req.get("flux3_bbox_mode")))
             _llm_prompt_gecmisine_yaz(sahip, {
                 "mod": mod, "metin": metin, "dil": "en",
                 "yaraticilik": yaraticilik, "uzunluk": uzunluk,
@@ -1175,6 +1316,14 @@ def _llm_kuyruk_isini_calistir(job):
                             temiz_mesajlar.append({"role": rol, "content": icerik})
                         elif isinstance(icerik, list):
                             temiz_mesajlar.append({"role": rol, "content": icerik})
+                if not llm.MULTIMODAL_ENABLED and any(
+                        isinstance(message.get("content"), list)
+                        and any(isinstance(part, dict) and part.get("type") == "image_url"
+                                for part in message["content"])
+                        for message in temiz_mesajlar):
+                    raise RuntimeError(
+                        "Seçili model ayarlarında görsel anlama kapalı. "
+                        "Ayarlar → LLM Ayarları bölümünden açın.")
                 # Ek talimat (orn. sohbeti prompta cevirme) yalniz modele gider,
                 # kaydedilen sohbet gecmisine yazilmaz.
                 ek_talimat = str(req.get("ek_talimat") or "").strip()[:2000]
@@ -1206,7 +1355,7 @@ def _llm_kuyruk_isini_calistir(job):
 
                 job["sonuc"] = {}
                 yanit, olcum = llm.sohbet_et(
-                    istek_mesajlari, req.get("yaraticilik", 0.7),
+                    istek_mesajlari, req.get("yaraticilik", ayar.get("llm_temperature", 0.7)),
                     req.get("max_tokens"), parca_geri=parca_guncelle,
                     dusunme_geri=dusunme_guncelle,
                     stream=bool(ayar.get("llm_streaming", True)),
@@ -1305,9 +1454,31 @@ def _gpu_isini_calistir(job):
         job["ilerleme"] = {"calisan": "Görsel üretime gönderiliyor", "oran": 0.2}
 
     if llm.durum()["canli"]:
-        job["_llama_canliydi"] = True
-        if not _llm_kapat_ve_bekle():
-            raise RuntimeError("llama-server kapanmadı; görsel işi başlatılamadı")
+        req = job.get("istek") or {}
+        model = req.get("model") or req.get("image_model")
+        if model in (None, "auto"):
+            refs = bool(req.get("image_base64") or req.get("image2_base64"))
+            model = MODEL_FLUX2 if refs else MODEL_Z_IMAGE
+        model = "video" if is_tipini_belirle(
+            req, int(bool(req.get("image_base64"))) +
+            int(bool(req.get("image2_base64")))) == IS_TIPI_VIDEO else model
+        vram_bos = _vram_bos_mb()
+        gerekli_gorsel = RUNPOD_GORSEL_VRAM_MB.get(
+            model, RUNPOD_GORSEL_VRAM_MB["z_image"])
+        # LLM GPU'da kalırken görsel modelin de açılabileceği ölçülüyorsa
+        # gereksiz yeniden yüklemeyi önle. Ölçüm yoksa güvenli tarafta kal.
+        llama_kalabilir = (RUNPOD_MODE and vram_bos is not None
+                           and vram_bos >= gerekli_gorsel + 1200)
+        if llama_kalabilir:
+            job["_llama_canliydi"] = True
+            job["_llama_bellekte_kaldi"] = True
+            job["ilerleme"] = {"asama": "bellek",
+                               "calisan": "Sohbet modeli bellekte tutuluyor",
+                               "oran": 0.03}
+        else:
+            job["_llama_canliydi"] = True
+            if not _llm_kapat_ve_bekle():
+                raise RuntimeError("llama-server kapanmadı; görsel işi başlatılamadı")
     if job["iptal"]:
         raise RuntimeError("İş durduruldu")
     _isi_calistir(job)
@@ -1612,6 +1783,8 @@ def _ws_ilerleme_dinle(prompt_id, client_id, nodlar):
 # RunPod loads the full Gemma model, projection and context onto the GPU.
 # Leave headroom for CUDA allocations after ComfyUI releases its models.
 LLM_VRAM_GEREK_MB = 9000 if RUNPOD_MODE else 2600
+RUNPOD_GORSEL_VRAM_MB = {"z_image": 10000, "flux2": 16500, "flux3": 12500,
+                         "krea2": 22500, "illustrious": 10500, "video": 26000}
 GPU_BOSALTMA_TAVAN_SN = 20
 GPU_BOSALTMA_BEKLE = 0.25   # nvidia-smi tek cagri ~80ms; sik poll yuklemeyi hizlandirir
 LLM_KAPATMA_BEKLE_SN = 30  # llama durmazsa goruntu isi bu kadar bekler
@@ -1640,30 +1813,33 @@ def _vram_bos_mb():
         return None
 
 
+def _llm_gerekli_vram_mb():
+    return llm.profil_vram_mb() if RUNPOD_MODE else LLM_VRAM_GEREK_MB
+
+
 def _comfy_bosalti_ve_dogrula(job=None, zorla=False):
-    """Release ComfyUI VRAM and verify enough is free before starting llama.cpp."""
+    """ComfyUI bellegini bosaltir; llama icin yeterli VRAM olustugunu olcer."""
     if job is not None and job.get("iptal"):
         return False, "iptal"
+    gerekli_vram = _llm_gerekli_vram_mb()
     vram_bos = _vram_bos_mb()
     if vram_bos is None and not zorla:
-        return False, ("Bos VRAM miktari olculemedi; yavas yuklemeyi onlemek "
-                       "icin LLM baslatilmadi")
-    if not zorla and vram_bos is not None and vram_bos >= LLM_VRAM_GEREK_MB:
+        return False, "Bos VRAM olculemedi; LLM baslatilmadi"
+    if not zorla and vram_bos is not None and vram_bos >= gerekli_vram:
         return True, ""
     try:
         comfy_kuyruk = comfy_get_json("/queue")
     except Exception as e:
         return False, "ComfyUI kuyrugu dogrulanamadi; bellek bosaltilmadi: %s" % e
-    if (comfy_kuyruk.get("queue_running")
-            or comfy_kuyruk.get("queue_pending")):
+    if comfy_kuyruk.get("queue_running") or comfy_kuyruk.get("queue_pending"):
         return False, "ComfyUI kuyrugunda is varken modeller bosaltilamaz"
     if job is not None:
         job["ilerleme"] = {"calisan": "ComfyUI modelleri bosaltiliyor",
                            "oran": 0.08}
     try:
         status, _ = comfy_request(
-            "POST", "/free", body=json.dumps(
-                {"unload_models": True, "free_memory": True}).encode("utf-8"),
+            "POST", "/free",
+            body=json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8"),
             headers={"Content-Type": "application/json"})
         if status != 200:
             return False, "ComfyUI bellek bosaltma istegi basarisiz (%s)" % status
@@ -1671,9 +1847,6 @@ def _comfy_bosalti_ve_dogrula(job=None, zorla=False):
         return False, "ComfyUI bellek bosaltma istegi basarisiz: %s" % e
     son_tarih = time.monotonic() + GPU_BOSALTMA_TAVAN_SN
     tur = 0
-    son_vram = None
-    degismedi = 0
-    denendi = 1
     while time.monotonic() < son_tarih:
         if job is not None and job.get("iptal"):
             return False, "iptal"
@@ -1681,56 +1854,19 @@ def _comfy_bosalti_ve_dogrula(job=None, zorla=False):
                        max(0, son_tarih - time.monotonic())))
         vram_bos = _vram_bos_mb()
         tur += 1
-        if vram_bos is not None and vram_bos >= LLM_VRAM_GEREK_MB:
+        if vram_bos is not None and vram_bos >= gerekli_vram:
             if job is not None:
-                job["ilerleme"] = {"calisan": "VRAM hazir (%d MB bos)"
-                                              % vram_bos, "oran": 0.12}
+                job["ilerleme"] = {"calisan": "VRAM hazir (%d MB bos)" % vram_bos,
+                                   "oran": 0.12}
             return True, ""
-        # VRAM artisi durduysa iki saniye gecikme tanisi: nvidia-smi boslanmayi
-        # gec raporlayabilir. Hala yetersizse llama'yi az VRAM'le baslatmak
-        # paylasilan bellek tasmasindan her seyi yavaslatir; bunun yerine bir
-        # tur daha /free denenir, o da yetmezse is acik bir hatayla durur.
-        if vram_bos is not None and son_vram is not None \
-                and abs(vram_bos - son_vram) < 32:
-            degismedi += 1
-            if degismedi >= 4:
-                time.sleep(2)
-                vram_bos = _vram_bos_mb()
-                if vram_bos is not None and vram_bos >= LLM_VRAM_GEREK_MB:
-                    return True, ""
-                if zorla:
-                    # Manuel "Belleği boşalt": elinden geleni yapti, olculen
-                    # boslukla sonuc döner.
-                    return True, ""
-                if denendi == 1:
-                    denendi = 2
-                    son_tarih = time.monotonic() + GPU_BOSALTMA_TAVAN_SN
-                    if job is not None:
-                        job["ilerleme"] = {"calisan": "ComfyUI ikinci kez "
-                                                      "bosaltiliyor",
-                                           "oran": 0.09}
-                    try:
-                        comfy_request(
-                            "POST", "/free", body=json.dumps(
-                                {"unload_models": True,
-                                 "free_memory": True}).encode("utf-8"),
-                            headers={"Content-Type": "application/json"})
-                    except Exception:
-                        pass
-                    continue
-                break
-        else:
-            degismedi = 0
-        son_vram = vram_bos
         if job is not None and tur % 5 == 0:
-            job["ilerleme"] = {"calisan": "VRAM bekleniyor (%s MB bos)"
-                                          % vram_bos, "oran": 0.08}
-    return False, ("VRAM yetersiz: %s MB bos, llama icin en az %d MB gerekli. "
-                   "Daha az GPU bellegiyle baslatirsak paylasilan bellek "
-                   "tasiyor; 'Belleği boşalt' kullan ya da ComfyUI'nin "
-                   "isleri bitmesini bekle."
-                   % (vram_bos, LLM_VRAM_GEREK_MB))
-
+            job["ilerleme"] = {"calisan": "VRAM bekleniyor (%s MB bos)" % vram_bos,
+                               "oran": 0.08}
+    if zorla and vram_bos is not None:
+        return True, ""
+    return False, ("VRAM yetersiz: %s MB bos, secilen LLM icin en az %d MB "
+                   "gerekiyor. ComfyUI islerinin bitmesini bekleyin."
+                   % (vram_bos, gerekli_vram))
 
 def _llm_kapat_ve_bekle(tavan_sn=None):
     """llama-server'i durdurur, port bosalana dek bekler.
@@ -2080,7 +2216,23 @@ def prompt_sil(kullanici, ad):
 _GECMIS_KILIT = threading.RLock()
 
 
-def gecmise_kaydet(kullanici, blob_listesi, meta, video=False):
+def _video_kapak_uret(blob):
+    """Return a small JPEG thumbnail for a generated video on RunPod."""
+    if not RUNPOD_MODE or not blob:
+        return None
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
+             "-ss", "0.05", "-frames:v", "1", "-vf", "scale=480:-2",
+             "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
+            input=blob, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=30, check=False)
+        return result.stdout if result.returncode == 0 and result.stdout.startswith(b"\xff\xd8") else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def gecmise_kaydet(kullanici, blob_listesi, meta, video=False, poster_blob=None):
     """Her uretimi BU kullanicinin gecmis/ altina yazar: goruntu PNG, video MP4.
     Ayni taban adli .json meta ile birlikte; budama uygulanir."""
     gecmis_dir = _kullanici_gecmis(kullanici)
@@ -2098,13 +2250,19 @@ def gecmise_kaydet(kullanici, blob_listesi, meta, video=False):
         with open(os.path.join(gecmis_dir, ad), "wb") as f:
             f.write(blob)
     meta = dict(meta)
+    poster_file = None
+    if video and poster_blob:
+        poster_file = taban + "_poster.jpg"
+        with open(os.path.join(gecmis_dir, poster_file), "wb") as f:
+            f.write(poster_blob)
     baytlar = {}
-    for ad in dosyalar:
+    for ad in dosyalar + ([poster_file] if poster_file else []):
         try:
             baytlar[ad] = os.path.getsize(os.path.join(gecmis_dir, ad))
         except OSError:
             pass
-    meta.update({"dosyalar": dosyalar, "dosya_bayt": baytlar,
+    meta.update({"dosyalar": dosyalar, "poster_file": poster_file,
+                 "dosya_bayt": baytlar,
                  "tarih": _dt.datetime.now().isoformat(timespec="seconds")})
     with _GECMIS_KILIT:
         with open(os.path.join(gecmis_dir, taban + ".json"), "w", encoding="utf-8") as f:
@@ -2127,7 +2285,10 @@ def _gecmis_buda(kullanici):
                     meta = json.load(f)
             except Exception:
                 meta = {}
-            for aday in [eski] + list(meta.get("dosyalar") or []):
+            for aday in ([eski] + list(meta.get("dosyalar") or []) +
+                         [meta.get("poster_file")]):
+                if not aday:
+                    continue
                 yol = os.path.abspath(os.path.join(gecmis_dir, aday))
                 if not yol.startswith(os.path.abspath(gecmis_dir) + os.sep):
                     continue
@@ -2156,7 +2317,10 @@ def gecmis_kaydi_sil(kullanici, kayit):
     except Exception:
         meta = {}
     ok = False
-    for aday in [kayit] + list(meta.get("dosyalar") or []):
+    for aday in ([kayit] + list(meta.get("dosyalar") or []) +
+                 [meta.get("poster_file")]):
+        if not aday:
+            continue
         p = os.path.abspath(os.path.join(gecmis_dir, aday))
         if not p.startswith(kok):
             continue
@@ -2177,7 +2341,8 @@ def gecmis_temizle(kullanici):
     n = 0
     try:
         for ad in os.listdir(gecmis_dir):
-            if not ad.lower().endswith((".png", ".mp4", ".json")):
+            if not (ad.lower().endswith((".png", ".mp4", ".json")) or
+                    ad.lower().endswith("_poster.jpg")):
                 continue
             yol = os.path.abspath(os.path.join(gecmis_dir, ad))
             if not yol.startswith(kok):
@@ -2228,6 +2393,11 @@ def _gecmis_kayit_bilgisi(gecmis_dir, ad, meta, dosya=None):
         dosya_bayt = os.path.getsize(os.path.join(gecmis_dir, ilk))
     except OSError:
         dosya_bayt = None
+    poster_file = meta.get("poster_file")
+    if (not isinstance(poster_file, str) or os.path.basename(poster_file) != poster_file
+            or not poster_file.lower().endswith("_poster.jpg")
+            or not os.path.isfile(os.path.join(gecmis_dir, poster_file))):
+        poster_file = None
     return {
         "kayit": ad, "dosya": ilk, "dosyalar": dosyalar,
         "tur": "video" if ilk.lower().endswith(".mp4") else "goruntu",
@@ -2244,6 +2414,8 @@ def _gecmis_kayit_bilgisi(gecmis_dir, ad, meta, dosya=None):
         "frames": meta.get("frames"), "suresn": meta.get("suresn"),
         "fps": meta.get("fps"),
         "yildiz": _gecmis_dosya_favorili(meta, ilk),
+        "video_poster_url": ("/gecmis/%s" % urllib.parse.quote(poster_file)
+                             if poster_file else None),
         "url": "/gecmis/%s" % urllib.parse.quote(ilk)}
 
 
@@ -2590,9 +2762,16 @@ def _dosya_isit(yol, job):
 def _imge_modeli_isitme_karari(model, llama_canliydi):
     """Isitilacak text encoder dosya yolu veya None döner."""
     global _son_goruntu_etkilesim
-    yol = os.path.join(COMFY_KOK, "models",
-                       "text_encoders", _TE_DOSYALARI.get(model,
-                                                          TEXT_ENCODER_FILE))
+    if RUNPOD_MODE:
+        workflow_key = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
+                        MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2"}.get(model)
+        encoder = pod_setup.workflow(workflow_key).get("text_encoder_file") \
+            if workflow_key else None
+        if not encoder:
+            return None
+    else:
+        encoder = _TE_DOSYALARI.get(model, TEXT_ENCODER_FILE)
+    yol = os.path.join(COMFY_KOK, "models", "text_encoders", encoder)
     simdi = time.monotonic()
     if not llama_canliydi and _son_goruntu_etkilesim is not None \
             and simdi - _son_goruntu_etkilesim < _IMGE_ISITMA_ATLA_SN:
@@ -2657,11 +2836,18 @@ def _isi_calistir(job):
         model = req.get("model")
         if model in (MODEL_ANIMA, MODEL_MOODY_ANIMA) and n_ref_istek:
             model = MODEL_FLUX2
+        elif RUNPOD_MODE and model in (MODEL_ANIMA, MODEL_MOODY_ANIMA):
+            model = MODEL_ILLUSTRIOUS
         if model not in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_ANIMA,
-                         MODEL_MOODY_ANIMA):
+                         MODEL_MOODY_ANIMA, MODEL_FLUX3, MODEL_KREA2,
+                         MODEL_ILLUSTRIOUS):
             model = MODEL_FLUX2
-        default_sampler = ("res_multistep" if model == MODEL_Z_IMAGE
-                           else "euler")
+        workflow = (pod_setup.workflow(model) if RUNPOD_MODE else {})
+        default_sampler = workflow.get("sampler") or (
+            "res_multistep" if model == MODEL_Z_IMAGE else "euler")
+        default_steps = workflow.get("steps") or (
+            8 if model in (MODEL_Z_IMAGE, MODEL_ANIMA) else 4)
+        default_cfg = workflow.get("cfg", 1.0)
         prompt_girdi = str(req.get("prompt_girdi") or req.get("prompt") or "")
         prompt_servis = str(req.get("prompt") or "")
         ceviri = None
@@ -2675,10 +2861,17 @@ def _isi_calistir(job):
             req["prompt_en"] = prompt_servis
         p = {"prompt": prompt_servis, "negative": req.get("negative", ""),
              "width": w, "height": h, "seed": int(req.get("seed", -1)),
-             "steps": max(1, min(50, int(req.get("steps", 8 if model in
-                                                  (MODEL_Z_IMAGE, MODEL_ANIMA) else 4)))),
-             "cfg": float(req.get("cfg", 1.0)),
-             "sampler": req.get("sampler", default_sampler)}
+             "steps": max(1, min(50, int(req.get("steps", default_steps)))),
+             "cfg": float(req.get("cfg", default_cfg)),
+             "sampler": req.get("sampler", default_sampler),
+             "flux3_bbox_mode": bool(req.get("flux3_bbox_mode"))}
+        if RUNPOD_MODE:
+            workflow_key = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
+                            MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
+                            MODEL_ILLUSTRIOUS: "illustrious"}[model]
+            p["loras"] = pod_setup.ensure_loras(
+                workflow_key, req.get("loras") if "loras" in req else None,
+                job=job)
         uretim_baslangic = time.perf_counter()
         image_name = None
         image_name2 = None
@@ -2694,6 +2887,12 @@ def _isi_calistir(job):
             prompt, seed = build_anima_prompt(p)
         elif model == MODEL_MOODY_ANIMA:
             prompt, seed = build_anima_prompt(p, MOODY_ANIMA_DIFFUSION_FILE)
+        elif model == MODEL_FLUX3:
+            prompt, seed = build_flux3_prompt(p, image_name, image_name2)
+        elif model == MODEL_KREA2:
+            prompt, seed = build_krea2_prompt(p)
+        elif model == MODEL_ILLUSTRIOUS:
+            prompt, seed = build_illustrious_prompt(p)
         else:
             prompt_builder = build_z_image_prompt if model == MODEL_Z_IMAGE else build_prompt
             prompt, seed = prompt_builder(p, image_name, image_name2)
@@ -3005,6 +3204,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self._admin_gerekli() is not None:
                 self._send(200, json.dumps(pod_setup.status(), ensure_ascii=False))
             return
+        if parsed.path == "/api/system-settings":
+            if self._admin_gerekli() is None:
+                return
+            self._send(200, json.dumps(pod_setup.system_settings(), ensure_ascii=False))
+            return
+        if parsed.path == "/api/loras" and RUNPOD_MODE:
+            if self._auth_gerekli() is None:
+                return
+            query = urllib.parse.parse_qs(parsed.query or "")
+            model = (query.get("model") or [None])[0]
+            self._send(200, json.dumps({"loras": pod_setup.lora_status(model)},
+                                       ensure_ascii=False))
+            return
         if parsed.path == "/api/log":
             if self._admin_gerekli() is None:
                 return
@@ -3053,6 +3265,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 if req.get("islem") == "iptal":
                     pod_setup.cancel(req.get("grup"))
+                elif req.get("islem") == "duraklat":
+                    pod_setup.pause(req.get("grup"))
+                elif req.get("islem") == "devam":
+                    pod_setup.start(req.get("grup"))
                 elif req.get("islem") == "kaldir":
                     pod_setup.remove(req.get("grup"))
                 elif req.get("islem") == "sira":
@@ -3065,6 +3281,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(409, json.dumps({"hata": str(exc)}, ensure_ascii=False))
             else:
                 self._send(202, json.dumps(pod_setup.status(), ensure_ascii=False))
+            return
+        if parsed.path == "/api/system-settings":
+            if self._admin_gerekli() is None:
+                return
+            req = self._json_oku()
+            if "__hata__" in req:
+                self._send(400, json.dumps({"hata": req["__hata__"]}))
+                return
+            try:
+                action = req.get("islem", "kaydet")
+                if action == "baglanti":
+                    result = pod_setup.update_model_link(
+                        req.get("grup"), req.get("dosya"), req.get("baglanti"),
+                        restore=False)
+                elif action == "varsayilan":
+                    result = pod_setup.update_model_link(
+                        req.get("grup"), req.get("dosya"), "", restore=True)
+                elif action == "kaydet":
+                    result = pod_setup.update_system_settings(req)
+                elif action == "lora_ekle":
+                    result = pod_setup.add_lora(req)
+                elif action == "lora_ayar":
+                    result = pod_setup.configure_lora(req.get("id"), req)
+                elif action == "lora_sil":
+                    result = pod_setup.delete_lora(req.get("id"))
+                else:
+                    raise ValueError("Bilinmeyen sistem ayarı işlemi.")
+            except ValueError as exc:
+                self._send(400, json.dumps({"hata": str(exc)}, ensure_ascii=False))
+                return
+            except RuntimeError as exc:
+                self._send(409, json.dumps({"hata": str(exc)}, ensure_ascii=False))
+                return
+            except OSError:
+                self._send(500, '{"hata":"Sistem ayarı kaydedilemedi."}')
+                return
+            self._send(200, json.dumps(result, ensure_ascii=False))
             return
         self._send(404, '{"hata":"bulunamadi"}')
 
@@ -3527,6 +3780,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 if req.get("islem") == "iptal":
                     pod_setup.cancel(req.get("grup"))
+                elif req.get("islem") == "duraklat":
+                    pod_setup.pause(req.get("grup"))
+                elif req.get("islem") == "devam":
+                    pod_setup.start(req.get("grup"))
                 elif req.get("islem") == "kaldir":
                     with _isler_kilit:
                         if _kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu:

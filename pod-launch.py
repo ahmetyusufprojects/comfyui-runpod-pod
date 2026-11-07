@@ -134,7 +134,7 @@ def main():
         print(f"Deneniyor: {gpu_id}, {rate:.2f} USD/saat", flush=True)
         body = {
             "name": NAME, "templateId": TEMPLATE_ID, "image": image,
-            "cloud": "SECURE", "disk": 120,
+            "cloud": "SECURE", "disk": 200,
             "gpu": {"id": gpu_id, "count": 1, "minCudaVersion": "12.8"},
             "ports": ["8189/http", "8192/http"], "env": env,
             "mounts": {"global": [{"volumeId": FLEX, "path": "/workspace"}]},

@@ -39,6 +39,90 @@ MOODY_ANIMA_DIFFUSION_FILE = _model_file(
 ANIMA_TEXT_ENCODER_FILE = _model_file(
     "anima", "text_encoder_file", "qwen_3_06b_base.safetensors")
 ANIMA_VAE_FILE = _model_file("anima", "vae_file", "qwen_image_vae.safetensors")
+FLUX3_DIFFUSION_FILE = _model_file(
+    "flux3", "diffusion_file", "flux3-image-klein-int8-convrot.safetensors")
+FLUX3_TEXT_ENCODER_FILE = _model_file(
+    "flux3", "text_encoder_file", "qwen3vl_4b_int8_convrot.safetensors")
+FLUX3_VAE_FILE = _model_file("flux3", "vae_file", "flux2-vae.safetensors")
+KREA2_DIFFUSION_FILE = _model_file(
+    "krea2", "diffusion_file", "Moody-Krea-Mix-v7SE_00001__clean_fp8.safetensors")
+KREA2_TEXT_ENCODER_FILE = _model_file(
+    "krea2", "text_encoder_file", "qwen3vl_4b_fp8_scaled.safetensors")
+KREA2_VAE_FILE = _model_file("krea2", "vae_file", "qwen_image_vae.safetensors")
+ILLUSTRIOUS_CHECKPOINT_FILE = _model_file(
+    "illustrious", "checkpoint_file",
+    "WAI-NSFW-illustrious-SDXL-V14.0-V-Prediction.safetensors")
+
+
+def attach_loras(prompt, loras):
+    """Insert compatible ComfyUI LoRA loaders into a stock model graph."""
+    if not isinstance(loras, list) or not loras:
+        return prompt
+    model_node = None
+    for node_id, node in prompt.items():
+        inputs = node.get("inputs") or {}
+        kind = node.get("class_type", "")
+        if "model" not in inputs:
+            continue
+        if kind.startswith("ModelSampling"):
+            model_node = (node_id, inputs)
+            break
+    if model_node is None:
+        for preferred in ("CFGGuider", "KSampler", "SamplerCustomAdvanced"):
+            model_node = next(((node_id, node.get("inputs") or {})
+                               for node_id, node in prompt.items()
+                               if node.get("class_type") == preferred
+                               and "model" in (node.get("inputs") or {})), None)
+            if model_node:
+                break
+    clip_ref = None
+    for node in prompt.values():
+        inputs = node.get("inputs") or {}
+        if "clip" in inputs and isinstance(inputs["clip"], list):
+            clip_ref = list(inputs["clip"])
+            break
+    if not model_node or clip_ref is None:
+        raise ValueError("Bu görsel iş akışı LoRA bağlantısını desteklemiyor.")
+    try:
+        model_ref = list(model_node[1]["model"])
+    except (KeyError, TypeError):
+        raise ValueError("Görsel model bağlantısı LoRA için uygun değil.")
+    used_ids = {int(key) for key in prompt if str(key).isdigit()}
+    next_id = max(used_ids or {0}) + 1
+    original_nodes = list(prompt.items())
+    for index, entry in enumerate(loras):
+        if not isinstance(entry, dict):
+            continue
+        filename = entry.get("name")
+        if not isinstance(filename, str) or not filename or "/" in filename or "\\" in filename:
+            continue
+        try:
+            weight = max(0.0, min(2.0, float(entry.get("weight", 1.0))))
+        except (TypeError, ValueError, OverflowError):
+            weight = 1.0
+        node_id = str(next_id + index)
+        prompt[node_id] = {"class_type": "LoraLoader", "inputs": {
+            "model": model_ref, "clip": clip_ref,
+            "lora_name": filename, "strength_model": weight,
+            "strength_clip": weight}}
+        model_ref = [node_id, 0]
+        clip_ref = [node_id, 1]
+    if not prompt:
+        return prompt
+    model_node[1]["model"] = model_ref
+    for _, node in original_nodes:
+        inputs = node.get("inputs") or {}
+        if "clip" in inputs and inputs["clip"] == list(original_nodes_clip_ref(original_nodes)):
+            inputs["clip"] = clip_ref
+    return prompt
+
+
+def original_nodes_clip_ref(nodes):
+    for _, node in nodes:
+        clip = (node.get("inputs") or {}).get("clip")
+        if isinstance(clip, list):
+            return clip
+    return []
 
 
 def build_prompt(p, image_name=None, image_name2=None):
@@ -94,7 +178,7 @@ def build_prompt(p, image_name=None, image_name2=None):
         nid += 1
     pr["14"]["inputs"]["positive"] = pos_src
     pr["14"]["inputs"]["negative"] = neg_src
-    return pr, seed
+    return attach_loras(pr, p.get("loras")), seed
 
 
 def build_z_image_prompt(p, image_name=None, image_name2=None):
@@ -134,7 +218,7 @@ def build_z_image_prompt(p, image_name=None, image_name2=None):
     else:
         pr["4"] = {"class_type": "CLIPTextEncode",
                    "inputs": {"text": p["prompt"], "clip": ["2", 0]}}
-    return pr, seed
+    return attach_loras(pr, p.get("loras")), seed
 
 
 def build_anima_prompt(p, diffusion_file=ANIMA_DIFFUSION_FILE):
@@ -164,4 +248,175 @@ def build_anima_prompt(p, diffusion_file=ANIMA_DIFFUSION_FILE):
         "9": {"class_type": "SaveImage",
               "inputs": {"images": ["8", 0], "filename_prefix": "webui-anima"}},
     }
-    return pr, seed
+    return attach_loras(pr, p.get("loras")), seed
+
+
+def build_flux3_prompt(p, image_name=None, image_name2=None):
+    """FLUX 3 Klein distilled workflow with optional references and layout rows."""
+    seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
+    prompt_text = str(p["prompt"] or "")
+    pr = {
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": FLUX3_DIFFUSION_FILE,
+                         "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": FLUX3_TEXT_ENCODER_FILE,
+                         "type": "flux3", "device": "default"}},
+        "3": {"class_type": "VAELoader",
+              "inputs": {"vae_name": FLUX3_VAE_FILE}},
+        "4": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": prompt_text, "clip": ["2", 0]}},
+        "5": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": "", "clip": ["2", 0]}},
+        "6": {"class_type": "EmptyFlux2LatentImage",
+              "inputs": {"width": p["width"], "height": p["height"],
+                         "batch_size": 1}},
+        "7": {"class_type": "KSampler",
+              "inputs": {"model": ["1", 0], "positive": ["4", 0],
+                         "negative": ["5", 0], "latent_image": ["6", 0],
+                         "seed": seed, "steps": p.get("steps", 16),
+                         "cfg": p.get("cfg", 1.0),
+                         "sampler_name": p.get("sampler", "euler"),
+                         "scheduler": p.get("scheduler", "simple"),
+                         "denoise": 1.0}},
+        "8": {"class_type": "VAEDecode",
+              "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
+        "9": {"class_type": "SaveImage",
+              "inputs": {"images": ["8", 0], "filename_prefix": "webui-flux3"}},
+    }
+    if p.get("flux3_bbox_mode"):
+        caption, elements = _flux3_layout_elements(prompt_text, p["width"], p["height"])
+        if elements:
+            pr["4"]["inputs"]["text"] = ["15", 0]
+            pr["14"] = {"class_type": "CreateBoundingBoxes", "inputs": {
+                "width": p["width"], "height": p["height"],
+                "bboxes": json.dumps(elements, ensure_ascii=False),
+                "editor_state": [], "last_incoming": []}}
+            pr["15"] = {"class_type": "Flux3LayoutPrompt", "inputs": {
+                "prompt": caption, "element": ["14", 2]}}
+    refs = [ref for ref in (image_name, image_name2) if ref]
+    if refs:
+        ref_nodes = []
+        for node_id, ref in enumerate(refs, start=20):
+            pr[str(node_id)] = {"class_type": "LoadImage",
+                                "inputs": {"image": ref}}
+            ref_nodes.append(node_id)
+        ref_loader_id = str(max(int(value) for value in pr) + 1)
+        ref_inputs = {"positive": ["4", 0], "negative": ["5", 0],
+                      "vae": ["3", 0], "resolution": "resize",
+                      "resolution.megapixels": 1}
+        for index, node_id in enumerate(ref_nodes):
+            ref_inputs["images.image%d" % index] = [str(node_id), 0]
+        pr[ref_loader_id] = {"class_type": "ReferenceMultiLatent", "inputs": ref_inputs}
+        pr["7"]["inputs"].update({"positive": [ref_loader_id, 0],
+                                  "negative": [ref_loader_id, 1],
+                                  "latent_image": [ref_loader_id, 2]})
+    return attach_loras(pr, p.get("loras")), seed
+
+
+def _flux3_layout_elements(prompt, width, height):
+    """Convert the caption + BFL element-table output into stock ComfyUI nodes."""
+    text = str(prompt or "").rstrip()
+    decoder = json.JSONDecoder()
+    for start in (index for index, char in enumerate(text) if char == "["):
+        try:
+            rows, end = decoder.raw_decode(text[start:])
+        except (ValueError, TypeError):
+            continue
+        if text[start + end:].strip() or not isinstance(rows, list):
+            continue
+        caption = text[:start].rstrip()
+        elements, references = [], []
+        for row in rows[:100]:
+            if not isinstance(row, dict):
+                continue
+            box = row.get("tgt_bbox") if "tgt_bbox" in row else row.get("bbox")
+            if not isinstance(box, (list, tuple)) or len(box) != 4:
+                continue
+            try:
+                bounds = [max(0, min(1000, round(float(value)))) for value in box]
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+                continue
+            desc = str(row.get("desc") or "").strip()[:1600]
+            if not desc:
+                continue
+            old_id = str(row.get("id") or "").strip()
+            new_id = "obj_%d" % (len(elements) + 1)
+            if old_id:
+                references.append((old_id, new_id))
+            elements.append({"type": "obj", "bbox": bounds, "desc": desc})
+        if not elements:
+            return text, []
+        for old_id, new_id in references:
+            caption = caption.replace("<" + old_id + ">", "<" + new_id + ">")
+        return caption, elements
+    return text, []
+
+
+def build_krea2_prompt(p):
+    """ComfyUI stock-node workflow matching the supplied Krea 2 example."""
+    seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
+    pr = {
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": KREA2_DIFFUSION_FILE,
+                         "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": KREA2_TEXT_ENCODER_FILE,
+                         "type": "krea2", "device": "default"}},
+        "3": {"class_type": "VAELoader",
+              "inputs": {"vae_name": KREA2_VAE_FILE}},
+        "4": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": p["prompt"], "clip": ["2", 0]}},
+        "5": {"class_type": "ConditioningZeroOut",
+              "inputs": {"conditioning": ["4", 0]}},
+        "6": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": p["width"], "height": p["height"],
+                         "batch_size": 1}},
+        "7": {"class_type": "ModelSamplingAuraFlow",
+              "inputs": {"model": ["1", 0], "shift": 3.0}},
+        "8": {"class_type": "KSampler",
+              "inputs": {"model": ["7", 0], "seed": seed,
+                         "steps": p.get("steps", 8), "cfg": p.get("cfg", 1.0),
+                         "sampler_name": p.get("sampler", "euler_ancestral"),
+                         "scheduler": p.get("scheduler", "beta"),
+                         "positive": ["4", 0], "negative": ["5", 0],
+                         "latent_image": ["6", 0], "denoise": 1.0}},
+        "9": {"class_type": "VAEDecode",
+              "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "SaveImage",
+               "inputs": {"images": ["9", 0], "filename_prefix": "webui-krea2"}},
+    }
+    return attach_loras(pr, p.get("loras")), seed
+
+
+def build_illustrious_prompt(p):
+    """SDXL checkpoint workflow with the checkpoint's v-prediction sampling."""
+    seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
+    pr = {
+        "1": {"class_type": "CheckpointLoaderSimple",
+              "inputs": {"ckpt_name": ILLUSTRIOUS_CHECKPOINT_FILE}},
+        "2": {"class_type": "ModelSamplingDiscrete",
+              "inputs": {"model": ["1", 0], "sampling": "v_prediction",
+                         "zsnr": True}},
+        "3": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": p["prompt"], "clip": ["1", 1]}},
+        "4": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": p.get("negative", ""), "clip": ["1", 1]}},
+        "5": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": p["width"], "height": p["height"],
+                         "batch_size": 1}},
+        "6": {"class_type": "KSampler",
+              "inputs": {"model": ["2", 0], "seed": seed,
+                         "steps": p.get("steps", 28), "cfg": p.get("cfg", 5.0),
+                         "sampler_name": p.get("sampler", "euler"),
+                         "scheduler": p.get("scheduler", "normal"),
+                         "positive": ["3", 0], "negative": ["4", 0],
+                         "latent_image": ["5", 0], "denoise": 1.0}},
+        "7": {"class_type": "VAEDecode",
+              "inputs": {"samples": ["6", 0], "vae": ["1", 2]}},
+        "8": {"class_type": "SaveImage",
+              "inputs": {"images": ["7", 0], "filename_prefix": "webui-illustrious"}},
+    }
+    return attach_loras(pr, p.get("loras")), seed

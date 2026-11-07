@@ -1,6 +1,5 @@
 "use strict";
-/* İş tipi seçim noktası (E): video arayüzü YOK, ama şema hazır.
-   Yeni tip eklenince sadece bu fonksiyon + sunucudaki is_tipini_belirle büyür. */
+/* Video ve görsel üretim aynı sıradaki GPU iş kuyruğunu kullanır. */
 const VIDEO_HAZIRLIK = {suresn: 0, fps: 0};
 let RUNPOD_WEBUI = false;
 let fotoB64 = null, fotoB64_2 = null, fotoMime = null, fotoMime2 = null, takipIs = null;
@@ -20,7 +19,17 @@ let promptDestekYaraticilik = 0.7, promptDestekUzunluk = 'orta';
 let uretimVarsayilan = {steps: 8, seed: -1, max_side: 1536};
 let uretimKesintisizAktif = false, uretimKesintisizIstek = null;
 let llmVarsayilanlar = null;
+let runpodLoraCurrentModel = null, runpodLoraSaved = null;
+const runpodLoraSelections = new Map();
+let runpodLoraRequestId = 0;
 let aktifMenu = 'uretim';
+function runpodKurulumAdres(){
+  const url=new URL(location.href);
+  if(url.hostname.includes('-8189.proxy.runpod.net'))
+    url.hostname=url.hostname.replace('-8189.proxy.runpod.net','-8192.proxy.runpod.net');
+  else url.port='8192';
+  url.pathname='/';url.search='';url.hash='';return url.href;
+}
 function videoMu(){
   try{ return $('wf').value === 'video'; }catch(e){ return false; }
 }
@@ -39,7 +48,57 @@ function animaModelSecimiUygula(model){
 }
 function animaSecili(){ return !videoMu() && !refSayisi() &&
   ($('animaModel').checked || $('moodyAnimaModel').checked); }
+function runpodLoraOku(){
+  const root=$('runpodLoraOptions');
+  if(!root) return [];
+  return Array.from(root.querySelectorAll('input[data-lora-id]:checked')).map(input=>{
+    const weight=root.querySelector(`[data-lora-weight="${CSS.escape(input.dataset.loraId)}"]`);
+    return {id:input.dataset.loraId,weight:weight?Number(weight.value):1};
+  });
+}
+async function runpodLoraYukle(){
+  if(!RUNPOD_WEBUI) return;
+  const model=otomatikModel();
+  if(runpodLoraCurrentModel) runpodLoraSelections.set(runpodLoraCurrentModel,runpodLoraOku());
+  runpodLoraCurrentModel=model;
+  const requestId=++runpodLoraRequestId;
+  const picker=$('runpodLoraPicker'), root=$('runpodLoraOptions');
+  if(!picker||!root) return;
+  picker.hidden=videoMu();
+  root.replaceChildren();
+  try{
+    const response=await _fetch('/api/loras?model='+encodeURIComponent(model));
+    const data=await response.json();
+    if(requestId!==runpodLoraRequestId||model!==otomatikModel()) return;
+    if(!response.ok) throw new Error(data.hata||'HTTP '+response.status);
+    const loras=data.loras||[];
+    const chosen=runpodLoraSelections.has(model)?runpodLoraSelections.get(model):runpodLoraSaved;
+    for(const lora of loras){
+      const row=document.createElement('label');row.className='runpod-lora-option';
+      const check=document.createElement('input');check.type='checkbox';check.dataset.loraId=lora.id;
+      const isChosen=Array.isArray(chosen)?chosen.find(item=>item.id===lora.id):null;
+      check.checked=isChosen?true:(!Array.isArray(chosen)&&!!lora.default_selected);
+      const title=document.createElement('span');title.className='runpod-lora-name';title.textContent=lora.name+(lora.hazir?'':' · indirilecek');
+      const weight=document.createElement('input');weight.type='number';weight.min='0';weight.max='2';weight.step='0.05';weight.value=Number(isChosen?.weight??lora.weight??1).toFixed(2);weight.dataset.loraWeight=lora.id;weight.setAttribute('aria-label',lora.name+' ağırlığı');
+      check.addEventListener('change',()=>{runpodLoraSelections.set(model,runpodLoraOku());formKaydet();});
+      weight.addEventListener('change',()=>{runpodLoraSelections.set(model,runpodLoraOku());formKaydet();});
+      row.append(check,title,weight);root.append(row);
+    }
+    if(!loras.length){const note=document.createElement('span');note.className='kucuk';note.textContent='Bu model için LoRA tanımlanmamış.';root.append(note);}
+  }catch(error){if(requestId!==runpodLoraRequestId)return;const note=document.createElement('span');note.className='kucuk';note.textContent='LoRA listesi alınamadı: '+error.message;root.append(note);}
+}
+function runpodModelSecili(){
+  const secim = $('runpodImageModel');
+  if(!RUNPOD_WEBUI || !secim || secim.value === 'auto') return null;
+  return secim.value;
+}
 function otomatikModel(){
+  const runpodModel = runpodModelSecili();
+  if(runpodModel){
+    if(refSayisi() && (runpodModel === 'krea2' || runpodModel === 'illustrious'))
+      return 'flux2';
+    return runpodModel;
+  }
   if(refSayisi()) return 'flux2';
   if(animaSecili()) return $('moodyAnimaModel').checked ? 'moody_anima' : 'anima';
   return 'z_image';
@@ -53,6 +112,9 @@ function uretimModGuncelle(){
     const varsayilanlar = {
       flux2: {steps: 4, sampler: 'euler'},
       z_image: {steps: 8, sampler: 'res_multistep'},
+      flux3: {steps: 16, sampler: 'euler'},
+      krea2: {steps: 8, sampler: 'euler_ancestral'},
+      illustrious: {steps: 28, sampler: 'euler'},
       anima: {steps: 8, sampler: 'euler'},
       moody_anima: {steps: 4, sampler: 'euler'}
     };
@@ -61,12 +123,32 @@ function uretimModGuncelle(){
     if($('sampler').value === eski.sampler) $('sampler').value = yeni.sampler;
   }
   otomatikSonModel = model;
-  $('animaModelSecim').hidden = !!refSayisi() || videoMu();
+  if(modelDegisti) runpodLoraYukle();
+  const runpodModelWrap = $('runpodModelWrap');
+  if(runpodModelWrap) runpodModelWrap.hidden = !RUNPOD_WEBUI;
+  const bboxWrap = $('flux3BboxModeWrap');
+  if(bboxWrap) bboxWrap.hidden = !RUNPOD_WEBUI || model !== 'flux3';
+  if($('runpodLoraPicker')) $('runpodLoraPicker').hidden = !RUNPOD_WEBUI || videoMu();
+  if(RUNPOD_WEBUI && $('runpodModelInfo')){
+    const names = {z_image:'Moody Pro v13.2',flux2:'Flux 2 Klein',flux3:'Flux 3 Klein · 16 adım',
+      krea2:'Moody Krea Mix v7SE',illustrious:'Illustrious XL'};
+    $('runpodModelInfo').textContent = names[model] + (refSayisi() && model === 'flux2'
+      ? ' · referans düzenleme' : ' · model hazır değilse Kurulum sayfasından ekle.');
+  }
+  if(RUNPOD_WEBUI && $('runpodImageModel')){
+    for(const option of $('runpodImageModel').options)
+      option.disabled = refSayisi() > 0 && (option.value === 'krea2' || option.value === 'illustrious');
+  }
+  $('animaModelSecim').hidden = RUNPOD_WEBUI || !!refSayisi() || videoMu();
   const bilgi = $('uretimModBilgi');
   if(bilgi){
     if(videoMu()) bilgi.textContent = RUNPOD_WEBUI
       ? 'MiniMax H3 hızlı taslak: 4 adım, küçük çözünürlük ve kısa klip. Ayrıntılı 8 adım profili ayrıca kurulabilir.'
       : 'Video iş akışı: MiniMax H3; model seçimi bu akışta etkisizdir.';
+    else if(RUNPOD_WEBUI && runpodModel) bilgi.textContent =
+      (runpodModel === 'flux2' || runpodModel === 'flux3' ? 'Referanslı düzenleme: ' : 'Seçili model: ') +
+      ({z_image:'Z-Image · Moody Pro',flux2:'Flux 2 Klein',flux3:'Flux 3 Klein',krea2:'Krea 2',illustrious:'Illustrious'}[model] || model) +
+      ' · ' + $('steps').value + ' adım';
     else if(refSayisi() >= 2) bilgi.textContent = 'Otomatik: Flux2 Klein · çift referans düzenleme · ' + $('steps').value + ' adım';
     else if(refSayisi() === 1) bilgi.textContent = 'Otomatik: Flux2 Klein · düzenleme (1 referans) · ' + $('steps').value + ' adım';
     else if(model === 'anima') bilgi.textContent = 'Anima Turbo v1.1 · saf görsel üretimi · ' + $('steps').value + ' adım';
@@ -175,6 +257,7 @@ document.querySelectorAll('#menuNav button').forEach(b => b.onclick = () => {
 function durumuSifirla(){
   /* Hesap degisiminde onceki hesabin prompt/sonuc/kutuphane/gecmis gorunumu kalmasin. */
   oturumNesli++;
+  runpodLoraCurrentModel = null; runpodLoraSaved = null; runpodLoraSelections.clear();
   try{ if(progTimer){ clearInterval(progTimer); progTimer = null; } }catch(e){}
   try{ if(kuyrukTimer){ clearInterval(kuyrukTimer); kuyrukTimer = null; } }catch(e){}
   try{ if(formKayitSayac){ clearTimeout(formKayitSayac); formKayitSayac = null; } }catch(e){}
@@ -366,6 +449,10 @@ async function boot(){
       const k = await kurulumYaniti.json();
       if(!k){ girisEkraniAc(); bootCalisiyor = false; return; }
       RUNPOD_WEBUI = k.runpod === true;
+      if($('runpodInstallerLink')){
+        $('runpodInstallerLink').hidden=!RUNPOD_WEBUI;
+        if(RUNPOD_WEBUI) $('runpodInstallerLink').href=runpodKurulumAdres();
+      }
       $('videoProfileBlok').hidden = false;
       if(RUNPOD_WEBUI){
         $('vsure').value = '0.5'; $('vfps').value = '8'; $('vmax').value = '320';
@@ -680,11 +767,22 @@ if(wfEl) wfEl.onchange = e => {
   $('uretimVideoMod').classList.toggle('aktif', video);
   $('wfAciklama').textContent = video ?
     'Referans fotoğraftan sessiz video üretir (en az 1 referans). Ölçü en uzun kenara göre alınır.' :
-    'Model otomatik seçilir: referans varsa Flux2 Klein düzenleme; yoksa Z-Image Turbo veya üretim ayarlarından Anima modeli.';
+    (RUNPOD_WEBUI ? 'Modeli aşağıdan seçebilirsin. Referanslı düzenlemede Flux 2 veya Flux 3 kullan.' :
+     'Model otomatik seçilir: referans varsa Flux2 Klein düzenleme; yoksa Z-Image Turbo veya Anima modeli.');
   uretimIcGorunum();
   uretimModGuncelle();
   formKaydet();
 };
+if($('runpodImageModel')) $('runpodImageModel').addEventListener('change', () => {
+  const defaults = {z_image:{steps:8,sampler:'res_multistep'},flux2:{steps:4,sampler:'euler'},
+    flux3:{steps:16,sampler:'euler'},krea2:{steps:8,sampler:'euler_ancestral'},
+    illustrious:{steps:28,sampler:'euler'}};
+  const previous = defaults[otomatikSonModel], next = defaults[otomatikModel()];
+  if(previous && next && +$('steps').value === previous.steps) $('steps').value = next.steps;
+  if(previous && next && $('sampler').value === previous.sampler) $('sampler').value = next.sampler;
+  uretimModGuncelle(); formKaydet();
+});
+if($('flux3BboxMode')) $('flux3BboxMode').addEventListener('change', formKaydet);
 function fotoTemizle(slot){
   if(slot === 1){
     fotoB64 = null; fotoMime = null; $('foto').value = '';
@@ -851,9 +949,11 @@ function formVerisi(istekSecenekleri){
     fps = +($('vfps') ? $('vfps').value : (RUNPOD_WEBUI ? 8 : 24));
     VIDEO_HAZIRLIK.suresn = suresn; VIDEO_HAZIRLIK.fps = fps;
   }
-  return Object.assign({
+  const body=Object.assign({
     prompt: $('prompt').value, negative: $('negatif').value,
     model: otomatikModel(),
+    image_model: RUNPOD_WEBUI && $('runpodImageModel') ? $('runpodImageModel').value : 'auto',
+    flux3_bbox_mode: RUNPOD_WEBUI && $('flux3BboxMode') ? $('flux3BboxMode').checked : false,
     width: +$('w').value, height: +$('h').value,
     max_side: +$('maxside').value, max_olcek: $('maxolcek').checked,
     video_max_side: vm ? +($('vmax') ? $('vmax').value : (RUNPOD_WEBUI ? 320 : 1344)) : 0,
@@ -866,16 +966,19 @@ function formVerisi(istekSecenekleri){
     prompt_destek: $('uretimPromptDestek').checked,
     prompt_ceviri: !vm && $('uretimPromptCeviri').checked
   }, istekSecenekleri || {});
+  if(RUNPOD_WEBUI && runpodLoraCurrentModel===otomatikModel()) body.loras=runpodLoraOku();
+  return body;
 }
 /* Uretilen sonuc ile gecmisten acilan medya TEK kapsayiciya (#galeri) ve
    TEK sinifla (.uretim-goruntu) girer; iki yon de ayni contain kuralini kullanir. */
-function galeriMedyasiEkle(tur, src, alt){
+function galeriMedyasiEkle(tur, src, alt, poster){
   const el = document.createElement(tur === 'video' ? 'video' : 'img');
   el.className = 'uretim-goruntu';
   el.src = src;
   if(tur === 'video'){
     el.controls = true;
     el.preload = 'metadata';
+    if(poster) el.poster = poster;
   }else{
     el.alt = alt || 'Üretilen görsel';
     el.draggable = false;
@@ -902,32 +1005,15 @@ function sonucuGoster(s){
   /* Onceki gorselin ayrinti bilgisi kalmasin: yeni kayit acilana kadar bos. */
   $('uretimSeciliBilgi').hidden = true;
   $('uretimSeciliBilgi').replaceChildren();
-  if(s.video_url) galeriMedyasiEkle('video', s.video_url);
+  if(s.video_url) galeriMedyasiEkle('video', s.video_url, '', s.video_poster_url);
   (s.gorseller || []).forEach(u => galeriMedyasiEkle('gorsel', u, 'Yeni üretilen görsel'));
   kutuphaneYukle(); gecSayfa = 1; gecFavoriler = false;
   try{ arsivYukle(true); }catch(e){}
   $('gecFavoriBtn').setAttribute('aria-pressed', 'false'); $('gecFavoriBtn').textContent = '☆'; $('gecFavoriBtn').title = 'Favoriler';
   $('gecArama').value = '';
-  gecmisYukle(true).then(j => {
-    if(!j || !gecListe.length) return;
-    /* Yeni uretilen kaydi bul ve gorsel gosterme sistemiyle ac (detay paneli
-       bu kaydin bilgileriyle dolar; onceki gorselin ayrintisi kalmaz).
-       Albüm modunda bile gecmisAcIdx kullanilir: gecmisAlbumAc sahneyi
-       gizleyip yalniz sidebar listesini actigi icin gorsel kayboluyordu. */
-    let hedef = -1;
-    if(s.gecmis){
-      /* s.gecmis uzantisiz taban adi; k.kayit ise .json uzantili dosya adi. */
-      hedef = gecListe.findIndex(k => k.kayit === s.gecmis + '.json' ||
-        k.kayit === s.gecmis);
-    }
-    if(hedef < 0 && s.gecmis_dosyalar && s.gecmis_dosyalar.length){
-      hedef = gecListe.findIndex(k => s.gecmis_dosyalar.indexOf(k.dosya) >= 0);
-    }
-    if(hedef < 0) hedef = 0;
-    const k = gecListe[hedef];
-    if(!k) return;
-    gecmisAcIdx(hedef);
-  });
+  /* Sonuç zaten üretim yanıtında bulunduğu için burada medya URL'sini yeniden
+     indirmeyiz. Geçmiş listesi yenilenir, ekrandaki hazır sonuç korunur. */
+  gecmisYukle(true);
   kuyrukYenile();
 }
 async function uret(istekSecenekleri, kesintisizDevam = false){
@@ -1811,9 +1897,14 @@ async function gecmisYukle(temizle){
       btn.title = (k.album ? 'Albüm · ' : (k.tur === 'video' ? 'Video · ' : '')) +
         (k.prompt || k.kayit || 'Üretim');
       if(k.tur === 'video'){
-        const v = document.createElement('video');
-        v.src = k.url; v.preload = 'metadata'; v.muted = true; v.setAttribute('aria-label', 'Video üretimi');
-        btn.appendChild(v);
+        if(k.video_poster_url){
+          const im=document.createElement('img');im.dataset.src=k.video_poster_url;
+          im.loading='lazy';im.alt='Video kapağı';btn.appendChild(im);
+        }else{
+          const v = document.createElement('video');
+          v.src = k.url; v.preload = 'metadata'; v.muted = true; v.setAttribute('aria-label', 'Video üretimi');
+          btn.appendChild(v);
+        }
       }else{
         const im = document.createElement('img');
         im.dataset.src = k.url;
@@ -1837,18 +1928,6 @@ async function gecmisYukle(temizle){
         else if(k.album_member) gecmisAlbumAc(idx, k.dosya);
         else gecmisAcIdx(idx);
       };
-      if(k.album || k.tur === 'video'){
-        btn.setAttribute('aria-busy', 'true');
-        const poster = btn.querySelector('img,video');
-        if(poster){
-          const yuklendi = () => btn.setAttribute('aria-busy', 'false');
-          poster.addEventListener('load', yuklendi, {once: true});
-          poster.addEventListener('error', yuklendi, {once: true});
-          poster.addEventListener('loadeddata', yuklendi, {once: true});
-          if(poster.complete || poster.readyState >= 2) yuklendi();
-          else btn.setAttribute('aria-busy', 'true');
-        }
-      }
       if(k.album || k.tur === 'video'){
         btn.setAttribute('aria-busy', 'true');
         const poster = btn.querySelector('img,video');
@@ -1922,7 +2001,7 @@ async function gecmisAcIdx(i, albumIndex){
   const mount = $('galeri');
   mount.replaceChildren();
   const media = galeriMedyasiEkle(k.tur === 'video' ? 'video' : 'gorsel', k.url,
-                                  meta.prompt || 'Üretilen görsel');
+                                  meta.prompt || 'Üretilen görsel', k.video_poster_url);
   media.style.transform = 'scale(1)';
   uretimOffsetX = 0; uretimOffsetY = 0; uretimZoom = 1;
   $('uretimGoruntuBos').hidden = true;
@@ -2163,11 +2242,16 @@ async function gecmisAlbumAc(i, focusFile, pageOverride){
       btn.className = 'gec-kart-ac';
       btn.title = foto.prompt || 'Albüm fotoğrafı';
       if(foto.tur === 'video'){
-        const video = document.createElement('video');
-        video.src = foto.url;
-        video.preload = 'metadata';
-        video.muted = true;
-        btn.appendChild(video);
+        if(foto.video_poster_url){
+          const image=document.createElement('img');image.dataset.src=foto.video_poster_url;
+          image.loading='lazy';image.alt='Video kapağı';btn.appendChild(image);
+        }else{
+          const video = document.createElement('video');
+          video.src = foto.url;
+          video.preload = 'metadata';
+          video.muted = true;
+          btn.appendChild(video);
+        }
       }else{
         const image = document.createElement('img');
         image.dataset.src = foto.url;
@@ -2252,7 +2336,11 @@ async function uretimKaydir(delta){
     }
     const albumSayfaAdet = Math.max(1, Math.ceil(gecAlbumToplam / 12));
     const sayfa = gecAlbumSayfa + (delta < 0 ? -1 : 1);
-    if(sayfa < 1 || sayfa > albumSayfaAdet) return;
+    if(sayfa < 1 || sayfa > albumSayfaAdet){
+      gecAktifAlbum = null; gecAlbumKayitIdx = -1;
+      await uretimKaydir(delta);
+      return;
+    }
     if(await gecmisAlbumAc(gecIdx, null, sayfa)){
       const hedef = delta < 0 ? gecAlbumBaslangic + gecAktifAlbum.length - 1 : gecAlbumBaslangic;
       await gecmisAcIdx(gecIdx, hedef);
@@ -2262,7 +2350,9 @@ async function uretimKaydir(delta){
   const ix = gecIdx + delta;
   gecAktifAlbum = null; gecAlbumKayitIdx = -1;
   if(ix >= 0 && ix < gecListe.length){
-    if(gecListe[ix].album) await gecmisAlbumAc(ix);
+    if(gecListe[ix].album){
+      if(await gecmisAlbumAc(ix)) await gecmisAcIdx(ix, gecAlbumBaslangic);
+    }
     else await gecmisAcIdx(ix);
     return;
   }
@@ -2273,7 +2363,9 @@ async function uretimKaydir(delta){
   const veri = await gecmisYukle(true);
   if(veri && gecListe.length){
     const yeniIdx = delta < 0 ? gecListe.length - 1 : 0;
-    if(gecListe[yeniIdx].album) await gecmisAlbumAc(yeniIdx);
+    if(gecListe[yeniIdx].album){
+      if(await gecmisAlbumAc(yeniIdx)) await gecmisAcIdx(yeniIdx, gecAlbumBaslangic);
+    }
     else await gecmisAcIdx(yeniIdx);
   }
 }
@@ -2706,10 +2798,19 @@ $('continuousGeneration').addEventListener('change', () => {
 $('cinematicMode').addEventListener('change', sinemaRenkTemasiGuncelle);
 document.querySelectorAll('#menuNav button').forEach(btn =>
   btn.addEventListener('click', () => uiAyarKaydet('active_menu', aktifMenu)));
+document.querySelectorAll('[data-ayar-hedef]').forEach(button=>button.addEventListener('click',()=>{
+  const target=$(button.dataset.ayarHedef);if(target) target.scrollIntoView({behavior:'smooth',block:'start'});
+}));
 function formUygulaKayitli(f){
   if(!f || typeof f !== 'object') return;
   const koy = (id, v) => { if(v !== undefined && v !== null && $(id)) $(id).value = v; };
   koy('prompt', f.prompt); koy('negatif', f.negatif);
+  if($('runpodImageModel') && typeof f.image_model === 'string' &&
+      Array.from($('runpodImageModel').options).some(option => option.value === f.image_model))
+    $('runpodImageModel').value = f.image_model;
+  if($('flux3BboxMode') && typeof f.flux3_bbox_mode === 'boolean')
+    $('flux3BboxMode').checked = f.flux3_bbox_mode;
+  if(Array.isArray(f.loras)) runpodLoraSaved=f.loras.filter(item=>item&&typeof item.id==='string');
   koy('w', f.width); koy('h', f.height); koy('maxside', f.max_side);
   koy('cfg', f.cfg); koy('sampler', f.sampler);
   if(f.max_olcek !== undefined && $('maxolcek')) $('maxolcek').checked = !!f.max_olcek;
@@ -2739,13 +2840,15 @@ function formUygulaKayitli(f){
 }
 function formPaketle(){
   const v = formVerisi();
-  return {prompt: v.prompt, negatif: v.negative, model: v.model, width: v.width, height: v.height,
+  return {prompt: v.prompt, negatif: v.negative, model: v.model,
+    image_model: v.image_model, flux3_bbox_mode: v.flux3_bbox_mode,
+    width: v.width, height: v.height,
     anima_model: $('animaModel').checked,
     moody_anima_model: $('moodyAnimaModel').checked,
     max_side: v.max_side, max_olcek: v.max_olcek, video_max_side: v.video_max_side,
     steps: v.steps, cfg: v.cfg, sampler: v.sampler, seed: v.seed,
     workflow: v.workflow, suresn: v.suresn, fps: v.fps,
-    video_profile: v.video_profile,
+    video_profile: v.video_profile, loras: v.loras,
     aspect_ratio: kilitOran};
 }
 async function formSimdiKaydet(){
@@ -2815,6 +2918,7 @@ async function ayarYukle(){
     $('uretimPromptDestek').checked = !!j.ayarlar.uretim_prompt_destek;
     $('uretimPromptCeviri').checked = !!j.ayarlar.uretim_prompt_ceviri;
     if(j.ayarlar) formUygulaKayitli(j.ayarlar.form);
+    if(RUNPOD_WEBUI) await runpodLoraYukle();
   }catch(e){ bilgi('Kullanıcı ayarları yüklenemedi: ' + (e.message || e)); }
   try{
     const r2 = await fetch('/api/kasa/durum'); const k = await r2.json();
@@ -3207,6 +3311,7 @@ function llmIsTakipEt(is_id, tur, sakla=true){
         j.durum === 'calisiyor' ? ((il.calisan || 'LLM çalışıyor') + gecen) : '';
       if(tur === 'llm_prompt' && is_id === psAktifIs && mesaj) $('psDurum').textContent = mesaj;
       if(tur === 'llm_preload' && mesaj) $('psDurum').textContent = mesaj;
+      if(tur === 'llm_preload' && mesaj && $('llmApplyInfo')) $('llmApplyInfo').textContent=mesaj;
       if(tur === 'llm_chat' && j.durum === 'calisiyor' && sohbetAktifEl){
         const icerikEl = sohbetAktifEl.querySelector('.icerik');
         if(icerikEl && j.sonuc && j.sonuc.parca && icerikEl.dataset.ham !== j.sonuc.parca){
@@ -3253,6 +3358,9 @@ function llmIsTakipEt(is_id, tur, sakla=true){
         }else if(tur === 'llm_preload'){
           $('psHazirla').disabled = j.durum === 'bitti';
           $('psDurum').textContent = j.durum === 'bitti' ? 'Model hazır.' : (j.durum === 'durduruldu' ? 'Hazırlık durduruldu.' : 'HATA: ' + (j.hata || 'model hazırlanamadı'));
+          if($('llmApplyInfo')) $('llmApplyInfo').textContent=$('psDurum').textContent;
+          if($('llmModelYenidenYukle')) $('llmModelYenidenYukle').disabled=false;
+          if(j.durum==='bitti') llmSistemYukle();
           psCanliCiz(null);
           psModelDurumuYukle();
         }
@@ -4625,7 +4733,7 @@ async function podKurulumYukle() {
     const sonDurum = JSON.stringify(bilgi);
     if (podKurulumSonDurum === sonDurum) return;
     podKurulumSonDurum = sonDurum;
-    const durumlar = {idle: 'Kurulu değil', queued: 'Sırada', running: 'Hazırlanıyor',
+    const durumlar = {idle: 'Kurulu değil', queued: 'Sırada', running: 'Hazırlanıyor', paused: 'Duraklatıldı',
       ready: 'Hazır', installed: 'Dosyalar hazır', cancelled: 'İptal edildi',
       error: 'Kurulum tamamlanamadı'};
     const kuyruk = bilgi.sirada;
@@ -4650,8 +4758,13 @@ async function podKurulumYukle() {
           dugme.disabled = !uygun;
           satir.append(dugme);
         }
+        satir.append(podKurulumDugme('Duraklat', {grup: grup.id, islem: 'duraklat'}));
         satir.append(podKurulumDugme('Sıradan çıkar', {grup: grup.id, islem: 'iptal'}));
       } else if (grup.durum === 'running') {
+        satir.append(podKurulumDugme('Duraklat', {grup: grup.id, islem: 'duraklat'}));
+        satir.append(podKurulumDugme('İptal et', {grup: grup.id, islem: 'iptal'}));
+      } else if (grup.durum === 'paused') {
+        satir.append(podKurulumDugme('Devam et', {grup: grup.id, islem: 'devam'}));
         satir.append(podKurulumDugme('İptal et', {grup: grup.id, islem: 'iptal'}));
       } else if (grup.durum !== 'ready' && grup.durum !== 'installed') {
         satir.append(podKurulumDugme(grup.durum === 'error' || grup.durum === 'cancelled'
@@ -4743,6 +4856,25 @@ async function llmSistemYukle(){
     const r = await fetch('/api/ayarlar'); const j = await r.json();
     if(!r.ok) throw new Error(j.hata || 'HTTP ' + r.status);
     const a = (j && j.ayarlar) || {};
+    $('runpodLlmSettings').hidden=!RUNPOD_WEBUI;
+    $('llmAdvancedActions').hidden=!RUNPOD_WEBUI;
+    if(RUNPOD_WEBUI){
+      $('llmModel').value=a.llm_model||'auto';
+      $('llmGpuLayers').value=String(a.llm_gpu_layers??'all');
+      $('llmThreads').value=a.llm_threads||8;
+      $('llmBatch').value=a.llm_batch||4096;
+      $('llmTopP').value=a.llm_top_p??0.95;
+      $('llmTopK').value=a.llm_top_k??40;
+      $('llmRepeatPenalty').value=a.llm_repeat_penalty??1.05;
+      $('llmTemperature').value=a.llm_temperature??0.7;
+      $('llmUseMtp').checked=a.llm_use_mtp!==false;
+      $('llmMultimodal').checked=a.llm_multimodal!==false;
+      try{
+        const state=await (await fetch('/api/durum')).json();const model=state.llm||{};
+        const label={llama:'Gemma 4 E4B',llm_12b:'Gemma 4 12B',llm_26b:'Gemma 4 26B A4B'}[model.calisan_model||model.model]||model.calisan_model||model.model||'Model seçilmedi';
+        $('llmRuntimeInfo').textContent=model.canli?`Çalışıyor · ${label} · GPU katmanı ${model.ngl} · bağlam ${model.calisan_ctx||model.ctx}`:'Kapalı · Sonraki hazırlamada seçili ayarlar kullanılacak.';
+      }catch(_){$('llmRuntimeInfo').textContent='Model durumu henüz alınamadı.';}
+    }
     const varsayilanlar = j.llm_varsayilanlar;
     if(!varsayilanlar || typeof varsayilanlar.sistem !== 'string' ||
         typeof varsayilanlar.sohbet !== 'string' || !varsayilanlar.mod)
@@ -4767,6 +4899,20 @@ async function llmSistemYukle(){
     if($('llmModSohbet')) $('llmModSohbet').value = m.sohbet || varsayilanlar.mod.sohbet || '';
   }catch(e){ bilgi('Model tercihleri yüklenemedi: ' + (e.message || e)); }
 }
+$('llmModelYenidenYukle').onclick=async()=>{
+  const info=$('llmApplyInfo'),button=$('llmModelYenidenYukle');button.disabled=true;info.textContent='Ayarlar kaydediliyor…';
+  try{
+    const body={llm_model:$('llmModel').value,llm_gpu_layers:$('llmGpuLayers').value==='all'?'all':Number($('llmGpuLayers').value),
+      llm_threads:Number($('llmThreads').value),llm_batch:Number($('llmBatch').value),llm_top_p:Number($('llmTopP').value),
+      llm_top_k:Number($('llmTopK').value),llm_repeat_penalty:Number($('llmRepeatPenalty').value),
+      llm_temperature:Number($('llmTemperature').value),llm_use_mtp:$('llmUseMtp').checked,llm_multimodal:$('llmMultimodal').checked};
+    const saved=await ayarlarGuncelle(body),result=await saved.json().catch(()=>({}));
+    if(!saved.ok) throw new Error(result.hata||'Ayarlar kaydedilemedi');
+    const response=await fetch('/api/llm/hazirla',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const job=await response.json().catch(()=>({}));if(!response.ok||!job.is_id) throw new Error(job.hata||'Model hazırlama kuyruğa eklenemedi');
+    info.textContent='Model hazırlanıyor'+(job.sira?' · sıra '+job.sira:'');llmIsTakipEt(job.is_id,'llm_preload');
+  }catch(error){info.textContent='Hata: '+error.message;button.disabled=false;}
+};
 $('llmCtxKaydet').onclick = async () => {
   const el = $('llmCtxBilgi');
   if(!el) return;

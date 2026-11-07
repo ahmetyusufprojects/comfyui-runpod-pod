@@ -1,5 +1,6 @@
 import http.server
 import builtins
+import copy
 import io
 import os
 import pathlib
@@ -201,4 +202,102 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         builtins.open = original_open
         psutil.virtual_memory = original_virtual_memory
 
-print("model download, cancellation, GPU diagnostics, and log retrieval checks passed")
+    # Queue pause/resume/cancel transitions use only an enabled group and a
+    # dummy worker handle; no real model job or user data is touched.
+    saved_ready = pod_setup._ready
+    saved_thread = pod_setup._thread
+    saved_active = pod_setup._active
+    saved_queue = list(pod_setup._queue)
+    saved_state = dict(pod_setup._state)
+    class DummyThread:
+        def is_alive(self):
+            return True
+    try:
+        pod_setup._ready = True
+        pod_setup._thread = DummyThread()
+        pod_setup._active = None
+        pod_setup._queue.clear()
+        pod_setup.start("translation")
+        assert pod_setup._queue == ["translation"]
+        pod_setup.pause("translation")
+        assert not pod_setup._queue
+        assert pod_setup._state["translation"][0] == "paused"
+        pod_setup.start("translation")
+        assert pod_setup._queue == ["translation"]
+        pod_setup.cancel("translation")
+        assert not pod_setup._queue
+        assert pod_setup._state["translation"][0] == "cancelled"
+    finally:
+        pod_setup._ready = saved_ready
+        pod_setup._thread = saved_thread
+        pod_setup._active = saved_active
+        pod_setup._queue[:] = saved_queue
+        pod_setup._state.clear()
+        pod_setup._state.update(saved_state)
+
+    # The selected model prompt is loaded beside the fixed application JSON
+    # contract; bbox parsing receives the official four-coordinate array.
+    profile_prompt = server.llm._uretim_sistem_mesaji(
+        "fikir", "en", "orta", model_prompt_profile="flux3", bbox_mode=True)
+    assert "element table" in profile_prompt and "positive_tr" in profile_prompt
+    bbox_caption, bbox_elements = server._flux3_layout_elements(
+        'A harbor at dawn. [{"id":"obj_1","desc":"red boat",'
+        '"bbox":[120,180,640,820]}]', 1024, 1024)
+    assert bbox_caption == "A harbor at dawn."
+    assert bbox_elements == [{"type":"obj","bbox":[120,180,640,820],"desc":"red boat"}]
+
+    # Exercise universal settings, model-link reset, and editable LoRA records
+    # using an isolated JSON file plus temporary model paths.
+    saved_settings_path = pod_setup._system_settings_path
+    saved_catalog = copy.deepcopy(pod_setup.CATALOG)
+    original_parse_model_link = pod_setup._parse_model_link
+    original_parse_lora_link = pod_setup._parse_lora_link
+    try:
+        pod_setup._system_settings_path = scratch / "universal-settings.json"
+        pod_setup.update_system_settings({
+            "auto_download": True,
+            "default_download_order": ["zimage"],
+            "llm_defaults": {"image": {"flux3": "llm_12b"}, "chat": "llm_26b"},
+        })
+        saved = pod_setup._system_settings_read()
+        assert saved["auto_download"] is True
+        assert saved["default_download_order"] == ["zimage"]
+        assert saved["llm_defaults"]["image"]["flux3"] == "llm_12b"
+        model_file = pod_setup.CATALOG["zimage"]["files"][0]
+        pod_setup._parse_model_link = lambda value: (
+            {"source": "hf", "repo": "fixture/replacement", "revision": "deadbeef",
+             "path": "weights.safetensors"},
+            {"size": 123, "sha256": "a" * 64},
+        )
+        pod_setup.update_model_link("zimage", model_file["name"],
+                                    "https://huggingface.co/fixture/replacement/resolve/main/weights.safetensors")
+        assert model_file["repo"] == "fixture/replacement"
+        assert model_file["size"] == 123
+        pod_setup.update_model_link("zimage", model_file["name"], "", restore=True)
+        assert model_file["repo"] == saved_catalog["zimage"]["files"][0]["repo"]
+        pod_setup._parse_lora_link = lambda value: (
+            {"source": "hf", "repo": "fixture/lora", "revision": "deadbeef",
+             "path": "adapter.safetensors"}, ".safetensors")
+        lora_settings = pod_setup.add_lora({
+            "model": "flux3", "name": "Synthetic LoRA",
+            "link": "https://huggingface.co/fixture/lora/resolve/main/adapter.safetensors"})
+        custom = next(item for item in lora_settings["ayarlar"]["loras"]
+                      if item["name"] == "Synthetic LoRA")
+        pod_setup.configure_lora(custom["id"], {
+            "enabled": True, "default_selected": True,
+            "auto_download": True, "weight": 1.25})
+        changed = pod_setup._system_settings_read()
+        custom = next(item for item in changed["loras"]
+                      if item["name"] == "Synthetic LoRA")
+        assert custom["weight"] == 1.25 and custom["group"] in changed["default_download_order"]
+        pod_setup.delete_lora(custom["id"])
+        assert all(item["name"] != "Synthetic LoRA"
+                   for item in pod_setup._system_settings_read()["loras"])
+    finally:
+        pod_setup._system_settings_path = saved_settings_path
+        pod_setup._parse_model_link = original_parse_model_link
+        pod_setup._parse_lora_link = original_parse_lora_link
+        pod_setup.CATALOG.clear()
+        pod_setup.CATALOG.update(saved_catalog)
+
+print("model download, pause/resume/cancellation, LoRA/settings, model prompts, GPU diagnostics, and log retrieval checks passed")

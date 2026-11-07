@@ -20,7 +20,7 @@ import fcntl
 ROOT = Path(os.environ["POD_RUNTIME_ROOT"])
 COMFY = Path(os.environ["COMFYUI_ROOT"])
 MODELS = COMFY / "models"
-COMFY_REF = "b0b743566f65daafc423b4fea8a2fbda94b3384a"
+COMFY_REF = "1332fabfcc507aa7c548cd5152071ed494c207e8"
 _CATALOG_DATA = json.loads(Path(os.environ["POD_MODEL_CATALOG"]).read_text(encoding="utf-8"))
 if _CATALOG_DATA.get("schema") != 2:
     raise RuntimeError("Model listesi desteklenmeyen biçimde.")
@@ -39,12 +39,29 @@ _active = None
 _thread = None
 _state = {}
 _active_cancel = None
+_pause_requested = set()
 _active_process = None
 _active_progress = {}
 _comfy_process = None
 _data_lock = None
 _flex = None
 _ready = False
+_system_settings_path = None
+_system_settings_lock = threading.RLock()
+_SYSTEM_SETTINGS_DEFAULT = {
+    "schema": 1,
+    "auto_download": False,
+    "default_download_order": ["zimage", "llama", "llm_12b", "llm_26b"],
+    "llm_defaults": _CATALOG_DATA.get("llm_defaults") or {},
+    "link_overrides": {},
+    "loras": [{"id": "anime-desire-illustrious",
+               "name": "Anime Desire · Illustrious",
+               "model": "illustrious", "group": "anime_desire_lora",
+               "file": "anime-2d-ill_v3.fp16.safetensors",
+               "weight": 1.0, "enabled": True, "default_selected": True,
+               "auto_download": False,
+               "built_in": True}],
+}
 
 
 class DownloadCancelled(RuntimeError):
@@ -89,8 +106,8 @@ def _validate_catalog():
             elif source_type == "url":
                 parsed = urllib.parse.urlsplit(file.get("url") or "")
                 if (parsed.scheme != "https" or not parsed.hostname or parsed.username
-                        or parsed.password or not file.get("sha256")):
-                    raise RuntimeError(f"{group}: doğrudan indirme bağlantısı HTTPS ve SHA-256 gerektirir.")
+                        or parsed.password or parsed.fragment):
+                    raise RuntimeError(f"{group}: doğrudan indirme bağlantısı güvenli HTTPS olmalı.")
             elif not all(isinstance(file.get(key), str) and file.get(key)
                          for key in ("repo", "revision", "path")):
                 raise RuntimeError(f"{group}: Hugging Face deposu, sürümü veya yolu eksik.")
@@ -126,9 +143,588 @@ def _validate_catalog():
 _validate_catalog()
 
 
+_LORA_MODELS = {"z_image", "flux2", "flux3", "krea2", "illustrious"}
+_LORA_ID_RE = re.compile(r"^[a-f0-9]{12}$")
+
+
+def _lora_entries_clean(values):
+    result = []
+    if not isinstance(values, list):
+        return result
+    used = set()
+    for item in values[:100]:
+        if not isinstance(item, dict):
+            continue
+        identifier = item.get("id")
+        if not isinstance(identifier, str) or not (
+                identifier == "anime-desire-illustrious"
+                or _LORA_ID_RE.fullmatch(identifier)) or identifier in used:
+            continue
+        model = item.get("model")
+        group = item.get("group")
+        name = str(item.get("name") or "").strip()[:80]
+        filename = item.get("file")
+        if (model not in _LORA_MODELS or not isinstance(group, str)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,47}", group)
+                or not isinstance(filename, str) or Path(filename).name != filename
+                or Path(filename).suffix.lower() not in (".safetensors", ".pt")
+                or not name):
+            continue
+        try:
+            weight = max(0.0, min(2.0, float(item.get("weight", 1.0))))
+        except (TypeError, ValueError, OverflowError):
+            weight = 1.0
+        result.append({"id": identifier, "name": name, "model": model,
+                       "group": group, "file": filename,
+                       "weight": round(weight, 2),
+                       "enabled": item.get("enabled") is True,
+                       "auto_download": item.get("auto_download") is True,
+                       "default_selected": item.get("default_selected") is True,
+                       "built_in": item.get("built_in") is True,
+                       "source_file": item.get("source_file"),
+                       "link": str(item.get("link") or "")[:1000]})
+        used.add(identifier)
+    return result
+
+
+def _register_lora_groups(settings):
+    """Expose saved LoRAs as ordinary cancellable installer download groups."""
+    for entry in _lora_entries_clean(settings.get("loras")):
+        group = entry["group"]
+        if group in CATALOG:
+            continue
+        file = entry.get("source_file")
+        if not isinstance(file, dict):
+            continue
+        CATALOG[group] = {"label": "LoRA · " + entry["name"],
+                          "engine": "comfy", "files": [dict(file)]}
+    _validate_catalog()
+
+
+def _system_settings_read():
+    settings = json.loads(json.dumps(_SYSTEM_SETTINGS_DEFAULT))
+    if _system_settings_path is None:
+        return settings
+    try:
+        saved = json.loads(_system_settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return settings
+    if not isinstance(saved, dict) or saved.get("schema") != 1:
+        return settings
+    if isinstance(saved.get("auto_download"), bool):
+        settings["auto_download"] = saved["auto_download"]
+    order = saved.get("default_download_order")
+    if isinstance(order, list):
+        settings["default_download_order"] = [
+            group for group in order
+            if group in CATALOG and CATALOG[group].get("enabled", True)]
+    defaults = saved.get("llm_defaults")
+    if isinstance(defaults, dict):
+        settings["llm_defaults"] = defaults
+    overrides = saved.get("link_overrides")
+    if isinstance(overrides, dict):
+        settings["link_overrides"] = overrides
+    if isinstance(saved.get("loras"), list):
+        saved_loras = _lora_entries_clean(saved["loras"])
+        builtin = [entry for entry in settings.get("loras", [])
+                   if entry.get("built_in")]
+        saved_ids = {entry["id"] for entry in saved_loras}
+        settings["loras"] = saved_loras + [entry for entry in builtin
+                                             if entry["id"] not in saved_ids]
+    return settings
+
+
+def _system_settings_write(settings):
+    if _system_settings_path is None:
+        raise RuntimeError("Kalıcı sistem ayarları için Flex dizini hazır değil.")
+    temporary = _system_settings_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2),
+                         encoding="utf-8")
+    temporary.chmod(0o600)
+    temporary.replace(_system_settings_path)
+
+
+def _hf_link(file):
+    if (file.get("source") or "hf") != "hf":
+        return ""
+    repo = urllib.parse.quote(file.get("repo", ""), safe="/")
+    revision = urllib.parse.quote(file.get("revision", ""), safe="")
+    path = urllib.parse.quote(file.get("path", ""), safe="/")
+    return f"https://huggingface.co/{repo}/resolve/{revision}/{path}"
+
+
+def _file_link(file):
+    source = file.get("source") or "hf"
+    if source == "hf":
+        return _hf_link(file)
+    if source == "civitai":
+        return "https://civitai.com/api/download/models/%s" % int(file["version"])
+    return str(file.get("url") or "")
+
+
+def _apply_saved_links(settings):
+    overrides = settings.get("link_overrides") or {}
+    for group, item in CATALOG.items():
+        for file in item.get("files", []):
+            key = group + "/" + file["name"]
+            override = overrides.get(key)
+            if not isinstance(override, dict):
+                continue
+            for field in ("source", "repo", "revision", "path", "url", "version"):
+                if field in override:
+                    file.pop(field, None)
+                    file[field] = override[field]
+            if isinstance(override.get("size"), int) and override["size"] > 0:
+                file["size"] = override["size"]
+            if isinstance(override.get("sha256"), str) and re.fullmatch(
+                    r"[0-9a-fA-F]{64}", override["sha256"]):
+                file["sha256"] = override["sha256"].lower()
+    _validate_catalog()
+
+
+def system_settings():
+    """Return universal configuration without account-specific settings."""
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        groups = []
+        for group, item in CATALOG.items():
+            if not item.get("enabled", True):
+                continue
+            files = []
+            originals = {source.get("name"): source
+                         for source in (_CATALOG_DATA.get("groups", {}).get(group, {})
+                                        .get("files", []))}
+            for file in item.get("files", []):
+                original = originals.get(file["name"], file)
+                files.append({
+                    "name": file["name"], "dir": file["dir"],
+                    "size": file.get("size"), "optional": bool(file.get("optional")),
+                    "gated": bool(file.get("gated")),
+                    "link": _file_link(file),
+                    "default_link": _file_link(original),
+                })
+            groups.append({"id": group, "label": item["label"], "files": files})
+        return {"ayarlar": settings, "gruplar": groups,
+                "lora_durum": lora_status()}
+
+
+def default_llm_for(image_model=None, chat=False):
+    settings = _system_settings_read()
+    defaults = settings.get("llm_defaults") or _CATALOG_DATA.get("llm_defaults") or {}
+    selected = defaults.get("chat", "llm_26b") if chat else (
+        (defaults.get("image") or {}).get(image_model, "llama"))
+    workflow = WORKFLOWS.get(selected) or {}
+    group = workflow.get("group")
+    if group not in CATALOG or not CATALOG[group].get("enabled", True):
+        return "llama"
+    return selected
+
+
+def _parse_hf_link(link):
+    parsed = urllib.parse.urlsplit(str(link or "").strip())
+    if (parsed.scheme != "https" or parsed.hostname != "huggingface.co"
+            or parsed.username or parsed.password or parsed.query or parsed.fragment):
+        raise ValueError("Yalnızca Hugging Face resolve bağlantısı kullanılabilir.")
+    parts = [urllib.parse.unquote(part) for part in parsed.path.strip("/").split("/")]
+    if len(parts) < 5 or parts[2] != "resolve" or not parts[3]:
+        raise ValueError("Bağlantı biçimi: huggingface.co/{hesap}/{depo}/resolve/{sürüm}/{dosya}")
+    repo = "/".join(parts[:2])
+    path = "/".join(parts[4:])
+    if (not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo)
+            or any(part in ("", ".", "..") for part in path.split("/"))):
+        raise ValueError("Hugging Face depo veya dosya yolu geçersiz.")
+    return {"repo": repo, "revision": parts[3], "path": path}
+
+
+def update_system_settings(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Sistem ayarları sözlük olmalı.")
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        if "auto_download" in payload:
+            if not isinstance(payload["auto_download"], bool):
+                raise ValueError("Otomatik indirme seçeneği açık veya kapalı olmalı.")
+            settings["auto_download"] = payload["auto_download"]
+        if "default_download_order" in payload:
+            order = payload["default_download_order"]
+            if (not isinstance(order, list) or len(order) > len(CATALOG)
+                    or any(group not in CATALOG or not CATALOG[group].get("enabled", True)
+                           for group in order) or len(set(order)) != len(order)):
+                raise ValueError("Varsayılan indirme sırası geçersiz.")
+            settings["default_download_order"] = order
+        if "llm_defaults" in payload:
+            defaults = payload["llm_defaults"]
+            if not isinstance(defaults, dict):
+                raise ValueError("Model eşleşmeleri sözlük olmalı.")
+            allowed = {name for name, workflow in WORKFLOWS.items()
+                       if workflow.get("group") in CATALOG
+                       and CATALOG[workflow["group"]].get("engine") == "llama"
+                       and CATALOG[workflow["group"]].get("enabled", True)}
+            image_defaults = defaults.get("image", {})
+            if not isinstance(image_defaults, dict):
+                raise ValueError("Görsel model eşleşmeleri geçersiz.")
+            merged = json.loads(json.dumps(settings.get("llm_defaults") or {}))
+            for key, value in image_defaults.items():
+                if key not in WORKFLOWS or value not in allowed:
+                    raise ValueError("Görsel model eşleşmesi bilinmiyor.")
+                merged.setdefault("image", {})[key] = value
+            chat = defaults.get("chat", merged.get("chat"))
+            if chat not in allowed:
+                raise ValueError("Sohbet model eşleşmesi bilinmiyor.")
+            merged["chat"] = chat
+            settings["llm_defaults"] = merged
+        _system_settings_write(settings)
+        return system_settings()
+
+
+def update_model_link(group, name, link, restore=False):
+    if group not in CATALOG or not CATALOG[group].get("enabled", True):
+        raise ValueError("Bu model grubu düzenlenemez.")
+    file = next((item for item in CATALOG[group]["files"] if item["name"] == name), None)
+    if file is None:
+        raise ValueError("Dosya bulunamadı.")
+    with _system_settings_lock:
+        affected = [(candidate, item) for candidate, catalog in CATALOG.items()
+                    for item in catalog.get("files", [])
+                    if item["dir"] == file["dir"] and item["name"] == name]
+        affected_groups = {candidate for candidate, _ in affected}
+        if _active in affected_groups or affected_groups.intersection(_queue):
+            raise RuntimeError("İndirme kuyruğu çalışırken bağlantı değiştirilemez.")
+        settings = _system_settings_read()
+        overrides = settings.setdefault("link_overrides", {})
+        if restore:
+            for candidate, shared in affected:
+                overrides.pop(candidate + "/" + name, None)
+                original_files = (_CATALOG_DATA.get("groups", {}).get(candidate, {})
+                                  .get("files", []))
+                if not original_files:
+                    saved_lora = next((entry for entry in settings.get("loras", [])
+                                       if entry.get("group") == candidate), None)
+                    source_file = (saved_lora or {}).get("source_file") or {}
+                    original_files = [source_file] if source_file else []
+                original = next((item for item in original_files
+                                 if item.get("name") == name), None)
+                if not original:
+                    raise ValueError("Varsayılan LoRA bağlantısı bulunamadı.")
+                for field in ("source", "repo", "revision", "path", "url",
+                              "version", "size", "sha256"):
+                    if field in original:
+                        shared[field] = original[field]
+                    else:
+                        shared.pop(field, None)
+        else:
+            source, metadata = _parse_model_link(link)
+            for candidate, shared in affected:
+                overrides[candidate + "/" + name] = dict(source, **metadata)
+                for field in ("source", "repo", "revision", "path", "url", "version"):
+                    shared.pop(field, None)
+                shared.update(source)
+                for field in ("size", "sha256"):
+                    if field in metadata:
+                        shared[field] = metadata[field]
+                    else:
+                        shared.pop(field, None)
+        target = MODELS / file["dir"] / file["name"]
+        target.unlink(missing_ok=True)
+        _verification_file(target).unlink(missing_ok=True)
+        _validate_catalog()
+        _system_settings_write(settings)
+        return system_settings()
+
+
+def _hf_resolve_metadata(source):
+    """Read file size and Git-LFS digest without downloading its model weights."""
+    path = "/%s/resolve/%s/%s" % (source["repo"],
+                                  urllib.parse.quote(source["revision"], safe=""),
+                                  urllib.parse.quote(source["path"], safe="/"))
+    request = urllib.request.Request("https://huggingface.co" + path,
+                                     method="HEAD", headers={"User-Agent": "RunPod-WebUI/1"})
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        request.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            headers = response.headers
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError):
+        # Public sources may not expose HEAD metadata through every mirror/proxy.
+        # The downloader will still verify the result if a digest is supplied.
+        return {}
+    size = headers.get("x-linked-size") or headers.get("content-length")
+    digest = (headers.get("x-linked-etag") or "").strip().strip('"').lower()
+    result = {}
+    try:
+        if size and int(size) > 0:
+            result["size"] = int(size)
+    except (TypeError, ValueError):
+        pass
+    if re.fullmatch(r"[0-9a-f]{64}", digest):
+        result["sha256"] = digest
+    return result
+
+
+def _parse_model_link(link):
+    """Resolve HF, Civitai, or direct HTTPS sources without changing the target."""
+    value = str(link or "").strip()
+    parsed = urllib.parse.urlsplit(value)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+            or parsed.password or parsed.fragment):
+        raise ValueError("Model bağlantısı kimlik bilgisi içermeyen HTTPS olmalı.")
+    if parsed.hostname == "huggingface.co":
+        source = _parse_hf_link(value)
+        source["source"] = "hf"
+        return source, _hf_resolve_metadata(source)
+    if parsed.hostname in ("civitai.com", "www.civitai.com"):
+        source, _ = _parse_lora_link(value)
+        return source, _civitai_resolve_metadata(source["version"])
+    if any(key.casefold() in ("token", "api_key", "apikey", "key")
+           for key in urllib.parse.parse_qs(parsed.query)):
+        raise ValueError("Gizli anahtar bağlantıya eklenmemeli; Pod Secret kullanılır.")
+    request = urllib.request.Request(value, method="HEAD",
+                                     headers={"User-Agent": "RunPod-WebUI/1"})
+    metadata = {}
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            size = response.headers.get("Content-Length")
+            if size and int(size) > 0:
+                metadata["size"] = int(size)
+    except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError):
+        pass
+    return {"source": "url", "url": value}, metadata
+
+
+def _civitai_resolve_metadata(version):
+    token = os.environ.get("CIVITAI_TOKEN")
+    if not token or token.startswith("{{"):
+        return {}
+    request = urllib.request.Request(
+        "https://civitai.com/api/v1/model-versions/%d" % int(version),
+        headers={"Authorization": "Bearer " + token,
+                 "User-Agent": "RunPod-WebUI/1"})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            data = json.loads(response.read(2 * 1024 * 1024).decode("utf-8"))
+        files = data.get("files") or []
+        chosen = next((item for item in files if item.get("primary")),
+                      files[0] if files else {})
+        result = {}
+        size = chosen.get("sizeKB")
+        if size and float(size) > 0:
+            result["size"] = int(float(size) * 1024)
+        digest = ((chosen.get("hashes") or {}).get("SHA256") or "").lower()
+        if re.fullmatch(r"[0-9a-f]{64}", digest):
+            result["sha256"] = digest
+        return result
+    except (OSError, ValueError, TypeError, urllib.error.URLError,
+            urllib.error.HTTPError):
+        return {}
+
+
+def _parse_lora_link(link):
+    value = str(link or "").strip()
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
+        raise ValueError("LoRA bağlantısı HTTPS olmalı.")
+    if parsed.hostname == "huggingface.co":
+        source = _parse_hf_link(value)
+        suffix = Path(source["path"]).suffix.lower()
+        if suffix not in (".safetensors", ".pt"):
+            raise ValueError("Hugging Face LoRA dosyası .safetensors veya .pt olmalı.")
+        return dict(source, source="hf", **_hf_resolve_metadata(source)), suffix
+    if parsed.hostname not in ("civitai.com", "www.civitai.com"):
+        raise ValueError("Yalnızca Hugging Face veya Civitai LoRA bağlantısı desteklenir.")
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    if any(key.casefold() in ("token", "api_key", "apikey") for key in query):
+        raise ValueError("Civitai anahtarı bağlantıya eklenmemeli; Pod Secret kullanılır.")
+    match = re.fullmatch(r"/api/download/models/(\d+)/?", parsed.path)
+    version = int(match.group(1)) if match else None
+    if version is None:
+        for key in ("modelVersionId", "versionId"):
+            try:
+                version = int((query.get(key) or [""])[0])
+                break
+            except (TypeError, ValueError):
+                continue
+    if not version or version < 1:
+        raise ValueError("Civitai bağlantısında model sürümü numarası bulunamadı.")
+    source = {"source": "civitai", "version": version}
+    return dict(source, **_civitai_resolve_metadata(version)), ".safetensors"
+
+
+def add_lora(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("LoRA bilgileri geçersiz.")
+    model = payload.get("model")
+    name = str(payload.get("name") or "").strip()[:80]
+    link = str(payload.get("link") or "").strip()
+    if model not in _LORA_MODELS or not name or len(link) > 2000:
+        raise ValueError("LoRA adı, modeli veya bağlantısı geçersiz.")
+    source, suffix = _parse_lora_link(link)
+    digest = hashlib.sha256((model + "\0" + name + "\0" + link + "\0"
+                             + str(time.time_ns())).encode("utf-8")).hexdigest()[:12]
+    slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")[:36] or "lora"
+    filename = f"{slug}-{digest}{suffix}"
+    group = "lora_" + digest
+    source_file = dict(source, dir="loras", name=filename)
+    entry = {"id": digest, "name": name, "model": model, "group": group,
+             "file": filename, "weight": 1.0, "enabled": True,
+             "default_selected": False, "auto_download": False,
+             "source_file": source_file, "link": link}
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        if any(item.get("id") == digest for item in settings.get("loras", [])):
+            raise RuntimeError("Bu LoRA zaten kayıtlı.")
+        settings["loras"] = _lora_entries_clean(settings.get("loras", []) + [entry])
+        CATALOG[group] = {"label": "LoRA · " + name,
+                          "engine": "comfy", "files": [source_file]}
+        _validate_catalog()
+        _system_settings_write(settings)
+        return system_settings()
+
+
+def configure_lora(identifier, payload):
+    if not isinstance(payload, dict):
+        raise ValueError("LoRA ayarları geçersiz.")
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        entry = next((item for item in settings.get("loras", [])
+                      if item.get("id") == identifier), None)
+        if entry is None:
+            raise ValueError("LoRA bulunamadı.")
+        for key in ("enabled", "default_selected", "auto_download"):
+            if key in payload:
+                if not isinstance(payload[key], bool):
+                    raise ValueError(key + " true/false olmalı.")
+                entry[key] = payload[key]
+        if "weight" in payload:
+            try:
+                weight = float(payload["weight"])
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("LoRA ağırlığı sayı olmalı.")
+            if not 0 <= weight <= 2:
+                raise ValueError("LoRA ağırlığı 0 ile 2 arasında olmalı.")
+            entry["weight"] = round(weight, 2)
+        order = settings.get("default_download_order", [])
+        if entry["auto_download"] and entry["group"] not in order:
+            order.append(entry["group"])
+        elif not entry["auto_download"] and entry["group"] in order:
+            order.remove(entry["group"])
+        settings["default_download_order"] = order
+        _system_settings_write(settings)
+        return system_settings()
+
+
+def delete_lora(identifier):
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        entry = next((item for item in settings.get("loras", [])
+                      if item.get("id") == identifier), None)
+        if entry is None:
+            raise ValueError("LoRA bulunamadı.")
+        if entry.get("built_in"):
+            raise ValueError("Uygulamayla gelen temel LoRA silinemez; devre dışı bırakılabilir.")
+        group = entry["group"]
+        if group in _queue or group == _active:
+            raise RuntimeError("LoRA indirilirken kaydı silinemez.")
+        settings["loras"] = [item for item in settings["loras"]
+                              if item.get("id") != identifier]
+        settings["default_download_order"] = [item for item in
+                                                settings.get("default_download_order", [])
+                                                if item != group]
+        group_config = CATALOG.get(group)
+        if group_config:
+            for file in group_config["files"]:
+                target = MODELS / file["dir"] / file["name"]
+                target.unlink(missing_ok=True)
+                _verification_file(target).unlink(missing_ok=True)
+                target.with_suffix(".part").unlink(missing_ok=True)
+            CATALOG.pop(group, None)
+            _state.pop(group, None)
+        _validate_catalog()
+        _system_settings_write(settings)
+        return system_settings()
+
+
+def lora_status(model=None):
+    settings = _system_settings_read()
+    result = []
+    for entry in settings.get("loras", []):
+        if model and entry.get("model") != model:
+            continue
+        group = entry.get("group")
+        file = next((item for item in CATALOG.get(group, {}).get("files", [])
+                     if item.get("name") == entry.get("file")), None)
+        target = MODELS / file["dir"] / file["name"] if file else None
+        ready = bool(file and target and _model_verified(target, file))
+        state, detail = _state.get(group, ("idle", ""))
+        if ready:
+            state, detail = "ready", "LoRA dosyası hazır."
+        result.append({key: entry.get(key) for key in
+                       ("id", "name", "model", "group", "file", "weight",
+                        "enabled", "default_selected", "auto_download", "built_in", "link")}
+                      | {"hazir": ready, "durum": state, "ayrinti": detail,
+                         "boyut": file.get("size") if file else None})
+    return result
+
+
+def ensure_loras(model, selected=None, job=None):
+    """Download selected compatible LoRAs, then return ComfyUI model names."""
+    settings = _system_settings_read()
+    entries = [item for item in settings.get("loras", [])
+               if item.get("model") == model and item.get("enabled")]
+    if selected is None:
+        chosen = [{"id": item["id"], "weight": item["weight"]}
+                  for item in entries if item.get("default_selected")]
+    else:
+        if not isinstance(selected, list) or len(selected) > 8:
+            raise ValueError("En fazla 8 uyumlu LoRA seçilebilir.")
+        chosen = selected
+    resolved = []
+    lookup = {item["id"]: item for item in entries}
+    for request_item in chosen:
+        if isinstance(request_item, str):
+            identifier, weight = request_item, None
+        elif isinstance(request_item, dict):
+            identifier, weight = request_item.get("id"), request_item.get("weight")
+        else:
+            continue
+        entry = lookup.get(identifier)
+        if entry is None:
+            raise ValueError("Seçili LoRA bu görsel modeliyle uyumlu değil.")
+        try:
+            weight = max(0.0, min(2.0, float(weight if weight is not None
+                                             else entry["weight"])))
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("LoRA ağırlığı sayı olmalı.")
+        file = next((item for item in CATALOG[entry["group"]]["files"]
+                     if item["name"] == entry["file"]), None)
+        if file is None:
+            raise RuntimeError("LoRA dosyasının indirme kaydı bulunamadı.")
+        target = MODELS / file["dir"] / file["name"]
+        if not _model_verified(target, file):
+            start(entry["group"])
+            deadline = time.monotonic() + 3600
+            while time.monotonic() < deadline:
+                if job is not None and job.get("iptal"):
+                    raise RuntimeError("İş durduruldu; LoRA indirmesi kurulum kuyruğunda kalabilir.")
+                if _model_verified(target, file):
+                    break
+                state, detail = _state.get(entry["group"], ("idle", ""))
+                if state == "error":
+                    raise RuntimeError("LoRA indirilemedi: " + str(detail)[:300])
+                if job is not None:
+                    job["ilerleme"] = {"asama": "lora",
+                                       "calisan": entry["name"] + " indiriliyor",
+                                       "oran": 0.08}
+                time.sleep(0.5)
+            else:
+                raise TimeoutError("LoRA indirmesi 60 dakika içinde tamamlanmadı.")
+        resolved.append({"name": entry["file"], "weight": weight})
+    return resolved
+
+
 def prepare_data(data_root, accounts):
     """Use one writer and require a mounted, explicitly selected data path."""
-    global _data_lock, _flex, _ready
+    global _data_lock, _flex, _ready, _system_settings_path
     mount = validate_mount()
     target = Path(data_root).resolve()
     flex_prefix = os.environ.get("POD_FLEX_PREFIX")
@@ -142,6 +738,8 @@ def prepare_data(data_root, accounts):
         snapshots = (mount / flex_prefix).resolve()
         if snapshots.parent != mount:
             raise RuntimeError("Flex dizini seçilen bağlama noktasında olmalı.")
+        snapshots.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _system_settings_path = snapshots / "system-settings.json"
         _flex = FlexStore(target, snapshots)
     elif not target.is_relative_to(mount) or target == mount:
         raise RuntimeError("Kullanıcı dizini kalıcı diskin altında olmalı.")
@@ -160,7 +758,20 @@ def prepare_data(data_root, accounts):
             raise RuntimeError("Başlangıç parolası için RunPod Secret çözülemedi; Secret adını kontrol edin.")
         accounts.ilk_admin(os.environ.get("WEBUI_BOOTSTRAP_USER", "user"), password)
         checkpoint()
+    settings = _system_settings_read()
+    _register_lora_groups(settings)
+    _apply_saved_links(settings)
     _ready = True
+    if (settings.get("auto_download")
+            and os.environ.get("WEBUI_AUTO_DOWNLOAD", "1") != "0"):
+        order = list(settings.get("default_download_order", []))
+        order.extend(entry["group"] for entry in settings.get("loras", [])
+                     if entry.get("auto_download") and entry["group"] not in order)
+        for group in order:
+            try:
+                start(group)
+            except (ValueError, RuntimeError):
+                continue
 
 
 def validate_mount():
@@ -180,6 +791,8 @@ def status():
     with _lock:
         groups = []
         for group, item in CATALOG.items():
+            if not item.get("enabled", True):
+                continue
             state, detail = _state.get(group, ("idle", ""))
             if state == "idle" and _group_files_complete(group):
                 state, detail = "installed", "Model dosyaları diskte hazır."
@@ -190,6 +803,11 @@ def status():
             groups.append({"id": group, "ad": item["label"], "durum": state,
                            "ayrinti": detail, "engine": item["engine"],
                            "calisma_hazir": _runtime_available(group),
+                           "dosyalar": [{"ad": file["name"],
+                                         "toplam": file.get("size"),
+                                         "opsiyonel": bool(file.get("optional")),
+                                         "gated": bool(file.get("gated"))}
+                                        for file in item["files"]],
                            "bagimliliklar": list(item.get("depends_on", []))})
         return {"gruplar": groups, "aktif": _active, "sirada": list(_queue),
                 "ilerleme": dict(_active_progress), "hazir": _ready}
@@ -197,13 +815,16 @@ def status():
 
 def _group_files_complete(group):
     item = CATALOG[group]
-    return all(_model_present(MODELS / file["dir"] / file["name"])
+    return all(file.get("optional") or
+               _model_present(MODELS / file["dir"] / file["name"])
                for file in item["files"])
 
 
 def _group_files_verified(group):
     item = CATALOG[group]
-    return all(_model_verified(MODELS / file["dir"] / file["name"], file)
+    return all(file.get("optional") and
+               not _model_present(MODELS / file["dir"] / file["name"])
+               or _model_verified(MODELS / file["dir"] / file["name"], file)
                for file in item["files"])
 
 
@@ -256,6 +877,12 @@ def workflow(name):
     return dict(WORKFLOWS.get(name) or {})
 
 
+def workflow_ready(name):
+    group = WORKFLOWS.get(name, {}).get("group")
+    return bool(group in CATALOG and CATALOG[group].get("enabled", True)
+                and _engine_ready(group))
+
+
 def _bagimlilik_sirasi(group, gorulen=None):
     gorulen = gorulen or set()
     if group in gorulen:
@@ -272,11 +899,19 @@ def start(group):
     global _thread
     if not isinstance(group, str) or group not in CATALOG:
         raise ValueError("Bilinmeyen model grubu.")
+    if not CATALOG[group].get("enabled", True):
+        raise ValueError("Bu model grubu kapalı.")
     if not _ready:
         raise RuntimeError("Pod veri hazırlığı tamamlanmadı; biraz sonra tekrar deneyin.")
     with _lock:
         for item in _bagimlilik_sirasi(group):
-            if item == _active or item in _queue or _engine_ready(item):
+            if item == _active:
+                if _active_cancel is not None and _active_cancel.is_set():
+                    raise RuntimeError("Duraklatma veya iptal tamamlanınca devam edebilirsiniz.")
+                _state[item] = ("ready", "")
+                continue
+            _pause_requested.discard(item)
+            if item in _queue or _engine_ready(item):
                 _state[item] = ("ready", "")
                 continue
             _queue.append(item)
@@ -321,8 +956,9 @@ def cancel(group):
         raise ValueError("Bilinmeyen model grubu.")
     process = None
     with _lock:
-        if group != _active and group not in _queue:
+        if group != _active and group not in _queue and _state.get(group, ("idle",))[0] != "paused":
             raise RuntimeError("Bu model şu anda indirilmedi veya hazırlanmadı.")
+        _pause_requested.discard(group)
         dependents = _transitive_dependents(group)
         queued_dependents = dependents.intersection(_queue)
         _queue[:] = [queued for queued in _queue if queued not in queued_dependents]
@@ -337,6 +973,30 @@ def cancel(group):
         else:
             _state[group] = ("cancelled", "Sıradan çıkarıldı.")
             return
+    _stop_process(process)
+
+
+def pause(group):
+    global _active_process
+    if not isinstance(group, str) or group not in CATALOG:
+        raise ValueError("Bilinmeyen model grubu.")
+    process = None
+    with _lock:
+        if group == _active:
+            if _active_cancel is None:
+                raise RuntimeError("Duraklatma işareti bulunamadı.")
+            _pause_requested.add(group)
+            _active_cancel.set()
+            _active_progress["stage"] = "Duraklatılıyor"
+            process = _active_process
+        elif group in _queue:
+            _queue.remove(group)
+            _state[group] = ("paused", "Sıradaki iş duraklatıldı.")
+            return
+        elif _state.get(group, ("idle",))[0] == "paused":
+            return
+        else:
+            raise RuntimeError("Yalnızca çalışan veya sıradaki indirme duraklatılabilir.")
     _stop_process(process)
 
 
@@ -418,18 +1078,34 @@ def _run():
                 _install_llama(cancel_event)
             else:
                 raise RuntimeError("Model grubu için bilinmeyen çalışma ortamı.")
+            optional_failures = []
             for file in item["files"]:
                 if cancel_event.is_set():
                     raise DownloadCancelled("İndirme iptal edildi.")
                 _progress(group, "İndiriliyor", name=file["name"],
                           downloaded=0, total=file.get("size"))
-                _model(file, cancel_event, group)
+                try:
+                    _model(file, cancel_event, group)
+                except DownloadCancelled:
+                    raise
+                except Exception as exc:
+                    if not file.get("optional"):
+                        raise
+                    optional_failures.append(file["name"])
+                    with (ROOT / "setup.log").open("a", encoding="utf-8") as log:
+                        log.write("[optional] %s atlandı (%s)\n" %
+                                  (file["name"], type(exc).__name__))
             if item["engine"] == "comfy":
                 _progress(group, "ComfyUI bağlantısı kontrol ediliyor")
                 _wait_comfy(cancel_event)
-            result = ("ready", "")
+            result = ("ready", "Ana model hazır; MTP isteğe bağlı olarak yüklenemedi."
+                      if optional_failures else "")
         except DownloadCancelled as exc:
-            result = ("cancelled", str(exc))
+            with _lock:
+                paused = group in _pause_requested
+                _pause_requested.discard(group)
+            result = ("paused", "Duraklatıldı; devam ettiğinde kısmi indirmeden sürer.") \
+                if paused else ("cancelled", str(exc))
         except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
             detail = str(exc) if type(exc) is RuntimeError else type(exc).__name__
             result = ("error", detail)

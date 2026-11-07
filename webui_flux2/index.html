@@ -140,6 +140,23 @@
 </select>
 <div class="kucuk" id="wfAciklama">Model ve iş akışı otomatik seçilir: referans varsa Flux2 Klein düzenleme, yoksa Z-Image Turbo üretim.</div>
 <div class="kucuk" id="uretimModBilgi"></div>
+<div id="runpodModelWrap" class="satir" hidden>
+  <div><label for="runpodImageModel">Görsel üretim modeli</label>
+    <select id="runpodImageModel">
+      <option value="auto">Otomatik · önerilen</option>
+      <option value="z_image">Z-Image · Moody Pro v13.2</option>
+      <option value="flux2">Flux 2 Klein</option>
+      <option value="flux3">Flux 3 Klein · 16 adım</option>
+      <option value="krea2">Krea 2 · Moody v7SE</option>
+      <option value="illustrious">Illustrious XL</option>
+    </select>
+  </div>
+  <div class="kucuk" id="runpodModelInfo">Seçtiğin model henüz indirilmediyse Kurulum panelinden indir.</div>
+  <div id="runpodLoraPicker" class="runpod-lora-picker" hidden>
+    <b>LoRA eklentileri</b><span class="kucuk">Uyumlu LoRA’ları seç; indirilmemiş olanlar üretim başlamadan hazırlanır.</span>
+    <div id="runpodLoraOptions" class="runpod-lora-options"></div>
+  </div>
+</div>
 </div>
 <div class="kart" id="kartRef">
 <h3>Referans fotoğraflar</h3>
@@ -260,6 +277,9 @@
 </div>
 <div class="kucuk">Yalnız referanssız görsel üretiminde kullanılır. Aynı anda tek Anima modeli seçilebilir; düzenleme Flux2 kullanır.</div>
 </div>
+<div id="flux3BboxModeWrap" hidden>
+  <label class="ayar-toggle"><input id="flux3BboxMode" type="checkbox"><span><b>Yerleşim ve kutu düzenleme</b><small>Flux 3 için sahnedeki öğeleri kutularla konumlandır; referanslı düzenlemede kaynak ve hedef yerleşimi tarif et.</small></span></label>
+</div>
 </div>
 
 <div class="kart" id="kartIs">
@@ -336,8 +356,17 @@
     </div>
   </header>
 
+  <div class="ayar-layout">
+  <nav class="ayar-kategori-nav" aria-label="Ayar bölümleri">
+    <b>AYARLAR</b>
+    <button type="button" data-ayar-hedef="settingGeneral">Genel</button>
+    <button type="button" data-ayar-hedef="settingImage">Görsel üretimi</button>
+    <button type="button" data-ayar-hedef="settingLLM">LLM ayarları</button>
+    <button type="button" data-ayar-hedef="settingPrompt">Gelişmiş ayarlar</button>
+    <a id="runpodInstallerLink" href="#" target="_blank" rel="noopener" hidden>Model, LoRA ve indirmeler ↗</a>
+  </nav>
   <div class="ayarlar-grid">
-    <section class="ayar-kart">
+    <section class="ayar-kart" id="settingGeneral">
       <div class="ayar-kart-baslik"><span class="ayar-ikon kasa" aria-hidden="true">▣</span><div><h3>Kayıtlar ve kasa</h3><p>Geçmişinin boyutunu ve kasa güvenliğini yönet.</p></div></div>
       <div class="ayar-alan">
         <label for="limitInput">Kayıt sınırı</label>
@@ -374,17 +403,39 @@
       <div class="ayar-kart-alt"><button id="sfrBtn" class="hayalet">Şifreyi değiştir</button><div class="ayar-bilgi" id="sfrBilgi" role="status"></div></div>
     </section>
 
-    <section class="ayar-kart">
+    <section class="ayar-kart" id="settingLLM">
       <div class="ayar-kart-baslik"><span class="ayar-ikon yapayzeka" aria-hidden="true">✳</span><div><h3>Yapay zekâ bağlamı</h3><p>Bağlam büyüdükçe uzun konuşmalar daha iyi takip edilir; bellek kullanımı da artar.</p></div></div>
+      <div id="runpodLlmSettings" class="ayar-alan" hidden>
+        <label for="llmModel">Kullanılacak sohbet modeli</label>
+        <p class="ayar-aciklama">Otomatik seçim, görsel modeline göre önerilen Gemma sürümünü; yalnız sohbet için 26B modelini seçer. El ile seçilen model kurulu olmalıdır.</p>
+        <select id="llmModel"><option value="auto">Otomatik · önerilen eşleşme</option><option value="llama">Gemma 4 E4B</option><option value="llm_12b">Gemma 4 12B</option><option value="llm_26b">Gemma 4 26B A4B</option></select>
+          <div class="ayar-form-grid uc">
+          <div class="ayar-alan"><label for="llmGpuLayers">GPU’da çalışacak katman</label><select id="llmGpuLayers"><option value="all">Tümü · hızlı</option><option value="48">48 · GPU/CPU dengeli</option><option value="32">32 · daha az VRAM</option><option value="16">16 · daha az VRAM</option><option value="0">0 · CPU ağırlıklı</option></select><span class="ayar-yardim">GPU’ya sığmayan katmanlar CPU’da çalışır; varsayılan tüm katmanları GPU’ya alır.</span></div>
+          <div class="ayar-alan"><label for="llmThreads">CPU iş parçacığı</label><input id="llmThreads" type="number" min="1" max="64" step="1" value="8"></div>
+          <div class="ayar-alan"><label for="llmBatch">Batch</label><input id="llmBatch" type="number" min="128" max="8192" step="128" value="4096"></div>
+        </div>
+        <div class="ayar-form-grid uc">
+          <div class="ayar-alan"><label for="llmTopP">Top-p</label><input id="llmTopP" type="number" min="0.05" max="1" step="0.05" value="0.95"></div>
+          <div class="ayar-alan"><label for="llmTopK">Top-k</label><input id="llmTopK" type="number" min="0" max="1000" step="1" value="40"></div>
+          <div class="ayar-alan"><label for="llmRepeatPenalty">Tekrar cezası</label><input id="llmRepeatPenalty" type="number" min="0.8" max="2" step="0.05" value="1.05"></div>
+        </div>
+        <div class="ayar-alan"><label for="llmTemperature">Sohbet yaratıcılığı · sıcaklık</label><input id="llmTemperature" type="number" min="0.1" max="2" step="0.05" value="0.7"><span class="ayar-yardim">Düşük değer daha tutarlı, yüksek değer daha çeşitli yanıt üretir.</span></div>
+        <div class="ayar-tercihler">
+          <label class="ayar-toggle"><input id="llmUseMtp" type="checkbox" checked><span><b>MTP hızlandırmasını dene</b><small>Model desteklemiyorsa ana model MTP olmadan açılır.</small></span></label>
+          <label class="ayar-toggle"><input id="llmMultimodal" type="checkbox" checked><span><b>Görsel anlama</b><small>mmproj dosyası hazırsa sohbet ve Prompt Stüdyosu görsel alabilir.</small></span></label>
+        </div>
+        <div class="ayar-bilgi" id="llmRuntimeInfo" role="status"></div>
+      </div>
       <div class="ayar-alan">
         <label for="llmCtx">Bağlam boyutu</label>
         <p class="ayar-aciklama">1024–32768 token · Varsayılan 8000. Tüm sohbet ve prompt görevlerinde kullanılır.</p>
         <div class="ayar-eylem-satiri"><div class="ayar-deger-birim"><input id="llmCtx" type="number" value="8000" min="1024" max="32768" step="128"><span>token</span></div><button id="llmCtxKaydet" class="ayar-birincil">Bağlamı kaydet</button></div>
         <div class="ayar-bilgi" id="llmCtxBilgi" role="status" aria-live="polite"></div>
       </div>
+      <div id="llmAdvancedActions" class="ayar-kart-alt" hidden><button id="llmModelYenidenYukle" class="ayar-birincil" type="button">Ayarları kaydet ve modeli hazırla</button><div class="ayar-bilgi" id="llmApplyInfo" role="status"></div></div>
     </section>
 
-    <section class="ayar-kart">
+    <section class="ayar-kart" id="settingPrompt">
       <div class="ayar-kart-baslik"><span class="ayar-ikon prompt" aria-hidden="true">✎</span><div><h3>Prompt desteği varsayılanları</h3><p>Prompt Stüdyosu için başlangıç yaratıcılığını ve yanıt uzunluğunu seç.</p></div></div>
       <div class="ayar-form-grid iki">
         <div class="ayar-alan"><label for="promptDestekYaraticilik">Yaratıcılık</label><input id="promptDestekYaraticilik" type="number" value="0.7" min="0.2" max="1.2" step="0.1"></div>
@@ -393,7 +444,7 @@
       <div class="ayar-kart-alt"><button id="promptDestekKaydet" class="hayalet">Varsayılanları kaydet</button><div class="ayar-bilgi" id="promptDestekBilgi" role="status"></div></div>
     </section>
 
-    <section class="ayar-kart">
+    <section class="ayar-kart" id="settingImage">
       <div class="ayar-kart-baslik"><span class="ayar-ikon uretim" aria-hidden="true">◈</span><div><h3>Hızlı üretim varsayılanları</h3><p>Yeni üretimlerinde kullanılacak temel değerleri belirle.</p></div></div>
       <div class="ayar-form-grid uc">
         <div class="ayar-alan"><label for="uretimVarsayilanSteps">Adım sayısı</label><input id="uretimVarsayilanSteps" type="number" value="8" min="1" max="50"></div>
@@ -430,6 +481,7 @@
       </div>
       <div class="ayar-kart-alt"><button id="llmSistemKaydet" class="ayar-birincil">Model tercihlerini kaydet</button><button id="llmSistemVarsayilan" class="hayalet">Varsayılan promptlara dön</button><div class="ayar-bilgi" id="llmSistemBilgi" role="status"></div></div>
     </section>
+  </div>
   </div>
 </div>
 </div>

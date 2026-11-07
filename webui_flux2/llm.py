@@ -47,6 +47,45 @@ def _runpod_llama_settings():
 
 _RUNPOD_LLAMA = _runpod_llama_settings()
 
+
+def _load_runpod_profiles():
+    if not RUNPOD_MODE:
+        return {}
+    try:
+        with open(os.environ["POD_MODEL_CATALOG"], "r", encoding="utf-8") as stream:
+            catalog = json.load(stream)
+        root = os.path.join(os.environ["COMFYUI_ROOT"], "models")
+        profiles = {}
+        for name in ("llama", "llm_12b", "llm_26b"):
+            workflow = (catalog.get("workflows") or {}).get(name) or {}
+            group = (catalog.get("groups") or {}).get(workflow.get("group")) or {}
+            files = group.get("files") or []
+            by_name = {item.get("name"): item for item in files}
+            model = by_name.get(workflow.get("model_file"), {})
+            mmproj = by_name.get(workflow.get("mmproj_file"), {})
+            mtp = by_name.get(workflow.get("mtp_file"), {})
+            if not workflow.get("model_file") or not workflow.get("mmproj_file"):
+                continue
+            profiles[name] = {
+                "model": os.path.join(root, model.get("dir", "llm"), workflow["model_file"]),
+                "mmproj": os.path.join(root, mmproj.get("dir", "llm"), workflow["mmproj_file"]),
+                "model_size": model.get("size"), "model_sha256": model.get("sha256"),
+                "mmproj_size": mmproj.get("size"), "mmproj_sha256": mmproj.get("sha256"),
+                "mtp": os.path.join(root, mtp.get("dir", "llm"), workflow["mtp_file"])
+                        if workflow.get("mtp_file") else None,
+                "mtp_size": mtp.get("size"), "mtp_sha256": mtp.get("sha256"),
+                "gpu_device": workflow.get("gpu_device", "CUDA0"),
+                "gpu_layers": workflow.get("gpu_layers", "all"),
+                "context": int(workflow.get("context", 8192)),
+                "label": group.get("label", name),
+            }
+        return profiles
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+_RUNPOD_PROFILES = _load_runpod_profiles()
+
 def _llm_dbg(msg):
     try:
         with open(os.path.join(BASE_DIR, "webui_error.log"), "a", encoding="utf-8") as f:
@@ -77,6 +116,14 @@ GPU_KATMAN = os.environ.get("LLAMA_GPU_LAYERS",
 GPU_DEVICE = os.environ.get("LLAMA_GPU_DEVICE",
                             _RUNPOD_LLAMA.get("gpu_device", "CUDA0"))
 CTX = 8000                 # varsayilan; kullanicinin llm_ctx ayari ile guncellenir
+LLAMA_THREADS = 8
+LLAMA_BATCH = 4096
+LLAMA_UBATCH = 1024
+TOP_P = 0.95
+TOP_K = 40
+REPEAT_PENALTY = 1.05
+MTP_ENABLED = True
+MULTIMODAL_ENABLED = True
 BAGLAM_ALT = 1024
 BAGLAM_UST = 32768
 LOG_PATH = os.path.join(BASE_DIR, "llm_server.log")
@@ -129,6 +176,11 @@ MOD_TALIMATI = {
               "doğal metin yaz. Kod, komut, kopyalanabilir prompt ve şablonları "
               "ayrı bir Markdown kod bloğunda ver; açıklamaları bloğun dışında tut. "
               "JSON veya iç düşünce dökümü verme.",
+    "video": "Kullanıcının isteğini seçili video modelinin doğrudan uygulayabileceği "
+              "tek ve tutarlı bir video talimatına dönüştür. Referans görsellerini "
+              "sırayla incele; görünmeyen içerik uydurma. Hareketi, zaman içindeki "
+              "devamlılığı, kamerayı ve önemli sesleri yalnızca isteğe katkı sağlıyorsa "
+              "belirt. Sahne veya kamera kesmelerini kullanıcı istemedikçe ekleme.",
 }
 
 SEMA = {
@@ -225,6 +277,29 @@ def _dosya_kod(yol, bek):
 
 
 def model_dogrula():
+    global _ACTIVE_MTP_PATH
+    if RUNPOD_MODE and _ACTIVE_PROFILE in _RUNPOD_PROFILES:
+        config = _RUNPOD_PROFILES[_ACTIVE_PROFILE]
+        check_files = [("model", MODEL_PATH)]
+        if MULTIMODAL_ENABLED:
+            check_files.append(("mmproj", MMPROJ_PATH))
+        for key, path in check_files:
+            size, digest = config.get(key + "_size"), config.get(key + "_sha256")
+            if size and digest:
+                _dosya_kod(path, (size, digest))
+            elif not os.path.isfile(path):
+                raise LLMHatasi(os.path.basename(path) + " bulunamadı", "model")
+        _ACTIVE_MTP_PATH = None
+        mtp = config.get("mtp")
+        if (MTP_ENABLED and mtp and os.path.isfile(mtp)
+                and config.get("mtp_size") and config.get("mtp_sha256")):
+            try:
+                _dosya_kod(mtp, (config["mtp_size"], config["mtp_sha256"]))
+                _ACTIVE_MTP_PATH = mtp
+            except LLMHatasi:
+                # MTP only speeds decoding; an incompatible optional file cannot block the main model.
+                _ACTIVE_MTP_PATH = None
+        return
     yol, beylit, kod = _aktif_mmproj()
     _dosya_kod(yol, (beylit, kod))
     _dosya_kod(MODEL_PATH, (MODEL_BEYIT, MODEL_KOD))
@@ -232,9 +307,89 @@ def model_dogrula():
 
 def _aktif_mmproj():
     """Q8_0 ayristirmasi varsa onu, yoksa f16 dosyayi secer."""
-    if os.path.exists(MMPROJ_Q8_PATH):
+    if not RUNPOD_MODE and os.path.exists(MMPROJ_Q8_PATH):
         return MMPROJ_Q8_PATH, MMPROJ_Q8_BEYIT, MMPROJ_Q8_KOD
     return MMPROJ_PATH, MMPROJ_BEYIT, MMPROJ_KOD
+
+
+_ACTIVE_PROFILE = "llama"
+_ACTIVE_MTP_PATH = None
+_calisan_profile = None
+_calisan_signature = None
+
+
+def model_ayarla(profile):
+    """Select a RunPod LLM profile; the server restarts on its next queued job."""
+    global MODEL_PATH, MMPROJ_PATH, MODEL_BEYIT, MMPROJ_BEYIT
+    global MODEL_KOD, MMPROJ_KOD, GPU_DEVICE, GPU_KATMAN, CTX
+    global _ACTIVE_PROFILE, _ACTIVE_MTP_PATH
+    if not RUNPOD_MODE:
+        if profile not in (None, "llama"):
+            raise LLMHatasi("Bulut LLM seçimi yalnızca RunPod üzerinde kullanılabilir.", "istek")
+        return _ACTIVE_PROFILE
+    if profile not in _RUNPOD_PROFILES:
+        raise LLMHatasi("Seçilen LLM modeli bu imajda tanımlı değil.", "istek")
+    config = _RUNPOD_PROFILES[profile]
+    MODEL_PATH, MMPROJ_PATH = config["model"], config["mmproj"]
+    MODEL_BEYIT, MODEL_KOD = config.get("model_size"), config.get("model_sha256")
+    MMPROJ_BEYIT, MMPROJ_KOD = config.get("mmproj_size"), config.get("mmproj_sha256")
+    GPU_DEVICE, GPU_KATMAN = config["gpu_device"], str(config["gpu_layers"])
+    CTX = int(config.get("context") or 8192)
+    _ACTIVE_PROFILE = profile
+    _ACTIVE_MTP_PATH = None
+    return profile
+
+
+def ayarlarini_uygula(settings):
+    global GPU_KATMAN, LLAMA_THREADS, LLAMA_BATCH, LLAMA_UBATCH
+    global TOP_P, TOP_K, REPEAT_PENALTY, MTP_ENABLED, MULTIMODAL_ENABLED
+    if not isinstance(settings, dict):
+        return
+    layers = settings.get("llm_gpu_layers")
+    if layers == "all":
+        GPU_KATMAN = "all"
+    elif isinstance(layers, int) and not isinstance(layers, bool) and 0 <= layers <= 512:
+        GPU_KATMAN = str(layers)
+    LLAMA_THREADS = max(1, min(64, int(settings.get("llm_threads", 8))))
+    LLAMA_BATCH = max(128, min(8192, int(settings.get("llm_batch", 4096))))
+    LLAMA_UBATCH = min(1024, LLAMA_BATCH)
+    TOP_P = max(0.05, min(1.0, float(settings.get("llm_top_p", 0.95))))
+    TOP_K = max(0, min(1000, int(settings.get("llm_top_k", 40))))
+    REPEAT_PENALTY = max(0.8, min(2.0, float(settings.get("llm_repeat_penalty", 1.05))))
+    MTP_ENABLED = settings.get("llm_use_mtp", True) is not False
+    wants_multimodal = settings.get("llm_multimodal", True) is not False
+    MULTIMODAL_ENABLED = wants_multimodal and (
+        not RUNPOD_MODE or os.path.isfile(MMPROJ_PATH))
+    if wants_multimodal and not MULTIMODAL_ENABLED:
+        _llm_dbg("mmproj dosyası yok; ana Gemma modeli görsel girişi olmadan devam edecek")
+
+
+def profil_vram_mb(profile=None, context=None):
+    config = _RUNPOD_PROFILES.get(profile or _ACTIVE_PROFILE) or {}
+    weights = int(config.get("model_size") or 0)
+    if MULTIMODAL_ENABLED:
+        weights += int(config.get("mmproj_size") or 0)
+    mtp = config.get("mtp")
+    if MTP_ENABLED and mtp and os.path.isfile(mtp):
+        weights += int(config.get("mtp_size") or 0)
+    context = int(context or CTX)
+    return int(weights / (1024 * 1024) + max(2500, context / 4))
+
+
+def _runtime_signature():
+    return [(_ACTIVE_PROFILE if RUNPOD_MODE else "llama"), CTX, str(GPU_KATMAN),
+            LLAMA_THREADS, LLAMA_BATCH, LLAMA_UBATCH, bool(MTP_ENABLED),
+            bool(MULTIMODAL_ENABLED)]
+
+
+def model_profilleri():
+    return [{"id": name, "ad": config.get("label", name),
+             "model_bayt": config.get("model_size"),
+             "mmproj_bayt": config.get("mmproj_size"),
+             "mtp_bayt": config.get("mtp_size"),
+             "mtp_dosyasi": bool(config.get("mtp")),
+             "ctx": config.get("context", 8192)}
+            for name, config in _RUNPOD_PROFILES.items()]
 
 
 # ------------------------------------------------------------------ süreç
@@ -267,6 +422,27 @@ def _pid_ctx_oku():
     except Exception:
         return None
     return None
+
+
+def _pid_profile_oku():
+    if not RUNPOD_MODE:
+        return "llama"
+    try:
+        with open(PID_PATH, "r", encoding="ascii") as f:
+            value = json.load(f)
+        return value.get("profile") if isinstance(value, dict) else None
+    except Exception:
+        return None
+
+
+def _pid_signature_oku():
+    try:
+        with open(PID_PATH, "r", encoding="ascii") as f:
+            value = json.load(f)
+        signature = value.get("signature") if isinstance(value, dict) else None
+        return signature if isinstance(signature, list) else None
+    except Exception:
+        return None
 
 
 def _surec_mem_byt(pid=None):
@@ -355,14 +531,18 @@ def durum(detayli=False):
     pid = _pid_oku()
     canli = _surec_yasiyor(pid)
     d = {"pid": pid, "canli": canli,
-         "saglik": _saglik() if canli else None}
+         "saglik": _saglik() if canli else None,
+         "model": _ACTIVE_PROFILE if RUNPOD_MODE else "llama",
+         "multimodal": bool(MULTIMODAL_ENABLED),
+         "mtp": bool(MTP_ENABLED)}
     if detayli:
-        komut_parcalar = [
-            LLAMA_SERVER, "-m", MODEL_PATH, "--mmproj", _aktif_mmproj()[0],
-            "--host", "127.0.0.1", "--port", str(PORT), "-c", str(CTX),
-            "-ngl", str(GPU_KATMAN), "-t", "8", "-b", "4096",
-            "-ub", "1024", "-np", "1",
-        ]
+        komut_parcalar = [LLAMA_SERVER, "-m", MODEL_PATH]
+        if MULTIMODAL_ENABLED:
+            komut_parcalar += ["--mmproj", _aktif_mmproj()[0]]
+        komut_parcalar += ["--host", "127.0.0.1", "--port", str(PORT),
+                           "-c", str(CTX), "-ngl", str(GPU_KATMAN),
+                           "-t", str(LLAMA_THREADS), "-b", str(LLAMA_BATCH),
+                           "-ub", str(LLAMA_UBATCH), "-np", "1"]
         if os.name != "nt":
             komut_parcalar += ["--device", GPU_DEVICE]
         if REASONING_MODE == "off":
@@ -379,6 +559,7 @@ def durum(detayli=False):
         d.update({"port": PORT, "ngl": GPU_KATMAN, "ctx": CTX,
                   "gpu_device": GPU_DEVICE if os.name != "nt" else None,
                   "calisan_ctx": _calisan_ctx,
+                  "calisan_model": _calisan_profile,
                   "komut": " ".join(komut_parcalar),
                   "ram_byt": _surec_mem_byt(pid),
                   "son_kullanim_sn": round(time.monotonic()
@@ -393,10 +574,18 @@ def durum(detayli=False):
 def _pid_yaz(pid, ctx=None):
     try:
         with open(PID_PATH, "w", encoding="ascii") as f:
-            if ctx is None:
+            if ctx is None and not RUNPOD_MODE:
                 f.write(str(pid))
             else:
-                json.dump({"pid": int(pid), "ctx": int(ctx)}, f)
+                value = {"pid": int(pid)}
+                if ctx is not None:
+                    value["ctx"] = int(ctx)
+                if RUNPOD_MODE:
+                    value["profile"] = _ACTIVE_PROFILE
+                    value["signature"] = _runtime_signature()
+                    if _ACTIVE_MTP_PATH:
+                        value["mtp"] = True
+                json.dump(value, f)
     except OSError:
         pass
 
@@ -453,17 +642,35 @@ def _gpu_sureci_mi(pid):
         layers = args[args.index("-ngl") + 1]
     except (ValueError, IndexError):
         return False
-    return device == GPU_DEVICE and layers.lower() == "all"
+    if device != GPU_DEVICE:
+        return False
+    try:
+        # Layer count zero is an explicit user choice (all layers stay on CPU).
+        # The server still has to be launched with CUDA0 and the CUDA backend
+        # itself is verified separately by _gpu_backend_dogrula().
+        return layers.lower() == "all" or int(layers) >= 0
+    except (TypeError, ValueError):
+        return False
 
 
 def baslat(*, gpu_hazirla=None):
     """Sunucuyu hazirlar. Donus: bu cagrida gecen yukleme ms (0 = zaten hazir)."""
-    global _calisan_ctx, _linux_process
+    global _calisan_ctx, _linux_process, _calisan_profile, _ACTIVE_MTP_PATH
+    global _calisan_signature
     baslama = time.monotonic()
     _llm_dbg("baslat_basla")
     _gpu_backend_dogrula()
     saglik = _saglik()
     pid = _pid_oku()
+
+    stored_profile = _pid_profile_oku()
+    if (RUNPOD_MODE and saglik in ("ok", "loading")
+            and stored_profile != _ACTIVE_PROFILE
+            and (stored_profile is not None or _ACTIVE_PROFILE != "llama")):
+        # An old profile belongs to this application's managed llama process.
+        durdur()
+        saglik = None
+        pid = None
 
     if saglik == "ok":
         sahibi = _port_sahibi()
@@ -482,6 +689,8 @@ def baslat(*, gpu_hazirla=None):
             if sahibi is not None:
                 _pid_yaz(sahibi)
             _calisan_ctx = _pid_ctx_oku()
+            _calisan_profile = _ACTIVE_PROFILE
+            _calisan_signature = _runtime_signature()
             _llm_dbg(f"baslat_zaten_hazir ms={int((time.monotonic()-baslama)*1000)}")
             return 0
 
@@ -491,6 +700,8 @@ def baslat(*, gpu_hazirla=None):
             sahibi = pid
         if sahibi is not None:
             _calisan_ctx = _pid_ctx_oku()
+            _calisan_profile = _ACTIVE_PROFILE
+            _calisan_signature = _runtime_signature()
             _pid_yaz(sahibi, _calisan_ctx)
             kalan = _hazir_bekle(sahibi, baslama)
             if kalan is not None:
@@ -518,12 +729,13 @@ def baslat(*, gpu_hazirla=None):
     except OSError:
         pass
 
-    komut = [
-        LLAMA_SERVER,
-        "-m", MODEL_PATH, "--mmproj", _aktif_mmproj()[0],
+    komut = [LLAMA_SERVER, "-m", MODEL_PATH]
+    if MULTIMODAL_ENABLED:
+        komut += ["--mmproj", _aktif_mmproj()[0]]
+    komut += [
         "--host", "127.0.0.1", "--port", str(PORT),
-        "-c", str(CTX), "-ngl", str(GPU_KATMAN), "-t", "8", "-b", "4096",
-        "-ub", "1024", "-np", "1",
+        "-c", str(CTX), "-ngl", str(GPU_KATMAN), "-t", str(LLAMA_THREADS),
+        "-b", str(LLAMA_BATCH), "-ub", str(LLAMA_UBATCH), "-np", "1",
         "-kvu", "-ctxcp", "32", "-fa", "on", "-lm", "mmap",
         "--no-webui", "--cache-reuse", "256",
         # Warmup bos bir kosu calistirir ve ~18 sn surer; ilk istekte zaten
@@ -543,6 +755,8 @@ def baslat(*, gpu_hazirla=None):
         komut += ["--reasoning-format", "deepseek"]
     if str(GPU_KATMAN) == "0":
         komut += ["-nkvo", "--no-mmproj-offload"]
+    if MTP_ENABLED and _ACTIVE_MTP_PATH and os.path.isfile(_ACTIVE_MTP_PATH):
+        komut += ["--spec-type", "draft-mtp", "--spec-draft-model", _ACTIVE_MTP_PATH]
     _dosyalari_isit()
     if gpu_hazirla is not None:
         gpu_hazirla()
@@ -560,9 +774,16 @@ def baslat(*, gpu_hazirla=None):
         log.close()
     _pid_yaz(surec.pid, CTX)
     _calisan_ctx = CTX
+    _calisan_profile = _ACTIVE_PROFILE
+    _calisan_signature = _runtime_signature()
 
     sure = _hazir_bekle(surec.pid, baslama)
     if sure is None:
+        if _ACTIVE_MTP_PATH:
+            _llm_dbg("MTP ile model başlayamadı; MTP olmadan tekrar deneniyor")
+            _ACTIVE_MTP_PATH = None
+            durdur()
+            return baslat(gpu_hazirla=gpu_hazirla)
         if surec.poll() is not None:
             satirlar = _log_sonu(50)
             raise LLMHatasi("llama-server başlamadı:\n" + "\n".join(satirlar),
@@ -616,7 +837,7 @@ def _log_sonu(n):
 
 
 def durdur():
-    global _calisan_ctx
+    global _calisan_ctx, _calisan_profile, _calisan_signature
     pid = _pid_oku()
     if os.name != "nt" and _surec_yasiyor(pid):
         try:
@@ -655,6 +876,8 @@ def durdur():
     except OSError:
         pass
     _calisan_ctx = None
+    _calisan_profile = None
+    _calisan_signature = None
 
 
 # ------------------------------------------------------------------ istek
@@ -684,7 +907,9 @@ def etkin_baglam():
 def baglam_degisti():
     """Sunucu canlıysa ve yapılandırılan CTX farklıysa True döner;
     yeni değer bir sonraki başlatmada uygulanır."""
-    return bool(_calisan_ctx and _calisan_ctx != CTX
+    return bool(_calisan_ctx and (_calisan_ctx != CTX or
+                (RUNPOD_MODE and (_calisan_profile != _ACTIVE_PROFILE or
+                                  _calisan_signature != _runtime_signature())))
                 and _surec_yasiyor(_pid_oku()))
 
 
@@ -953,12 +1178,17 @@ def hazirla(*, gpu_hazirla=None):
 
 
 def uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
-         sistem_ozel=None, mod_ozel=None, *, gpu_hazirla=None):
+         sistem_ozel=None, mod_ozel=None, *, gpu_hazirla=None,
+         model_prompt_profile=None, bbox_mode=False):
+    if gorseller and not MULTIMODAL_ENABLED:
+        raise LLMHatasi("Görsel anlama LLM ayarlarından kapalı.", "istek")
     if not _kilit.acquire(blocking=False):
         raise LLMHatasi("bir üretim zaten sürüyor", "mesgul")
     try:
         return _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
-                     sistem_ozel, mod_ozel, gpu_hazirla=gpu_hazirla)
+                     sistem_ozel, mod_ozel, gpu_hazirla=gpu_hazirla,
+                     model_prompt_profile=model_prompt_profile,
+                     bbox_mode=bbox_mode)
     finally:
         _kilit.release()
 
@@ -1022,7 +1252,9 @@ def sohbet_et(mesajlar, yaraticilik=0.7, max_tokens=None, parca_geri=None,
                 gecmis.append({"role": r, "content": icerik})
         payload = {"messages": gecmis[-33:],
                    "temperature": yaraticilik,
-                   "top_p": 0.95,
+                   "top_p": TOP_P,
+                   "top_k": TOP_K,
+                   "repeat_penalty": REPEAT_PENALTY,
                    "cache_prompt": True}
         if max_tokens is not None:
             try:
@@ -1060,17 +1292,34 @@ def _son_kullanim_guncelle():
 
 
 def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
-                          mod_ozel=None):
+                          mod_ozel=None, model_prompt_profile=None,
+                          bbox_mode=False):
     siste = (sistem_ozel.strip() if isinstance(sistem_ozel, str)
              and sistem_ozel.strip() else SISTEM_PROMPTU)
-    bolumler = [siste, MOD_TALIMATI[mod]]
+    bolumler = [siste]
+    if RUNPOD_MODE and model_prompt_profile in ("z_image", "flux3", "krea2", "minimaxh3"):
+        root = os.path.join(BASE_DIR, "model_prompts")
+        filename = {"z_image": "z_image.txt", "flux3": "flux.json", "krea2": "krea2.txt",
+                    "minimaxh3": "minimaxh3.txt"}[model_prompt_profile]
+        try:
+            with open(os.path.join(root, filename), "r", encoding="utf-8") as stream:
+                custom = stream.read().strip()
+            if model_prompt_profile == "flux3":
+                prompts = json.loads(custom)
+                mode = ("i2i" if mod in ("gorsel", "birlestir") else "t2i")
+                custom = str(prompts.get(mode + ("_bbox" if bbox_mode else "")) or "")
+            if custom:
+                bolumler.append("Seçili üretim modelinin özgün sistem talimatı:\n" + custom)
+        except (OSError, ValueError, TypeError):
+            pass
+    bolumler.append(MOD_TALIMATI[mod])
     if isinstance(mod_ozel, str) and mod_ozel.strip():
         bolumler.append("Kullanıcının bu mod için ek tercihi:\n" +
                         mod_ozel.strip())
 
     dil_adi = "Türkçe" if dil == "tr" else "İngilizce"
     bolumler.append(
-        "Sabit çıktı sözleşmesi: positive seçilen dilde tek paragraf, doğrudan "
+        "Sabit çıktı sözleşmesi: positive seçilen dilde tek metin alanıdır, doğrudan "
         "görsel modeline verilebilen prompttur. positive_tr bunun anlamı ve "
         "ayrıntıları koruyan doğal Türkçe karşılığıdır. negative yalnızca "
         "isteğe özgü, gerçekten kaçınılması gereken öğeleri kısa yaz; böyle bir "
@@ -1097,6 +1346,12 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
         bolumler.append(
             "Çeviri uzunluğu kaynak metne yakın olsun; anlamı koru, metni "
             "genişletme, özetleme veya yeni ayrıntı ekleme.")
+    elif mod == "video":
+        bolumler.append(
+            "Video biçimi: video modelinin talimatlarındaki akış, zaman ve sahne "
+            "devamlılığı kurallarını positive alanının içinde uygula. positive tek "
+            "bir metin değeridir; gerekirse kısa bölüm etiketleri ve satır sonları "
+            "kullan. positive_tr Türkçe karşılığıdır. JSON alan adlarını veya şemayı değiştirme.")
     else:
         hedef = {"kisa": "60-90", "orta": "100-140",
                  "uzun": "150-220"}[uzunluk]
@@ -1107,7 +1362,8 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
 
 
 def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
-          sistem_ozel=None, mod_ozel=None, *, gpu_hazirla=None):
+          sistem_ozel=None, mod_ozel=None, *, gpu_hazirla=None,
+          model_prompt_profile=None, bbox_mode=False):
     global _son_kullanim
     if mod not in MOD_TALIMATI:
         raise LLMHatasi("geçersiz mod", "istek")
@@ -1135,7 +1391,8 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
     if dil not in ("en", "tr"):
         dil = "en"
 
-    siste = _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel, mod_ozel)
+    siste = _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel, mod_ozel,
+                                  model_prompt_profile, bbox_mode)
 
     icerik = []
     if metin:
@@ -1179,8 +1436,9 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
             sicaklik = 0.1
         payload = {"messages": istek_mesajlar,
                    "temperature": sicaklik,
-                   "top_p": 0.95,
-                   "repeat_penalty": 1.05,
+                   "top_p": TOP_P,
+                   "top_k": TOP_K,
+                   "repeat_penalty": REPEAT_PENALTY,
                    "max_tokens": max_token,
                    "cache_prompt": True,
                    "response_format": sema}
