@@ -1,0 +1,57 @@
+name: RunPod gallery image
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/gallery-image.yml'
+      - 'docker/Dockerfile.gallery'
+      - 'docker/models.json'
+      - 'webui_flux2/**'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build Linux image
+        run: docker build -f docker/Dockerfile.gallery -t webui-gallery .
+      - name: Verify mount guard and gallery HTTP start
+        run: |
+          set -eu
+          if docker run --rm webui-gallery; then
+            echo 'Unexpected startup without a persistent mount'
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os, secrets, subprocess, time, urllib.request
+          env = dict(os.environ, WEBUI_BOOTSTRAP_PASSWORD=secrets.token_urlsafe(32))
+          subprocess.run(["docker", "run", "-d", "--name", "gallery-check",
+                          "--tmpfs", "/workspace", "-e", "WEBUI_BOOTSTRAP_PASSWORD",
+                          "-p", "127.0.0.1:8189:8189", "webui-gallery"],
+                         check=True, env=env, stdout=subprocess.DEVNULL)
+          for _ in range(40):
+              try:
+                  assert urllib.request.urlopen("http://127.0.0.1:8189/api/sunucu-hazir").status == 200
+                  assert b"podKurulum" in urllib.request.urlopen("http://127.0.0.1:8189/").read()
+                  break
+              except OSError:
+                  time.sleep(0.5)
+          else:
+              subprocess.run(["docker", "logs", "gallery-check"], check=False)
+              raise SystemExit("Gallery did not start")
+          PY
+      - name: Publish the tested image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:gallery-${GITHUB_SHA}"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag webui-gallery "$image"
+          docker push "$image"

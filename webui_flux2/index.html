@@ -200,7 +200,7 @@
   <label class="uretim-destek-etiket"><input id="uretimPromptDestek" type="checkbox"> Promptu üretmeden önce Prompt Stüdyosu ile iyileştir</label>
   <span class="kucuk">Referans varsa yalnızca istenen fotoğraf düzenlemelerini yazar; yoksa fikir promptu oluşturur. Kullanıcı metni kutuda korunur, AI promptu yalnızca üretimde kullanılır.</span>
   <label class="uretim-destek-etiket"><input id="uretimPromptCeviri" type="checkbox"> Türkçe promptu görsel üretimi için İngilizceye çevir</label>
-  <span class="kucuk">Yerel OPUS-MT modeli kullanılır. Türkçe metin kutusu korunur; yalnızca İngilizce çeviri görsel modeline gönderilir. Prompt Stüdyosu seçeneğiyle aynı anda kullanılamaz.</span>
+  <span class="kucuk">Yerel OPUS-MT modeli en fazla 24.000 karakter ve 8.192 alt token işler. Türkçe metin kutusu korunur; yalnızca İngilizce çeviri görsel modeline gönderilir. Prompt Stüdyosu seçeneğiyle aynı anda kullanılamaz.</span>
   <div class="kucuk" id="uretimPromptCeviriBilgi" role="status" aria-live="polite"></div>
 </div>
 <div style="display:none"><textarea id="negatif" style="min-height:44px"></textarea></div>
@@ -274,7 +274,7 @@
 </section>
 </div>
 
-<div class="kart" id="kartKuyruk" data-menu="kuyruk"><h3>Kuyruk <span class="kucuk" id="kuyrukSayi"></span></h3><div id="kuyrukListe"><div class="kucuk">Kuyruk boş.</div></div><div class="kucuk">Üret'e her basış sıraya iş ekler; işler tek tek çalışır. Sayfa yenilense bile işler sunucuda sürer.</div></div>
+<div class="kart" id="kartKuyruk" data-menu="kuyruk"><h3>Kuyruk <span class="kucuk" id="kuyrukSayi"></span></h3><div id="kuyrukListe"><div class="kucuk">Kuyruk boş.</div></div><div class="kucuk">GPU işleri sırayla çalışır. Çeviri ve ayar kaydı bu sırada devam edebilir. Sayfa yenilense bile işler sunucuda sürer.</div></div>
 
 <div class="kart lib-arayuz" id="kartKutuphane" data-menu="kutuphane">
 <header class="lib-baslik">
@@ -344,7 +344,7 @@
         <div class="ayar-eylem-satiri"><input id="limitInput" type="number" value="0" min="0"><button id="limitKaydet" class="hayalet">Sınırı kaydet</button></div>
       </div>
       <label class="ayar-toggle"><input id="historyAlbums" type="checkbox"><span><b>Geçmişi albümle</b><small>Aynı prompt, model ve referans görselle üretilen birden fazla görseli tek kutuda grupla.</small></span></label>
-      <label class="ayar-toggle"><input id="autoOpenResult" type="checkbox" checked><span><b>Üretilen görseli otomatik göster</b><small>Üretim bitince görsel otomatik olarak üretim sayfasında açılsın. Kapalıyken başka sekmede olsan da yerin değişmez.</small></span></label>
+      <label class="ayar-toggle"><input id="autoOpenResult" type="checkbox" checked><span><b>Üretilen görseli otomatik göster</b><small>Üretim bitince görseli aç. Ayarlar açıksa sayfada kalırsın ve sonuç için bildirim alırsın.</small></span></label>
       <div class="ayar-alan">
         <label for="beklemeInput">Kasa otomatik kilidi</label>
         <p class="ayar-aciklama">Kasa belirtilen süre boşta kaldığında otomatik kapanır.</p>
@@ -354,7 +354,7 @@
     </section>
 
     <section class="ayar-kart">
-      <div class="ayar-kart-baslik"><span class="ayar-ikon uretim" aria-hidden="true">◉</span><div><h3>Sinematik renk teması</h3><p>Ekrandaki fotoğraflardan vurgu rengini alır; fotoğraf yoksa standart renkler kullanılır.</p></div></div>
+      <div class="ayar-kart-baslik"><span class="ayar-ikon uretim" aria-hidden="true">◉</span><div><h3>Sinematik renk teması</h3><p>Vurgu rengini ekrandaki fotoğraflardan alır. Canlı film, fotoğrafı ekranda daha doygun, kontrastlı ve aydınlık gösterir; kaynak dosyayı değiştirmez.</p></div></div>
       <div class="ayar-alan"><label for="cinematicMode">Renk modu</label>
         <select id="cinematicMode"><option value="off">Kapalı</option><option value="soft">Yumuşak film</option><option value="vivid">Canlı film</option></select>
       </div>
@@ -463,6 +463,12 @@
   </aside>
 
   <section id="sohbetAna" class="sohbet-ana" aria-label="Sohbet">
+    <header class="sohbet-ust">
+    <div class="sohbet-mobil-bar">
+      <button id="sohbetMenuBtn" class="sohbet-menu-btn" type="button"
+        aria-expanded="false" aria-controls="sohbetYanKenar">☰ Sohbetler</button>
+    </div>
+      <div class="sohbet-ust-baslik"><strong>Sohbet stüdyosu</strong><small>Metin ve görselle çalış</small></div>
     <button id="sohbetBaglam" class="sohbet-baglam" type="button" hidden
       aria-label="Bağlam kullanımı ayrıntısı" title="Bağlam kullanımı">
       <svg viewBox="0 0 36 36" aria-hidden="true">
@@ -471,28 +477,23 @@
       </svg>
       <span id="sohbetBaglamYazi" class="sohbet-baglam-yazi">—</span>
     </button>
-    <div class="sohbet-mobil-bar">
-      <button id="sohbetMenuBtn" class="sohbet-menu-btn" type="button"
-        aria-expanded="false" aria-controls="sohbetYanKenar">☰ Sohbetler</button>
-    </div>
+    </header>
     <div id="sohbetIcerikAlani" class="sohbet-icerik-alani">
+      <div id="sohbetBosDurum" class="sohbet-karsilama">
+        <span class="sohbet-isaret" aria-hidden="true">✦</span>
+        <h2>Bugün ne üzerine çalışalım?</h2>
+        <p>Bir fikri geliştir, görselleri karşılaştır veya üretime hazır bir prompt yaz.</p>
+        <div class="sohbet-oneriler">
+          <button class="sohbet-hizli" type="button" data-hizli="Bir görsel fikri geliştirmek istiyorum. Bana üç yaratıcı yön öner.">✦ Fikir geliştir</button>
+          <button class="sohbet-hizli" type="button" data-hizli="Eklediğim görselleri kompozisyon, ışık ve renk açısından karşılaştır.">▧ Görselleri karşılaştır</button>
+          <button class="sohbet-hizli" type="button" data-hizli="Bir görsel üretim promptu yazmama yardım et. Önce fikrimi sor.">↗ Prompt hazırla</button>
+        </div>
+      </div>
       <div id="sohbetListe" class="sohbet-liste" aria-live="polite"></div>
     </div>
 
     <div id="sohbetGirdiKutusu" class="sohbet-girdi-kutusu">
-      <div id="sohbetDurumSatiri" class="sohbet-durum-satiri" hidden>
-        <span id="sohbetDurum" role="status" aria-live="polite"></span>
-        <span id="sohbetCanli" aria-live="polite"></span>
-        <button id="sohbetDusunmeOk" class="sohbet-dusunme-ok" type="button"
-          aria-expanded="false" aria-controls="sohbetDusunmePanel" hidden>▾</button>
-      </div>
-      <div id="sohbetDusunmePanel" class="sohbet-dusunme-panel" hidden>
-        <pre id="sohbetDusunmeMetin" tabindex="0"></pre>
-      </div>
-      <div id="sohbetFotoOnizleme" class="sohbet-foto-onizleme" hidden>
-        <img id="sohbetFotoImg" alt="Sohbete eklenecek görsel">
-        <button id="sohbetFotoKaldir" class="sohbet-foto-kaldir" type="button" aria-label="Görseli kaldır">×</button>
-      </div>
+      <div id="sohbetFotoOnizleme" class="sohbet-foto-onizleme" aria-label="Görsel ekleri" hidden></div>
       <div id="sohbetEkleMenu" class="sohbet-ekle-menu" hidden>
         <button id="sohbetEkleDosya" type="button">Dosya seç</button>
         <button id="sohbetEkleKutuphane" type="button">Kütüphaneden seç</button>
@@ -500,10 +501,11 @@
       </div>
       <div class="sohbet-girdi-cerceve">
         <button id="sohbetFotoEkle" class="sohbet-girdi-ekle" type="button" aria-label="Görsel ekle" title="Görsel ekle" aria-expanded="false" aria-controls="sohbetEkleMenu">+</button>
-        <input type="file" id="sohbetFoto" accept="image/*" hidden>
-        <textarea id="sohbetGirdi" rows="1" aria-label="Mesajınız" placeholder="Mesaj yaz..."></textarea>
+        <input type="file" id="sohbetFoto" accept="image/*" multiple hidden>
+        <textarea id="sohbetGirdi" rows="1" aria-label="Mesajınız" placeholder="Bir mesaj yaz veya görselleri bırak…"></textarea>
         <button id="sohbetGonder" class="sohbet-gönder" type="button" aria-label="Gönder" title="Gönder">↑</button>
       </div>
+      <div class="sohbet-ipucu"><span>En fazla 6 görsel</span><span>Enter: gönder · Shift+Enter: yeni satır</span></div>
     </div>
   </section>
 </div>
@@ -620,22 +622,18 @@
     <div class="izleme-kuyruk-alt"><span>Sağlık</span><b id="izlemeLlmSaglik">—</b></div>
   </article>
 </div>
-<section class="model-indirme-panel" aria-labelledby="modelIndirmeBaslik">
-  <div class="model-indirme-baslik">
-    <div><div class="izleme-ust-baslik">MODEL HAZIRLIĞI</div><h2 id="modelIndirmeBaslik">İndirme sırası</h2>
-    <p>Pod açıldıktan sonra ilk 60 saniye sırayı değiştirebilirsin. Hazır olan model, diğerleri inerken kullanılabilir.</p></div>
-    <button id="modelIndirmeYenile" class="izleme-yenile">↻ Yenile</button>
-  </div>
-  <div id="modelIndirmeDurum" class="model-indirme-durum" role="status" aria-live="polite">Model durumu yükleniyor…</div>
-  <div id="modelIndirmeSirasi" class="model-indirme-sirasi"></div>
-  <button id="modelIndirmeKaydet" class="model-indirme-kaydet" hidden>Sırayı kaydet ve indirmeyi başlat</button>
-</section>
 <div class="izleme-paneller">
   <section class="izleme-panel">
     <div class="izleme-panel-baslik"><div><h3>GPU aygıtları</h3><p>ComfyUI tarafından bildirilen bellek kullanımı</p></div><span class="izleme-panel-simge">▰</span></div>
     <div id="izlemeCihazlar" class="izleme-cihazlar"><div class="izleme-bos">GPU bilgisi yükleniyor…</div></div>
   </section>
   <section class="izleme-panel">
+    <div id="podKurulum" hidden>
+      <h3>RunPod kurulumu</h3>
+      <p>Galeri ve kasa açık kalır. Kullanmak istediğiniz modeli seçin.</p>
+      <div id="podKurulumGruplar"></div>
+      <p id="podKurulumHata" role="status"></p>
+    </div>
     <div class="izleme-panel-baslik"><div><h3>LLM süreç ayrıntıları</h3><p>Çalışma zamanı ve son üretim ölçümleri</p></div><span class="izleme-panel-simge">⌘</span></div>
     <dl id="izlemeLlmDetaylari" class="izleme-detaylar"><div><dt>Veri bekleniyor</dt><dd>—</dd></div></dl>
     <details class="izleme-komut"><summary>Başlatma komutunu göster</summary><pre id="izlemeKomut">—</pre></details>

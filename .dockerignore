@@ -11,6 +11,13 @@ webui_flux2/calisma/
 webui_flux2/models/
 webui_flux2/*.log
 webui_flux2/*.pid
+webui_flux2/kullanicilar.json
+webui_flux2/llm_sha256.json
+webui_flux2/ayarlar.json
+webui_flux2/promptlar.json
+webui_flux2/kutuphane/
+webui_flux2/gecmis/
+**/__pycache__/
 Gemma-4E4B-3/
 llama.cpp/
 docker_backup/

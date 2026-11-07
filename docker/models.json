@@ -1,0 +1,28 @@
+{
+  "flux": {
+    "label": "Flux 2 Klein",
+    "engine": "comfy",
+    "files": [
+      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/diffusion_models/flux-2-klein-4b.safetensors","dir":"diffusion_models","name":"flux-2-klein-4b.safetensors"},
+      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
+      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/vae/flux2-vae.safetensors","dir":"vae","name":"flux2-vae.safetensors"}
+    ]
+  },
+  "zimage": {
+    "label": "Z-Image Turbo",
+    "engine": "comfy",
+    "files": [
+      {"repo":"Comfy-Org/Z-Image-Turbo","revision":"6fc90a3b1b653e935a0d175e260736de25b84df5","path":"split_files/diffusion_models/z_image_turbo_bf16.safetensors","dir":"diffusion_models","name":"z_image_turbo_bf16.safetensors"},
+      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
+      {"repo":"Comfy-Org/Z-Image-Turbo","revision":"6fc90a3b1b653e935a0d175e260736de25b84df5","path":"split_files/vae/ae.safetensors","dir":"vae","name":"ae.safetensors"}
+    ]
+  },
+  "llama": {
+    "label": "Gemma 4 E4B sohbet",
+    "engine": "llama",
+    "files": [
+      {"repo":"hauhau/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-GGUF","path":"Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf","dir":"llm","name":"Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf","sha256":"d0027dd3a9128d9323e9f282c8bf010a8526c46477584535991dc1a869b56e96"},
+      {"repo":"hauhau/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-GGUF","path":"mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf","dir":"llm","name":"mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf","sha256":"debad39ab9c1152ab67695a674fb35e8375b2320c57bfd5075835d3ccb16c7db"}
+    ]
+  }
+}

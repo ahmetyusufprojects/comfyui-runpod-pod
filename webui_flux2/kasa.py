@@ -20,8 +20,11 @@ import shutil as _shutil
 import subprocess as _sp
 import threading as _th
 import time as _time
+from functools import wraps as _wraps
 
 import auth as _auth
+
+_NO_WINDOW = getattr(_sp, "CREATE_NO_WINDOW", 0)
 
 BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
 
@@ -66,6 +69,7 @@ _acik = {}  # kullanici -> {"parola": bytearray, "son": epoch, "bekleme": sn, "k
 _muhur_suren = set()  # su an muhurlemesi suren kullanicilar (cift muhur engeli)
 _kilit = _th.Lock()
 _muhur_olaylari = {}
+_profil_kilitleri = {}
 
 
 class KasaHatasi(Exception):
@@ -156,82 +160,102 @@ def guc_uyarilari(parola):
     return uyari
 
 
-def _gpg_simetrik(ara_tar, cikti, parola):
-    """ara_tar dosyasini sifreler. Parola boruyla verilir."""
-    p = _sp.Popen([GPG, "--homedir", _gpg_ev(), "--batch", "--pinentry-mode", "loopback",
-                   "--passphrase-fd", "0", "--cipher-algo", "AES256",
-                   "--symmetric", "-o", cikti, ara_tar],
-                  stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.PIPE)
-    _th.Thread(target=lambda: (p.stdin.write(parola), p.stdin.close()),
-               daemon=True).start()
-    _, err = p.communicate()
-    return p.returncode
+def _gpg_komutu():
+    return [GPG, "--homedir", _gpg_ev(), "--batch", "--pinentry-mode", "loopback",
+            "--passphrase-fd", "0", "--no-symkey-cache"]
 
 
-def _gpg_coz_boruya(vault, parola):
-    """Cozulmus arsivi boru olarak doner (tar'a aktarilir)."""
-    p = _sp.Popen([GPG, "--homedir", _gpg_ev(), "--batch", "--pinentry-mode", "loopback",
-                   "--passphrase-fd", "0", "-d", vault],
-                  stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.PIPE)
-    _th.Thread(target=lambda: (p.stdin.write(parola), p.stdin.close()),
-               daemon=True).start()
-    return p
+def _tar_aktar(kasa, parola, tar_argumanlari):
+    """Şifreyi çöz ve tar'a aktar. İki sürecin de başarılı olması gerekir."""
+    with _sp.Popen(_gpg_komutu() + ["-d", kasa], stdin=_sp.PIPE, stdout=_sp.PIPE,
+                   stderr=_sp.DEVNULL,
+                   creationflags=_NO_WINDOW) as gpg:
+        try:
+            gpg.stdin.write(parola + b"\n")
+            gpg.stdin.close()
+            tar = _sp.run(tar_argumanlari, stdin=gpg.stdout, stdout=_sp.DEVNULL,
+                          stderr=_sp.DEVNULL,
+                          creationflags=_NO_WINDOW)
+        finally:
+            gpg.stdout.close()
+        return tar.returncode == 0 and gpg.wait() == 0
 
 
 def _deneme_cozum(vault, parola):
-    """Kasayi acmadan parola dogru mu + arsiv saglam mi bakar. True/False."""
+    """Kasayı diske çıkarmadan parolayı ve arşivin tamamını doğrular."""
     try:
-        p = _gpg_coz_boruya(vault, parola)
-        t = _sp.run(["tar", "-t"], stdin=p.stdout, capture_output=True)
-        p.stdout.close()
-        p.wait(timeout=60)
-        return p.returncode == 0 and t.returncode == 0
-    except Exception:
+        return _tar_aktar(vault, parola, ["tar", "-tf", "-"])
+    except OSError:
         return False
 
 
+def _arsiv_sifrele(kaynak, cikti, parola):
+    # GPG stdin'in ilk satırından parolayı okur. Sonraki baytlar tar akışıdır.
+    # Görsel ve video kasalarında tekrar sıkıştırma süreyi uzatır.
+    komut = _gpg_komutu() + ["--cipher-algo", "AES256", "--compress-algo", "none",
+                             "--symmetric", "-o", cikti]
+    with _sp.Popen(komut, stdin=_sp.PIPE, stdout=_sp.DEVNULL,
+                   stderr=_sp.DEVNULL,
+                   creationflags=_NO_WINDOW) as gpg:
+        try:
+            gpg.stdin.write(parola + b"\n")
+            gpg.stdin.flush()
+            tar = _sp.run(["tar", "-cf", "-", "-C", kaynak, "."], stdout=gpg.stdin,
+                          stderr=_sp.DEVNULL,
+                          creationflags=_NO_WINDOW)
+        finally:
+            gpg.stdin.close()
+        return tar.returncode == 0 and gpg.wait() == 0
+
+
 def _muhurle(kullanici, parola, kaynak_agac):
-    """kaynak_agac icindekileri sifreleyip kasa dosyasina kaldirir.
-    Once deneme-cozumle yeni dosya dogrulanir, sonra eski kasa yedege alinir.
-    Yari dosya birakmaz: hata olursa eski kasa yerinde durur."""
+    """Arşivi şifreler, doğrular ve ancak sonra mevcut kasanın yerine koyar."""
     _os.makedirs(KASALAR_DIR, exist_ok=True)
     gizle(KASALAR_DIR)
-    ara = _os.path.join(KASALAR_DIR, kullanici + ".ara.tar")
     yeni = _os.path.join(KASALAR_DIR, kullanici + ".yeni.tar.gpg")
-    for f in (ara, yeni):
+    # Önceki sürümden kalmış şifresiz ara arşivi de temizle.
+    ara = _os.path.join(KASALAR_DIR, kullanici + ".ara.tar")
+    for yol in (yeni, ara):
         try:
-            if _os.path.isfile(f):
-                _os.remove(f)
-        except Exception:
+            _os.remove(yol)
+        except FileNotFoundError:
             pass
     try:
-        r = _sp.run(["tar", "-cf", ara, "-C", kaynak_agac, "."],
-                    capture_output=True)
-        if r.returncode != 0:
+        if not _arsiv_sifrele(kaynak_agac, yeni, parola):
             raise KasaHatasi("arsiv yapilamadi")
-        kod = _gpg_simetrik(ara, yeni, parola)
-        if kod != 0 or not _os.path.isfile(yeni):
-            raise KasaHatasi(GENEL_HATA)
         if not _deneme_cozum(yeni, parola):
             raise KasaHatasi("dogrulama basarisiz, eski kasa yerinde duruyor")
         kasa = _kasa_dosya(kullanici)
         onceki = _onceki_dosya(kullanici)
-        if _os.path.isfile(kasa):
-            try:
-                if _os.path.isfile(onceki):
-                    _os.remove(onceki)
-            except Exception:
-                pass
+        eski_var = _os.path.isfile(kasa)
+        if eski_var:
             _os.replace(kasa, onceki)
-        _os.replace(yeni, kasa)
+        try:
+            _os.replace(yeni, kasa)
+        except OSError:
+            if eski_var:
+                _os.replace(onceki, kasa)
+            raise
         gizle(kasa)
     finally:
-        for f in (ara, yeni):
-            try:
-                if _os.path.isfile(f):
-                    _os.remove(f)
-            except Exception:
-                pass
+        try:
+            _os.remove(yeni)
+        except OSError:
+            pass
+
+
+def _profil_gecisi(islem):
+    """Bir profilin disk işlemlerini sırala, diğer profillerin işini bekletme."""
+    @_wraps(islem)
+    def sar(kullanici, *args, **kwargs):
+        _kullanici_dogrula(kullanici)
+        with _kilit:
+            kilit = _profil_kilitleri.get(kullanici)
+            if kilit is None:
+                kilit = _profil_kilitleri[kullanici] = _th.RLock()
+        with kilit:
+            return islem(kullanici, *args, **kwargs)
+    return sar
 
 
 def calisma_koku(kullanici):
@@ -243,6 +267,7 @@ def calisma_koku(kullanici):
     return _calisma(kullanici)
 
 
+@_profil_gecisi
 def profil_sil(kullanici):
     """Kullanicinin kasasini ve acik calismasini siler (uyelik silinirken)."""
     _kullanici_dogrula(kullanici)
@@ -266,6 +291,7 @@ def profil_sil(kullanici):
             pass
 
 
+@_profil_gecisi
 def olustur(kullanici, parola1, parola2, kaynak_agac=None):
     """Ilk kasa. kaynak_agac verilirse icindekiler kasaya konur (tek adimda).
     Muhur dogrulandiktan sonra kaynagin ici temizlenir (sifresiz kopya kalmaz).
@@ -280,7 +306,7 @@ def olustur(kullanici, parola1, parola2, kaynak_agac=None):
         if kaynak_agac is None:
             _os.makedirs(_calisma(kullanici), exist_ok=True)
             kaynak_agac = _calisma(kullanici)
-        _muhurle(kullanici, bytes(parola), kaynak_agac)
+        _muhurle(kullanici, parola, kaynak_agac)
         _kaynak_temizle(kaynak_agac)
         return {"olustu": True, "uyarilar": guc_uyarilari(parola1 or "")}
     finally:
@@ -307,6 +333,7 @@ def _kaynak_temizle(kaynak_agac):
         pass
 
 
+@_profil_gecisi
 def ac(kullanici, parola):
     """Kasayi calisma/ altina acar. Parola bellege alinir (kapanista silinir)."""
     _kullanici_dogrula(kullanici)
@@ -320,34 +347,26 @@ def ac(kullanici, parola):
                     raise KasaHatasi("kasa kapaniyor, bitince yeniden ac")
                 _acik[kullanici]["son"] = _time.time()
                 return {"acildi": True, "zaten": True}
-            kasa = _kasa_dosya(kullanici)
-            if not _os.path.isfile(kasa):
-                raise KasaHatasi("bu profilin kasasi yok, once olustur")
-            hedef = _calisma(kullanici)
-            if _os.path.isdir(hedef) and _os.listdir(hedef):
-                raise KasaHatasi("yarim kalmis calisma var, once kurtar")
-            _os.makedirs(hedef, exist_ok=True)
-            gizle(CALISMA_DIR)
-            gizle(hedef)
-            g = _gpg_coz_boruya(kasa, bytes(hazir))
-            t = _sp.run(["tar", "-x", "-C", hedef], stdin=g.stdout)
-            g.stdout.close()
-            try:
-                g.wait(timeout=120)
-            except Exception:
-                g.kill()
+        kasa = _kasa_dosya(kullanici)
+        if not _os.path.isfile(kasa):
+            raise KasaHatasi("bu profilin kasasi yok, once olustur")
+        hedef = _calisma(kullanici)
+        if _os.path.isdir(hedef) and _os.listdir(hedef):
+            raise KasaHatasi("yarim kalmis calisma var, once kurtar")
+        _os.makedirs(hedef, exist_ok=True)
+        gizle(CALISMA_DIR)
+        gizle(hedef)
+        try:
+            if not _tar_aktar(kasa, hazir, ["tar", "-xf", "-", "-C", hedef]):
                 raise KasaHatasi(GENEL_HATA)
-            if g.returncode != 0 or t.returncode != 0:
-                try:
-                    _shutil.rmtree(hedef, ignore_errors=True)
-                except Exception:
-                    pass
-                raise KasaHatasi(GENEL_HATA)
-            bekleme = _sure_oku(kullanici) * 60
-            _acik[kullanici] = {"parola": bytearray(bytes(hazir)),
-                                "son": _time.time(),
+        except (KasaHatasi, OSError) as hata:
+            _shutil.rmtree(hedef, ignore_errors=True)
+            raise KasaHatasi(GENEL_HATA) from hata
+        bekleme = _sure_oku(kullanici) * 60
+        with _kilit:
+            _acik[kullanici] = {"parola": bytearray(hazir), "son": _time.time(),
                                 "bekleme": bekleme, "kapaniyor": False}
-            return {"acildi": True}
+        return {"acildi": True}
     finally:
         _sifirla(hazir)
 
@@ -383,34 +402,19 @@ def kapanis_baslat(kullanici):
         return True
 
 
+@_profil_gecisi
 def kapat(kullanici):
     """Acik agaci yeniden sifreler, calisma/'yi siler, parolayi bellekten siler."""
     _kullanici_dogrula(kullanici)
-    son = _time.time() + 120
-    bekledi = False
-    while True:
-        with _kilit:
-            kayit = _acik.get(kullanici)
-            if kayit is None:
-                return {"kapandi": bekledi, "neden": "zaten kapali"}
-            if kullanici not in _muhur_suren:
-                _muhur_suren.add(kullanici)
-                olay = _th.Event()
-                _muhur_olaylari[kullanici] = olay
-                parola = bytes(kayit["parola"])
-                hedef = _calisma(kullanici)
-                break
-            olay = _muhur_olaylari.get(kullanici)
-        if _time.time() >= son:
-            # Diger muhur sureci hala sureyorsa bu kapatmayi daha fazla
-            # bekletme; kasa acik kalir, kurtarma yoluyla yeniden muhurlenir.
-            raise KasaHatasi("diger muhurlenme sureci tamamlanmadi")
-        bekledi = True
-        if olay is not None:
-            kalan = max(0.05, min(1.0, son - _time.time()))
-            olay.wait(timeout=kalan)
-        else:
-            _time.sleep(0.1)
+    with _kilit:
+        kayit = _acik.get(kullanici)
+        if kayit is None:
+            return {"kapandi": False, "neden": "zaten kapali"}
+        kayit["kapaniyor"] = True
+        _muhur_suren.add(kullanici)
+        _muhur_olaylari[kullanici] = _th.Event()
+        parola = bytearray(kayit["parola"])
+        hedef = _calisma(kullanici)
 
     muhurlendi = False
     try:
@@ -418,10 +422,6 @@ def kapat(kullanici):
         if _os.path.isdir(hedef):
             _shutil.rmtree(hedef)
         muhurlendi = True
-        try:
-            temizle_comfy_artiklari()
-        except Exception:
-            pass
         return {"kapandi": True}
     finally:
         with _kilit:
@@ -436,7 +436,7 @@ def kapat(kullanici):
             olay = _muhur_olaylari.pop(kullanici, None)
             if olay is not None:
                 olay.set()
-        _sifirla(bytearray(parola))
+        _sifirla(parola)
 
 
 def kapanis_bekle(kullanici, tavan_sn=None):
@@ -474,6 +474,7 @@ def kapanis_iptal(kullanici):
             kayit["kapaniyor"] = False
 
 
+@_profil_gecisi
 def kurtar(kullanici, parola):
     """Yarim kalmis calisma/'yi (ornegin yeniden baslatma sonrasi) muhurler."""
     _kullanici_dogrula(kullanici)
@@ -482,18 +483,18 @@ def kurtar(kullanici, parola):
         with _kilit:
             if kullanici in _acik:
                 raise KasaHatasi("kasa zaten acik")
-            hedef = _calisma(kullanici)
-            if not (_os.path.isdir(hedef) and _os.listdir(hedef)):
-                raise KasaHatasi("kurtarilacak calisma yok")
-            kasa = _kasa_dosya(kullanici)
-            if _os.path.isfile(kasa) and not _deneme_cozum(kasa, bytes(hazir)):
-                raise KasaHatasi(GENEL_HATA)
-            _muhurle(kullanici, bytes(hazir), hedef)
-            try:
-                _shutil.rmtree(hedef, ignore_errors=True)
-            except Exception:
-                pass
-            return {"kurtardi": True}
+        hedef = _calisma(kullanici)
+        if not (_os.path.isdir(hedef) and _os.listdir(hedef)):
+            raise KasaHatasi("kurtarilacak calisma yok")
+        kasa = _kasa_dosya(kullanici)
+        if _os.path.isfile(kasa) and not _deneme_cozum(kasa, hazir):
+            raise KasaHatasi(GENEL_HATA)
+        _muhurle(kullanici, hazir, hedef)
+        try:
+            _shutil.rmtree(hedef, ignore_errors=True)
+        except Exception:
+            pass
+        return {"kurtardi": True}
     finally:
         _sifirla(hazir)
 

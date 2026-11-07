@@ -37,7 +37,6 @@ import kasa
 import llm
 import prompt_store
 import prompt_translation
-import download_models
 from comfy_client import (COMFY, comfy_get_json, comfy_post_json,
                           comfy_request, upload_image_to_comfy)
 from image_graphs import (DIFFUSION_FILE, TEXT_ENCODER_FILE, VAE_FILE,
@@ -53,8 +52,9 @@ from image_utils import (exif_duzelt as _exif_duzelt,
 _AYARLAR_KILIT = threading.RLock()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_ROOT = os.path.abspath(os.environ.get("WEBUI_DATA_ROOT", BASE_DIR))
-_MODEL_MANAGER = download_models.MODEL_MANAGER
-_MODEL_MANAGER.start()
+RUNPOD_MODE = os.environ.get("WEBUI_RUNPOD") == "1"
+if RUNPOD_MODE:
+    import pod_setup
 
 def _dbg(msg):
     try:
@@ -225,8 +225,17 @@ def _ayar_oku(kullanici):
 def _ayar_yaz(kullanici, ayar):
     with _AYARLAR_KILIT:
         _klasor_elin(_kullanici_koku(kullanici))
-        with open(_kullanici_ayar(kullanici), "w", encoding="utf-8") as f:
-            json.dump(ayar, f, ensure_ascii=False, indent=2)
+        yol = _kullanici_ayar(kullanici)
+        gecici = yol + ".tmp"
+        try:
+            with open(gecici, "w", encoding="utf-8") as f:
+                json.dump(ayar, f, ensure_ascii=False, indent=2)
+            os.replace(gecici, yol)
+        finally:
+            try:
+                os.remove(gecici)
+            except FileNotFoundError:
+                pass
 
 
 # Uretim formu kalici alanlari: ad -> (en_alt, en_ust). Reddetme yok,
@@ -289,7 +298,7 @@ def _form_temizle(ham):
     for k, v in ham.items():
         try:
             if k in ("prompt", "negatif"):
-                s = str(v or "")[:5000 if k == "prompt" else 2000]
+                s = str(v or "")[:prompt_translation.MAX_SOURCE_CHARS if k == "prompt" else 2000]
                 if s.strip():
                     temiz[k] = s
             elif k in ("workflow",):
@@ -333,6 +342,111 @@ def _form_temizle(ham):
         except Exception:
             continue
     return temiz
+
+
+def _ayar_degisikliklerini_uygula(ayar, req):
+    if "gecmis_limiti" in req:
+        try:
+            ayar["gecmis_limiti"] = max(0, int(req.get("gecmis_limiti", 0)))
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("gecmis_limiti sayi olmali")
+    if "form" in req:
+        if not isinstance(req["form"], dict):
+            raise ValueError("form sozluk olmali")
+        ayar["form"] = _form_temizle(req["form"])
+    if "ui" in req:
+        temiz_ui = _ui_ayar_temizle(req["ui"])
+        ui_ayarlari = ayar.get("ui", {})
+        if not isinstance(ui_ayarlari, dict):
+            raise ValueError("kayitli ui ayarlari gecersiz")
+        ui_ayarlari.update(temiz_ui)
+        ayar["ui"] = ui_ayarlari
+    if "llm_sistem" in req:
+        s = req.get("llm_sistem") or ""
+        if not isinstance(s, str):
+            raise ValueError("llm_sistem metin olmali")
+        if len(s.strip()) > 4000:
+            raise ValueError("sistem promptu en fazla 4000 karakter")
+        ayar["llm_sistem"] = s.strip()
+    if "llm_sohbet_sistem" in req:
+        s = req.get("llm_sohbet_sistem") or ""
+        if not isinstance(s, str):
+            raise ValueError("llm_sohbet_sistem metin olmali")
+        if len(s.strip()) > 4000:
+            raise ValueError("sohbet sistem promptu en fazla 4000 karakter")
+        ayar["llm_sohbet_sistem"] = s.strip()
+    if "llm_mod" in req:
+        m = req.get("llm_mod")
+        if not isinstance(m, dict):
+            raise ValueError("llm_mod sozluk olmali")
+        temiz_m = {}
+        for k in ("fikir", "gorsel", "birlestir", "ceviri",
+                  "sohbet"):
+            if k in m and m[k] is not None:
+                v = str(m[k])
+                if len(v.strip()) > 2000:
+                    raise ValueError(
+                        "mod talimati en fazla 2000 karakter")
+                if v.strip():
+                    temiz_m[k] = v.strip()
+        ayar["llm_mod"] = temiz_m
+    if "llm_streaming" in req:
+        if not isinstance(req.get("llm_streaming"), bool):
+            raise ValueError("llm_streaming boolean olmali")
+        ayar["llm_streaming"] = req["llm_streaming"]
+    if "llm_low_bandwidth" in req:
+        if not isinstance(req.get("llm_low_bandwidth"), bool):
+            raise ValueError("llm_low_bandwidth boolean olmali")
+        ayar["llm_low_bandwidth"] = req["llm_low_bandwidth"]
+    if "llm_ctx" in req:
+        try:
+            ctx_deger = int(req.get("llm_ctx"))
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("llm_ctx sayi olmali")
+        if ctx_deger < 1024 or ctx_deger > 32768:
+            raise ValueError("llm_ctx 1024-32768 araliginda olmali")
+        ayar["llm_ctx"] = ctx_deger
+    if "llm_prompt_destek_yaraticilik" in req:
+        try:
+            sicaklik = float(req.get("llm_prompt_destek_yaraticilik"))
+        except (TypeError, ValueError):
+            raise ValueError("prompt desteği yaratıcılığı sayı olmalı")
+        ayar["llm_prompt_destek_yaraticilik"] = max(0.2, min(1.2, sicaklik))
+    if "llm_prompt_destek_uzunluk" in req:
+        uzunluk = req.get("llm_prompt_destek_uzunluk")
+        if uzunluk not in ("kisa", "orta", "uzun"):
+            raise ValueError("prompt desteği uzunluğu geçersiz")
+        ayar["llm_prompt_destek_uzunluk"] = uzunluk
+    if "uretim_varsayilan_steps" in req:
+        try:
+            varsayilan_adim = int(req.get("uretim_varsayilan_steps"))
+        except (TypeError, ValueError):
+            raise ValueError("varsayılan step sayı olmalı")
+        ayar["uretim_varsayilan_steps"] = max(1, min(50, varsayilan_adim))
+    if "uretim_varsayilan_seed" in req:
+        try:
+            varsayilan_seed = int(req.get("uretim_varsayilan_seed"))
+        except (TypeError, ValueError):
+            raise ValueError("varsayılan seed sayı olmalı")
+        ayar["uretim_varsayilan_seed"] = max(-1, min(2 ** 31 - 1, varsayilan_seed))
+    if "uretim_varsayilan_max_side" in req:
+        try:
+            varsayilan_max_side = int(req.get("uretim_varsayilan_max_side"))
+        except (TypeError, ValueError):
+            raise ValueError("varsayılan maksimum kenar sayı olmalı")
+        ayar["uretim_varsayilan_max_side"] = max(256, min(4096, varsayilan_max_side))
+    if "uretim_prompt_destek" in req:
+        if not isinstance(req.get("uretim_prompt_destek"), bool):
+            raise ValueError("uretim_prompt_destek boolean olmalı")
+        ayar["uretim_prompt_destek"] = req["uretim_prompt_destek"]
+    if "uretim_prompt_ceviri" in req:
+        if not isinstance(req.get("uretim_prompt_ceviri"), bool):
+            raise ValueError("uretim_prompt_ceviri boolean olmalı")
+        ayar["uretim_prompt_ceviri"] = req["uretim_prompt_ceviri"]
+    if (ayar.get("uretim_prompt_ceviri")
+            and ayar.get("uretim_prompt_destek")):
+        raise ValueError(
+            "Prompt çevirisi ve Prompt Stüdyosu desteği aynı anda açılamaz")
 
 
 def _gecmis_limiti(kullanici):
@@ -448,10 +562,6 @@ _VIDEO_ASAMA = {
 
 COMFY_KOK = os.path.abspath(os.environ.get(
     "COMFYUI_ROOT", os.path.join(BASE_DIR, "..", "ComfyUI")))
-COMFY_HOST, _, _comfy_port_text = COMFY.partition(":")
-COMFY_PORT = int(_comfy_port_text or "8188")
-WEBUI_HOST = os.environ.get("WEBUI_HOST", "0.0.0.0")
-WEBUI_PORT = int(os.environ.get("WEBUI_PORT", "8189"))
 
 
 def _video_diskten_bul(sonrasi_sn):
@@ -549,6 +659,8 @@ def _video_uret(job, req):
             sablon.pop("139", None)
             g.pop("ref_images.ref_image_1", None)
         cid = uuid.uuid4().hex
+        if job["iptal"]:
+            raise RuntimeError("İş durduruldu")
         res = comfy_post_json("/prompt", {"prompt": sablon, "client_id": cid})
         if "node_errors" in res and res["node_errors"]:
             job["durum"] = "hata"
@@ -567,6 +679,8 @@ def _video_uret(job, req):
                          args=(res["prompt_id"], cid, _aktif["nodlar"]),
                          daemon=True).start()
         try:
+            if job["iptal"]:
+                _comfy_isini_kes(res["prompt_id"])
             entry = wait_result(res["prompt_id"], job=job)
         finally:
             if _aktif.get("prompt_id") == res["prompt_id"]:
@@ -605,6 +719,7 @@ def _video_uret(job, req):
             job["hata"] = kota_hata
             job["bitis"] = time.time()
             return
+        _is_sonucu_baslat(job)
         kut1 = kut2 = None
         try:
             if len(kutular) > 0:
@@ -659,9 +774,16 @@ _aktif_llm = {"is_id": None, "sahip": None, "tur": None,
 # --- Is kuyrugu: sayfa yenilense bile isler sunucuda surer, sonuc gecmis+is kaydinda durur ---
 _isler = {}
 _isler_kilit = threading.Lock()
+_llm_is_gecis_kilit = threading.Lock()
 _sohbet_kilit = threading.Lock()
+_http_yazma_kosulu = threading.Condition()
+_http_yazma_istekleri = set()
+_kasa_yazma_istekleri = {}
 _kuyruk = []  # bekleyen is_id'ler (FIFO)
 _kuyruk_calismasi = False
+_ceviri_kuyrugu = []  # CPU hazırlığı, GPU kuyruğunun sırasını değiştirmez.
+_ceviri_calismasi = False
+_LLM_VARSAYILAN_CTX = llm.CTX
 _SAKLANAN_IS_SAYISI = 10  # bitmis islerden en fazla bu kadar/sonuclariyla (dataURL) tutulur
 
 
@@ -691,7 +813,7 @@ def _is_dogrula(req):
 
 def _is_budala_kilitli():
     bitmis = [j for j in _isler.values()
-              if j["durum"] in ("bitti", "hata", "durduruldu")]
+              if j["olay"].is_set()]
     bitmis.sort(key=lambda j: j.get("bitis", 0))
     for j in bitmis[:max(0, len(bitmis) - _SAKLANAN_IS_SAYISI)]:
         _isler.pop(j["is_id"], None)
@@ -705,18 +827,59 @@ def _kuyruga_ekle(req, sahip, tur="goruntu"):
            "prompt_id": None, "ilerleme": {"kuyrukta": True, "oran": 0.0},
            "sonuc": None, "hata": None, "iptal": False,
            "olay": threading.Event()}
-    global _kuyruk_calismasi
+    global _kuyruk_calismasi, _ceviri_calismasi
     with _isler_kilit:
-        if _bellek_bosaltma_aktif:
+        if _bellek_bosaltma_aktif or _kapatma_istegi.is_set():
+            return None, 0
+        kasa_durumu = kasa.durum(sahip)
+        if not kasa_durumu["acik"] or kasa_durumu["kapaniyor"]:
             return None, 0
         _isler[job["is_id"]] = job
         _kuyruk.append(job["is_id"])
         _is_budala_kilitli()
         sira = len(_kuyruk)
+        if tur == "goruntu" and req.get("prompt_ceviri"):
+            job["ceviri_hazir"] = threading.Event()
+            job["ceviri_durum"] = "bekliyor"
+            _ceviri_kuyrugu.append(job)
+            if not _ceviri_calismasi:
+                _ceviri_calismasi = True
+                threading.Thread(target=_ceviri_worker, daemon=True).start()
         if not _kuyruk_calismasi:
             _kuyruk_calismasi = True
             threading.Thread(target=_kuyruk_worker, daemon=True).start()
     return job, sira
+
+
+def _ceviri_worker():
+    """Tek CPU işçisi, sıradaki görsel işlerinin çevirisini önceden hazırlar."""
+    global _ceviri_calismasi
+    while True:
+        with _isler_kilit:
+            if not _ceviri_kuyrugu:
+                _ceviri_calismasi = False
+                return
+            job = _ceviri_kuyrugu.pop(0)
+            if job["iptal"]:
+                job["ceviri_hazir"].set()
+                continue
+            req = job["istek"]
+            metin = str(req.get("prompt_girdi") or req.get("prompt") or "")
+            job["ceviri_durum"] = "calisiyor"
+        try:
+            sonuc = prompt_translation.cevir(
+                metin, job["sahip"], iptal=lambda: job["iptal"])
+            with _isler_kilit:
+                if not job["iptal"]:
+                    job["ceviri_sonuc"] = sonuc
+                    job["ceviri_durum"] = "hazir"
+        except Exception as e:
+            with _isler_kilit:
+                if not job["iptal"]:
+                    job["ceviri_hata"] = str(e)[:1000]
+                    job["ceviri_durum"] = "hata"
+        finally:
+            job["ceviri_hazir"].set()
 
 
 def _llm_prompt_gecmisine_yaz(sahip, req, sonuc):
@@ -744,44 +907,25 @@ def _llm_kuyruk_isini_calistir(job):
     req = job.get("istek") or {}
     sahip = job.get("sahip")
     tur = job.get("tur")
-    job["durum"] = "calisiyor"
-    job["baslangic"] = time.time()
+    with _llm_is_gecis_kilit:
+        if job["iptal"]:
+            raise RuntimeError("İş durduruldu")
+        _aktif_llm = {"is_id": job["is_id"], "sahip": sahip, "tur": tur,
+                      "durum": "Hazırlanıyor", "baslangic": job["baslangic"]}
     canli = llm.durum()["canli"]
-    _aktif_llm = {"is_id": job["is_id"], "sahip": sahip, "tur": tur,
-                  "durum": "Model hazır" if canli else "Bellek bekleniyor",
-                  "baslangic": job["baslangic"]}
+    def gpu_hazirla():
+        _dbg("chat_bosalti_basla")
+        ok, neden = _comfy_bosalti_ve_dogrula(job=job)
+        _dbg(f"chat_bosalti_bitis ok={ok}")
+        if not ok or job.get("iptal"):
+            raise RuntimeError(neden or "iptal edildi")
+
     try:
-        if canli:
-            job["ilerleme"] = {"asama": "hazirlik", "calisan": "Model hazır",
-                               "oran": 0.1}
-        else:
-            job["ilerleme"] = {"asama": "bellek",
-                               "calisan": "Model dosyaları önbelleğe alınıyor",
-                               "oran": 0.03}
-            _dbg("chat_isit_basla")
-            # Prewarm ONCE /free: ComfyUI /free RAM'e cok yaziyor ve
-            # llama sayfalarini cache'ten atiyor. Once llama dosyalarini
-            # oku (2-3 sn), sonra /free ile VRAM bosalt.
-            isit_ms = 0
-            try:
-                isit_ms = llm._dosyalari_isit()
-                _dbg(f"chat_isit_bitis ms={isit_ms}")
-            except Exception as e:
-                _dbg(f"chat_isit_hata {e}")
-            if isit_ms:
-                job["ilerleme"] = {"asama": "bellek",
-                                   "calisan": f"Isitma {isit_ms} ms, VRAM bekleniyor",
-                                   "oran": 0.05}
-            _dbg("chat_bosalti_basla")
-            ok, neden = _comfy_bosalti_ve_dogrula(job=job)
-            _dbg(f"chat_bosalti_bitis ok={ok}")
-            if not ok or job.get("iptal"):
-                raise RuntimeError(neden)
         if job.get("iptal"):
             raise RuntimeError("iptal edildi")
         ayar = _ayar_oku(sahip)
         try:
-            llm.baglam_ayarla(ayar.get("llm_ctx") or llm.CTX)
+            llm.baglam_ayarla(ayar.get("llm_ctx") or _LLM_VARSAYILAN_CTX)
         except llm.LLMHatasi:
             pass
         if llm.baglam_degisti() and not llm.istek_suruyor():
@@ -797,7 +941,9 @@ def _llm_kuyruk_isini_calistir(job):
                                "calisan": "Model yükleniyor", "oran": 0.2}
         if tur == "llm_preload":
             _aktif_llm["durum"] = "Model yükleniyor"
-            job["sonuc"] = llm.hazirla()
+            sonuc = llm.hazirla(gpu_hazirla=gpu_hazirla)
+            _is_sonucu_baslat(job)
+            job["sonuc"] = sonuc
         elif tur == "llm_prompt":
             if not canli:
                 job["ilerleme"] = {"asama": "yukleme",
@@ -808,7 +954,9 @@ def _llm_kuyruk_isini_calistir(job):
                              req.get("gorseller") or [], req.get("dil"),
                              req.get("yaraticilik"), req.get("uzunluk"),
                              sistem_ozel=ayar.get("llm_sistem"),
-                             mod_ozel=(ayar.get("llm_mod") or {}).get(req.get("mod")))
+                             mod_ozel=(ayar.get("llm_mod") or {}).get(req.get("mod")),
+                             gpu_hazirla=gpu_hazirla)
+            _is_sonucu_baslat(job)
             _llm_prompt_gecmisine_yaz(sahip, req, sonuc)
             job["sonuc"] = sonuc
         elif tur == "goruntu" and req.get("prompt_destek"):
@@ -830,7 +978,8 @@ def _llm_kuyruk_isini_calistir(job):
             sonuc = llm.uret(
                 mod, metin, gorseller, "en", yaraticilik, uzunluk,
                 sistem_ozel=ayar.get("llm_sistem"),
-                mod_ozel=(ayar.get("llm_mod") or {}).get(mod))
+                mod_ozel=(ayar.get("llm_mod") or {}).get(mod),
+                gpu_hazirla=gpu_hazirla)
             _llm_prompt_gecmisine_yaz(sahip, {
                 "mod": mod, "metin": metin, "dil": "en",
                 "yaraticilik": yaraticilik, "uzunluk": uzunluk,
@@ -886,6 +1035,8 @@ def _llm_kuyruk_isini_calistir(job):
                     istek_mesajlari.append({"role": "user", "content": ek_talimat})
 
                 def dusunme_guncelle(parca):
+                    if job["iptal"]:
+                        raise RuntimeError("İş durduruldu")
                     sonuc = job.get("sonuc")
                     if sonuc is None or not isinstance(sonuc, dict):
                         sonuc = job["sonuc"] = {}
@@ -895,6 +1046,8 @@ def _llm_kuyruk_isini_calistir(job):
                                        "calisan": "Düşünüyor", "oran": 0.5}
 
                 def parca_guncelle(parca):
+                    if job["iptal"]:
+                        raise RuntimeError("İş durduruldu")
                     sonuc = job.get("sonuc")
                     if sonuc is None or not isinstance(sonuc, dict):
                         sonuc = job["sonuc"] = {}
@@ -908,11 +1061,13 @@ def _llm_kuyruk_isini_calistir(job):
                     istek_mesajlari, req.get("yaraticilik", 0.7),
                     req.get("max_tokens"), parca_geri=parca_guncelle,
                     dusunme_geri=dusunme_guncelle,
-                    stream=bool(ayar.get("llm_streaming", True)))
+                    stream=bool(ayar.get("llm_streaming", True)),
+                    gpu_hazirla=gpu_hazirla)
             finally:
                 llm.SISTEM_PROMPTU = eski_sistem
                 llm.MOD_TALIMATI.clear()
                 llm.MOD_TALIMATI.update(eski_mod)
+            _is_sonucu_baslat(job)
             olcum = dict(olcum or {})
             olcum["yanit"] = yanit
             olcum["sohbet_id"] = sohbet_id
@@ -939,74 +1094,75 @@ def _llm_kuyruk_isini_calistir(job):
         job["durum"] = "durduruldu" if job.get("iptal") else "hata"
         job["hata"] = str(e)[:1000]
     finally:
-        if not job.get("_prompt_destek_devam"):
-            _is_istegi_temizle(job)
         job["bitis"] = time.time()
-        _aktif_llm = {"is_id": None, "sahip": None, "tur": None,
-                      "durum": None, "baslangic": 0}
-        if not job.get("_prompt_destek_devam"):
-            job["olay"].set()
+        with _llm_is_gecis_kilit:
+            _aktif_llm = {"is_id": None, "sahip": None, "tur": None,
+                          "durum": None, "baslangic": 0}
 
 
 def _kuyruk_worker():
-    """Tek isci: kuyrugu sirayla isletir. Sayfa kapanmasi isi durdurmaz."""
+    """ComfyUI ve llama-server aynı GPU'yu sırayla kullanır."""
     global _kuyruk_calismasi
     while True:
         with _isler_kilit:
             if not _kuyruk:
                 _kuyruk_calismasi = False
                 return
-            is_id = _kuyruk.pop(0)
-            job = _isler.get(is_id)
-        if job is None:
-            continue
-        if job.get("iptal"):
-            job["durum"] = "durduruldu"
-            job["bitis"] = time.time()
-            _is_istegi_temizle(job)
-            job["olay"].set()
-            continue
-        if job.get("tur") == "goruntu":
+            job = _isler[_kuyruk.pop(0)]
+            job["durum"] = "calisiyor"
             job["baslangic"] = time.time()
-        # LLM requests share this FIFO; only image work has to stop llama.cpp.
-        prompt_destekli = (job.get("tur") == "goruntu"
-                           and bool((job.get("istek") or {}).get("prompt_destek")))
-        if job.get("tur") == "goruntu" and not prompt_destekli \
-                and llm.durum()["canli"]:
-            job["_llama_canliydi"] = True
-            if not _llm_kapat_ve_bekle():
-                job["durum"] = "hata"
-                job["hata"] = ("llama-server kapanmadi; 8191 portu dolu, "
-                                "is iptal edildi")
-                job["bitis"] = time.time()
-                try:
-                    job["olay"].set()
-                except Exception:
-                    pass
-                continue
-        if prompt_destekli:
-            _llm_kuyruk_isini_calistir(job)
-            if job.pop("_prompt_destek_devam", False):
-                if job.get("iptal"):
-                    job["durum"] = "durduruldu"
-                    job["hata"] = "iptal edildi"
-                    job["bitis"] = time.time()
-                    job["olay"].set()
-                    continue
-                if llm.durum()["canli"]:
-                    job["_llama_canliydi"] = True
-                    if not _llm_kapat_ve_bekle():
-                        job["durum"] = "hata"
-                        job["hata"] = "llama-server kapanmadi; görsel işi başlatılamadı"
-                        job["bitis"] = time.time()
-                        job["olay"].set()
-                        continue
-                job["ilerleme"] = {"calisan": "Görsel üretime gönderiliyor", "oran": 0.2}
-                _isi_calistir(job)
-        elif job.get("tur") in ("llm_prompt", "llm_chat", "llm_preload"):
-            _llm_kuyruk_isini_calistir(job)
-        else:
-            _isi_calistir(job)
+            job["ilerleme"] = {"calisan": "Hazırlanıyor", "oran": 0.0}
+        try:
+            _gpu_isini_calistir(job)
+        except Exception as e:
+            job["durum"] = "durduruldu" if job["iptal"] else "hata"
+            job["hata"] = str(e)[:1000]
+            job["bitis"] = time.time()
+        finally:
+            with _isler_kilit:
+                job.pop("ceviri_sonuc", None)
+                job.pop("ceviri_hata", None)
+                if job["iptal"] and "ceviri_hazir" in job:
+                    job["ceviri_durum"] = "durduruldu"
+                _is_istegi_temizle(job)
+                job["olay"].set()
+
+
+def _gpu_isini_calistir(job):
+    if job["iptal"]:
+        raise RuntimeError("İş durduruldu")
+    tur = job["tur"]
+    if tur in ("llm_prompt", "llm_chat", "llm_preload"):
+        _llm_kuyruk_isini_calistir(job)
+        return
+
+    if "ceviri_hazir" in job:
+        job["ilerleme"] = {"asama": "ceviri",
+                           "calisan": "Türkçe prompt İngilizceye çevriliyor",
+                           "oran": 0.04}
+        while not job["ceviri_hazir"].wait(0.2):
+            if job["iptal"]:
+                raise RuntimeError("İş durduruldu")
+        if job.get("ceviri_hata"):
+            raise RuntimeError(job["ceviri_hata"])
+    if job["iptal"]:
+        raise RuntimeError("İş durduruldu")
+
+    if job["istek"].get("prompt_destek"):
+        _llm_kuyruk_isini_calistir(job)
+        if not job.pop("_prompt_destek_devam", False):
+            return
+        if job["iptal"]:
+            raise RuntimeError("İş durduruldu")
+        job["ilerleme"] = {"calisan": "Görsel üretime gönderiliyor", "oran": 0.2}
+
+    if llm.durum()["canli"]:
+        job["_llama_canliydi"] = True
+        if not _llm_kapat_ve_bekle():
+            raise RuntimeError("llama-server kapanmadı; görsel işi başlatılamadı")
+    if job["iptal"]:
+        raise RuntimeError("İş durduruldu")
+    _isi_calistir(job)
 
 
 def _is_canli_ilerleme(job):
@@ -1047,6 +1203,7 @@ def _is_ozet(job):
         prompt = (istek.get("prompt") or "")[:80]
     return {"is_id": job["is_id"], "durum": job["durum"], "sira": sira,
             "ilerleme": _is_canli_ilerleme(job), "hata": job.get("hata"),
+            "ceviri_durum": job.get("ceviri_durum"),
             "gecen": round(time.time() - job["baslangic"], 1) if job.get("baslangic") else 0,
             "prompt": prompt, "tur": tur,
             "model": istek.get("model", MODEL_FLUX2),
@@ -1094,80 +1251,101 @@ def _kasa_durum_bilgi(kullanici):
     return d
 
 
-def _kullanici_islerini_durdur(kullanici, bekle=True, tavan_sn=None):
-    """Bu kullanicinin bekleyen islerini iptal eder, kosanini durdurur.
-    ComfyUI'ye de dur denir (yalniz bu kullanicinin isi kosuyorsa).
-    bekle=True ise kosan isin bitmesi beklenir (tavan_sn varsa o kadar)."""
+def _is_sonucu_baslat(job):
     with _isler_kilit:
-        for is_id in list(_kuyruk):
-            job = _isler.get(is_id)
-            if job is not None and job.get("sahip") == kullanici \
-                    and job["durum"] == "kuyrukta":
-                _kuyruk.remove(is_id)
-                job["iptal"] = True
-                job["durum"] = "durduruldu"
-                job["bitis"] = time.time()
-                _is_istegi_temizle(job)
-                try:
-                    job["olay"].set()
-                except Exception:
-                    pass
-    if _aktif.get("prompt_id") is not None and _aktif.get("sahip") == kullanici:
-        _aktif["prompt_id"] = None
-        _aktif["sahip"] = None
+        if job["iptal"]:
+            raise RuntimeError("İş durduruldu")
+        job["sonuc_yaziliyor"] = True
+
+
+def _bekleyen_isi_iptal_et(job):
+    """Yalnız kuyruk kilidi altındayken çağrılır."""
+    _kuyruk.remove(job["is_id"])
+    job["iptal"] = True
+    job["durum"] = "durduruldu"
+    job["bitis"] = time.time()
+    if "ceviri_hazir" in job:
+        if job in _ceviri_kuyrugu:
+            _ceviri_kuyrugu.remove(job)
+            job["ceviri_hazir"].set()
+        job["ceviri_durum"] = "durduruldu"
+        job.pop("ceviri_sonuc", None)
+        job.pop("ceviri_hata", None)
+    _is_istegi_temizle(job)
+    job["olay"].set()
+
+
+def _comfy_isini_kes(prompt_id):
+    # Önce bekleyen işi sil; o arada başlamışsa kimliğiyle kes.
+    for yol, istek in (("/queue", {"delete": [prompt_id]}),
+                        ("/interrupt", {"prompt_id": prompt_id})):
         try:
-            comfy_post_json("/interrupt", {})
+            comfy_post_json(yol, istek)
         except Exception:
             pass
-        try:
-            comfy_post_json("/queue", {"clear": True})
-        except Exception:
-            pass
+
+
+def _isi_iptal_et(job):
     with _isler_kilit:
-        for job in _isler.values():
-            if job.get("sahip") == kullanici and job.get("durum") == "calisiyor":
-                job["iptal"] = True
-    if _aktif_llm.get("is_id") is not None and _aktif_llm.get("sahip") == kullanici:
-        try:
+        if job["durum"] == "kuyrukta":
+            _bekleyen_isi_iptal_et(job)
+            return True
+        if job["durum"] != "calisiyor" or job.get("sonuc_yaziliyor"):
+            return False
+        if job["iptal"]:
+            return True
+        job["iptal"] = True
+        prompt_id = job["prompt_id"]
+    if prompt_id:
+        _comfy_isini_kes(prompt_id)
+    with _llm_is_gecis_kilit:
+        if _aktif_llm.get("is_id") == job["is_id"]:
             llm.durdur()
-        except Exception:
-            pass
-    if bekle:
-        t0 = time.time()
-        while True:
-            with _isler_kilit:
-                kosan = [j for j in _isler.values()
-                         if j.get("sahip") == kullanici
-                         and j.get("durum") == "calisiyor"]
-            if not kosan:
-                break
-            if tavan_sn is not None:
-                kalan = tavan_sn - (time.time() - t0)
-                if kalan <= 0:
-                    break
-                bekle_sn = min(30.0, kalan)
-            else:
-                bekle_sn = 30.0
-            try:
-                kosan[0]["olay"].wait(timeout=bekle_sn)
-            except Exception:
-                pass
+    return True
+
+
+def _kullanici_islerini_durdur(kullanici, bekle=True, tavan_sn=None):
+    """Kullanıcının işlerini iptal eder ve istenirse son yazımları bekler."""
+    with _isler_kilit:
+        isler = [j for j in _isler.values() if j["sahip"] == kullanici
+                 and not j["olay"].is_set()]
+    for job in reversed(isler):
+        _isi_iptal_et(job)
+    if not bekle:
+        return True
+    son = None if tavan_sn is None else time.monotonic() + tavan_sn
+    for job in isler:
+        kalan = None if son is None else max(0, son - time.monotonic())
+        if not job["olay"].wait(kalan):
+            return False
+    return True
+
+
+def _kasa_isteklerini_bekle(kullanici):
+    with _http_yazma_kosulu:
+        return _http_yazma_kosulu.wait_for(
+            lambda: not _kasa_yazma_istekleri.get(kullanici), timeout=30)
+
+
+def _kasa_islerini_tamamla(kullanici):
+    if not _kasa_isteklerini_bekle(kullanici):
+        raise RuntimeError("Kasa yazımları tamamlanmadı")
+    if not _kullanici_islerini_durdur(kullanici, bekle=True, tavan_sn=20):
+        raise RuntimeError("Kasa işleri tamamlanmadı")
+    prompt_translation.onbellek_temizle(kullanici)
 
 
 def _kasa_sure_dolumu(kullanici):
-    """Bekci cagirir: isleri durdur, kosani bekle, sonra muhurle."""
-    prompt_translation.onbellek_temizle(kullanici)
-    _kullanici_islerini_durdur(kullanici, bekle=True, tavan_sn=20)
-    try:
-        kasa.kapat(kullanici)
-    except Exception as e:
-        print("Zaman aşımı sonrası kasa mühürlenemedi (%s): %s" % (kullanici, e),
-              flush=True)
+    """Bekçi çağırır: önce yazımları ve üretimi tamamla, sonra mühürle."""
+    if _kapatma_istegi.is_set():
+        kasa.kapanis_iptal(kullanici)
+        return
+    _kasa_islerini_tamamla(kullanici)
+    kasa.kapat(kullanici)
 
 
 def _kasa_kapat_arka(kullanici):
     """Cikis/kapat: bayragi koy, isleri durdur, arka planda muhurle. Hemen doner."""
-    prompt_translation.onbellek_temizle(kullanici)
     try:
         if not kasa.kapanis_baslat(kullanici):
             return False
@@ -1177,9 +1355,7 @@ def _kasa_kapat_arka(kullanici):
 
     def _arka():
         try:
-            # Asili kalan bir isi (ornegin ComfyUI zaten kapandiysa "calisiyor"
-            # olarak yapismis is) muhurlemeyi sonsuza dek bekletmesin.
-            _kullanici_islerini_durdur(kullanici, bekle=True, tavan_sn=20)
+            _kasa_islerini_tamamla(kullanici)
         except Exception as e:
             print("Kasa işleri durdurulamadı (%s): %s" % (kullanici, e), flush=True)
             kasa.kapanis_iptal(kullanici)
@@ -1215,12 +1391,12 @@ def _ws_ilerleme_dinle(prompt_id, client_id, nodlar):
 
     s = None
     try:
-        s = _sock.create_connection((COMFY_HOST, COMFY_PORT), timeout=10)
+        s = _sock.create_connection(("127.0.0.1", 8188), timeout=10)
         key = _b64.b64encode(_os.urandom(16)).decode()
-        s.sendall(("GET /ws?clientId=%s HTTP/1.1\r\nHost: %s\r\n"
+        s.sendall(("GET /ws?clientId=%s HTTP/1.1\r\nHost: 127.0.0.1:8188\r\n"
                    "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                    "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n"
-                   % (client_id, COMFY, key)).encode())
+                   % (client_id, key)).encode())
         head = b""
         while b"\r\n\r\n" not in head:
             head += s.recv(1024)
@@ -1299,7 +1475,7 @@ def _vram_bos_mb():
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=memory.free",
              "--format=csv,noheader,nounits"],
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             timeout=3).decode("utf-8", "replace")
         return max(0, int(out.strip().splitlines()[0].split()[0]))
     except Exception:
@@ -1324,14 +1500,6 @@ def _comfy_bosalti_ve_dogrula(job=None, zorla=False):
                        "icin LLM baslatilmadi")
     if not zorla and vram_bos is not None and vram_bos >= LLM_VRAM_GEREK_MB:
         return True, ""
-    try:
-        comfy_get_json("/system_stats")
-    except Exception:
-        if vram_bos is None:
-            return False, "Bos VRAM olculemedi ve ComfyUI'ye ulasilamadi; bellek bosaltilamadi"
-        return False, ("VRAM yetersiz (%d MB bos, en az %d MB gerekli); "
-                       "ComfyUI kapali oldugu icin modeller bosaltilamadi"
-                       % (vram_bos, LLM_VRAM_GEREK_MB))
     try:
         comfy_kuyruk = comfy_get_json("/queue")
     except Exception as e:
@@ -1879,10 +2047,13 @@ def _gecmis_album_id(meta):
     if not isinstance(meta, dict) or not meta.get("prompt"):
         return None
     dosyalar = meta.get("dosyalar") or []
-    if dosyalar and str(dosyalar[0]).lower().endswith(".mp4"):
+    # A history record is one generated result. Never group a video result
+    # with still images, regardless of which video container it uses.
+    if any(str(dosya).lower().endswith((".mp4", ".webm", ".mov", ".m4v"))
+           for dosya in dosyalar):
         return None
     refs = meta.get("foto_hashes")
-    if not isinstance(refs, list):
+    if not isinstance(refs, list) or not refs:
         refs = [meta.get("foto_kutuphane"), meta.get("foto_kutuphane2")]
     refs = [str(ref) for ref in refs if ref]
     anahtar = json.dumps(
@@ -2348,7 +2519,7 @@ def _isi_calistir(job):
             job["ilerleme"] = {"asama": "ceviri",
                                "calisan": "Türkçe prompt İngilizceye çevriliyor",
                                "oran": 0.04}
-            ceviri = prompt_translation.cevir(prompt_girdi, job["sahip"])
+            ceviri = job["ceviri_sonuc"]
             prompt_servis = ceviri["metin"]
             req["prompt_girdi"] = prompt_girdi
             req["prompt_en"] = prompt_servis
@@ -2384,6 +2555,8 @@ def _isi_calistir(job):
                                "calisan": "Model dosyası önbelleğe alınıyor",
                                "oran": 0.02}
             _dosya_isit(isitma_yolu, job)
+        if job["iptal"]:
+            raise RuntimeError("İş durduruldu")
         res = comfy_post_json("/prompt", {"prompt": prompt, "client_id": cid})
         if "node_errors" in res and res["node_errors"]:
             job["durum"] = "hata"
@@ -2401,6 +2574,8 @@ def _isi_calistir(job):
                          args=(res["prompt_id"], cid, _aktif["nodlar"]),
                          daemon=True).start()
         try:
+            if job["iptal"]:
+                _comfy_isini_kes(res["prompt_id"])
             entry = wait_result(res["prompt_id"], job=job)
         finally:
             if _aktif.get("prompt_id") == res["prompt_id"]:
@@ -2436,6 +2611,7 @@ def _isi_calistir(job):
             job["bitis"] = time.time()
             return
         # Kutuphane: yuklenen fotolari tarih-adla sakla (uretim basarili olunca).
+        _is_sonucu_baslat(job)
         kut1 = kut2 = None
         try:
             if ham1 is not None and raw is not None and foto_hedef:
@@ -2505,10 +2681,6 @@ def _isi_calistir(job):
         job["bitis"] = time.time()
     finally:
         try:
-            _is_istegi_temizle(job)
-        except Exception:
-            pass
-        try:
             # Is nasil biterse bitsin ComfyUI'deki ozel dosyalar silinir.
             kasa.temizle_comfy_artiklari()
         except Exception:
@@ -2519,10 +2691,6 @@ def _isi_calistir(job):
                           headers={"Content-Type": "application/json"})
         except Exception:
             pass
-        try:
-            job["olay"].set()
-        except Exception:
-            pass
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -2531,31 +2699,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def finish(self):
-        try:
-            super().finish()
-        finally:
-            if getattr(self, "_ayarlar_kilit_tutuyor", False):
-                self._ayarlar_kilit_tutuyor = False
-                _AYARLAR_KILIT.release()
-
     def _send(self, code, body, ctype="application/json", ek_baslik=None):
-        try:
-            if isinstance(body, str):
-                body = body.encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            # Ozel veri diskte onbellege yazilmasin (bu makineden disari sizmasin).
-            self.send_header("Cache-Control", "no-store")
-            for k, v in (ek_baslik or []):
-                self.send_header(k, v)
-            self.end_headers()
-            self.wfile.write(body)
-        finally:
-            if getattr(self, "_ayarlar_kilit_tutuyor", False):
-                self._ayarlar_kilit_tutuyor = False
-                _AYARLAR_KILIT.release()
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        # Ozel veri diskte onbellege yazilmasin.
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (ek_baslik or []):
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
 
     # --- Auth guard'lari: tum veri/is endpoint'leri buradan gecer ---
     def _cerez_token(self):
@@ -2589,12 +2744,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _kasa_gerekli(self, kullanici):
         """Kasa acik degilse 423 doner. Aciksa kullanim saatini tazeler."""
-        try:
-            acik = bool(kasa.durum(kullanici).get("acik"))
-        except Exception:
-            acik = False
-        if not acik:
-            self._send(423, '{"hata":"kasa kilitli"}')
+        with _http_yazma_kosulu:
+            try:
+                durum = kasa.durum(kullanici)
+            except Exception:
+                durum = {}
+            izinli = durum.get("acik") and not durum.get("kapaniyor")
+            if izinli and self.command == "POST":
+                self._kasa_yazma_kullanicisi = kullanici
+                _kasa_yazma_istekleri.setdefault(kullanici, set()).add(self)
+        if not izinli:
+            self._send(423, '{"hata":"kasa kilitli veya kapanıyor"}')
             return None
         try:
             kasa.dokun(kullanici)
@@ -2652,8 +2812,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return [("Set-Cookie", "%s=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0"
                 % auth.COKIE_ADI)]
 
+    def parse_request(self):
+        ok = super().parse_request()
+        return ok and self.server.istek_basladi(self.connection)
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/sunucu-hazir":
+            kapaniyor = _kapatma_istegi.is_set()
+            self._send(503 if kapaniyor else 200,
+                       json.dumps({"pid": os.getpid(), "hazir": not kapaniyor}))
+            return
         if _kapatma_istegi.is_set() and parsed.path not in (
                 "/", "/index.html", "/static/app.css", "/static/app.js"):
             self._send(503, '{"hata":"WebUI güvenli biçimde kapanıyor"}')
@@ -2675,6 +2844,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     ctype = ("text/css; charset=utf-8" if ad.endswith(".css")
                              else "application/javascript; charset=utf-8")
                     self._send(200, veri, ctype)
+        elif parsed.path == "/api/pod-kurulum" and RUNPOD_MODE:
+            if self._admin_gerekli() is not None:
+                self._send(200, json.dumps(pod_setup.status(), ensure_ascii=False))
         elif parsed.path == "/api/durum":
             info = {"comfy": False, "modeller": {}, "llm": {},
                     "uretim_suruyor": False, "kuyruk_bekleyen": 0}
@@ -2715,8 +2887,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
             self._send(200, json.dumps(info))
-        elif parsed.path == "/api/model-indirme":
-            self._send(200, json.dumps(_MODEL_MANAGER.status(), ensure_ascii=False))
         elif parsed.path == "/api/kurulum-durumu":
             self._send(200, json.dumps({"kurulu": _auth_store.kurulu_mu()}))
         elif parsed.path == "/api/ben":
@@ -3059,23 +3229,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        if _kapatma_istegi.is_set() and parsed.path != "/api/sunucu-kapat":
+        if parsed.path == "/api/sunucu-kapat":
+            self._do_POST(parsed)
+            return
+        with _http_yazma_kosulu:
+            kapaniyor = _kapatma_istegi.is_set()
+            if not kapaniyor:
+                _http_yazma_istekleri.add(self)
+        if kapaniyor:
             self._send(503, '{"hata":"WebUI güvenli biçimde kapanıyor"}')
             return
+        try:
+            self._do_POST(parsed)
+        finally:
+            with _http_yazma_kosulu:
+                _http_yazma_istekleri.discard(self)
+                kullanici = getattr(self, "_kasa_yazma_kullanicisi", None)
+                if kullanici in _kasa_yazma_istekleri:
+                    istekler = _kasa_yazma_istekleri[kullanici]
+                    istekler.discard(self)
+                    if not istekler:
+                        del _kasa_yazma_istekleri[kullanici]
+                _http_yazma_kosulu.notify_all()
+
+    def _do_POST(self, parsed):
         # Tum POST'lar CSRF perdesinden gecer (Origin/Referer varsa Host ile ayni olmali).
         if not self._origin_kontrol():
             return
-        if parsed.path == "/api/model-indirme/sira":
+        if parsed.path == "/api/pod-kurulum" and RUNPOD_MODE:
+            if self._admin_gerekli() is None:
+                return
             req = self._json_oku()
-            if "__hata__" in req or not isinstance(req.get("order"), list):
-                self._send(400, '{"hata":"geçerli bir model sırası gerekli"}')
-                return
             try:
-                _MODEL_MANAGER.set_order(req["order"])
-            except RuntimeError as exc:
-                self._send(409, json.dumps({"hata": str(exc)}, ensure_ascii=False))
-                return
-            self._send(200, json.dumps(_MODEL_MANAGER.status(), ensure_ascii=False))
+                pod_setup.start(req.get("grup"))
+            except ValueError as hata:
+                self._send(400, json.dumps({"hata": str(hata)}))
+            else:
+                self._send(202, json.dumps(pod_setup.status(), ensure_ascii=False))
             return
         # Herkese acik auth girisleri (kurulum/giris). Diger POST'lar asagida guard'li.
         if parsed.path == "/api/kurulum":
@@ -3266,24 +3456,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             if self._kasa_gerekli(kullanici) is None:
                 return
-            # Yalniz kendi calisan isi durdurulur; baskasinin isi pasif cevap alir.
-            if _aktif.get("prompt_id") is None or _aktif.get("sahip") != kullanici:
-                self._send(200, json.dumps({"durduruldu": False,
-                                            "kuyruk": False}))
-                return
-            pid = _aktif.get("prompt_id")
-            _aktif["prompt_id"] = None
-            _aktif["sahip"] = None
-            try:
-                comfy_post_json("/interrupt", {})
-            except Exception:
-                pass
-            try:
-                comfy_post_json("/queue", {"clear": True})
-            except Exception:
-                pass
-            self._send(200, json.dumps({"durduruldu": True,
-                                        "kuyruk": pid is not None}))
+            with _isler_kilit:
+                job = next((j for j in _isler.values()
+                            if j["sahip"] == kullanici
+                            and j["durum"] == "calisiyor"
+                            and j["prompt_id"] == _aktif.get("prompt_id")
+                            and j["prompt_id"] is not None), None)
+            durduruldu = job is not None and _isi_iptal_et(job)
+            self._send(200, json.dumps({"durduruldu": durduruldu,
+                                        "kuyruk": job is not None}))
             return
         if parsed.path == "/api/arsiv/sil":
             kullanici = self._auth_gerekli()
@@ -3416,161 +3597,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(400, json.dumps({"hata": "istek okunamadi: %s" % e}))
                 return
-            _AYARLAR_KILIT.acquire()
-            self._ayarlar_kilit_tutuyor = True
-            ayar = _ayar_oku(kullanici)
+            if not isinstance(req, dict):
+                self._send(400, '{"hata":"ayarlar sözlük olmalı"}')
+                return
+            try:
+                with _AYARLAR_KILIT:
+                    ayar = _ayar_oku(kullanici)
+                    _ayar_degisikliklerini_uygula(ayar, req)
+                    _ayar_yaz(kullanici, ayar)
+            except ValueError as e:
+                self._send(400, json.dumps({"hata": str(e)}, ensure_ascii=False))
+                return
+            except OSError:
+                self._send(500, '{"hata":"ayarlar kaydedilemedi"}')
+                return
             if "gecmis_limiti" in req:
-                try:
-                    ayar["gecmis_limiti"] = max(0, int(req.get("gecmis_limiti", 0)))
-                except Exception:
-                    self._send(400, json.dumps({"hata": "gecmis_limiti sayi olmali"}))
-                    return
-                _ayar_yaz(kullanici, ayar)
                 _gecmis_buda(kullanici)
-            if "form" in req:
-                if not isinstance(req.get("form"), dict):
-                    self._send(400, json.dumps({"hata": "form sozluk olmali"}))
-                    return
-                ayar["form"] = _form_temizle(req.get("form"))
-                _ayar_yaz(kullanici, ayar)
-            if "ui" in req:
-                try:
-                    temiz_ui = _ui_ayar_temizle(req["ui"])
-                    ui_ayarlari = ayar.get("ui", {})
-                    if not isinstance(ui_ayarlari, dict):
-                        raise ValueError("kayitli ui ayarlari gecersiz")
-                    ui_ayarlari.update(temiz_ui)
-                    ayar["ui"] = ui_ayarlari
-                    _ayar_yaz(kullanici, ayar)
-                except ValueError as e:
-                    self._send(400, json.dumps({"hata": str(e)},
-                                               ensure_ascii=False))
-                    return
-            if ("llm_sistem" in req or "llm_sohbet_sistem" in req
-                    or "llm_mod" in req or "llm_streaming" in req
-                    or "llm_low_bandwidth" in req
-                    or "llm_ctx" in req or "llm_prompt_destek_yaraticilik" in req
-                    or "llm_prompt_destek_uzunluk" in req
-                    or "uretim_varsayilan_steps" in req
-                    or "uretim_varsayilan_seed" in req
-                    or "uretim_varsayilan_max_side" in req
-                    or "uretim_prompt_destek" in req
-                    or "uretim_prompt_ceviri" in req):
-                try:
-                    if "llm_sistem" in req:
-                        s = req.get("llm_sistem") or ""
-                        if not isinstance(s, str):
-                            raise ValueError("llm_sistem metin olmali")
-                        if len(s.strip()) > 4000:
-                            raise ValueError("sistem promptu en fazla 4000 karakter")
-                        ayar["llm_sistem"] = s.strip()
-                    if "llm_sohbet_sistem" in req:
-                        s = req.get("llm_sohbet_sistem") or ""
-                        if not isinstance(s, str):
-                            raise ValueError("llm_sohbet_sistem metin olmali")
-                        if len(s.strip()) > 4000:
-                            raise ValueError("sohbet sistem promptu en fazla 4000 karakter")
-                        ayar["llm_sohbet_sistem"] = s.strip()
-                    if "llm_mod" in req:
-                        m = req.get("llm_mod")
-                        if not isinstance(m, dict):
-                            raise ValueError("llm_mod sozluk olmali")
-                        temiz_m = {}
-                        for k in ("fikir", "gorsel", "birlestir", "ceviri",
-                                  "sohbet"):
-                            if k in m and m[k] is not None:
-                                v = str(m[k])
-                                if len(v.strip()) > 2000:
-                                    raise ValueError(
-                                        "mod talimati en fazla 2000 karakter")
-                                if v.strip():
-                                    temiz_m[k] = v.strip()
-                        ayar["llm_mod"] = temiz_m
-                    if "llm_streaming" in req:
-                        if not isinstance(req.get("llm_streaming"), bool):
-                            raise ValueError("llm_streaming boolean olmali")
-                        ayar["llm_streaming"] = req["llm_streaming"]
-                    if "llm_low_bandwidth" in req:
-                        if not isinstance(req.get("llm_low_bandwidth"), bool):
-                            raise ValueError("llm_low_bandwidth boolean olmali")
-                        ayar["llm_low_bandwidth"] = req["llm_low_bandwidth"]
-                    if "llm_ctx" in req:
-                        try:
-                            ctx_deger = int(req.get("llm_ctx"))
-                        except (TypeError, ValueError):
-                            raise ValueError("llm_ctx sayi olmali")
-                        if ctx_deger < 1024 or ctx_deger > 32768:
-                            raise ValueError("llm_ctx 1024-32768 araliginda olmali")
-                        ayar["llm_ctx"] = ctx_deger
-                    if "llm_prompt_destek_yaraticilik" in req:
-                        try:
-                            sicaklik = float(req.get("llm_prompt_destek_yaraticilik"))
-                        except (TypeError, ValueError):
-                            raise ValueError("prompt desteği yaratıcılığı sayı olmalı")
-                        ayar["llm_prompt_destek_yaraticilik"] = max(0.2, min(1.2, sicaklik))
-                    if "llm_prompt_destek_uzunluk" in req:
-                        uzunluk = req.get("llm_prompt_destek_uzunluk")
-                        if uzunluk not in ("kisa", "orta", "uzun"):
-                            raise ValueError("prompt desteği uzunluğu geçersiz")
-                        ayar["llm_prompt_destek_uzunluk"] = uzunluk
-                    if "uretim_varsayilan_steps" in req:
-                        try:
-                            varsayilan_adim = int(req.get("uretim_varsayilan_steps"))
-                        except (TypeError, ValueError):
-                            raise ValueError("varsayılan step sayı olmalı")
-                        ayar["uretim_varsayilan_steps"] = max(1, min(50, varsayilan_adim))
-                    if "uretim_varsayilan_seed" in req:
-                        try:
-                            varsayilan_seed = int(req.get("uretim_varsayilan_seed"))
-                        except (TypeError, ValueError):
-                            raise ValueError("varsayılan seed sayı olmalı")
-                        ayar["uretim_varsayilan_seed"] = max(-1, min(2 ** 31 - 1, varsayilan_seed))
-                    if "uretim_varsayilan_max_side" in req:
-                        try:
-                            varsayilan_max_side = int(req.get("uretim_varsayilan_max_side"))
-                        except (TypeError, ValueError):
-                            raise ValueError("varsayılan maksimum kenar sayı olmalı")
-                        ayar["uretim_varsayilan_max_side"] = max(256, min(4096, varsayilan_max_side))
-                    if "uretim_prompt_destek" in req:
-                        if not isinstance(req.get("uretim_prompt_destek"), bool):
-                            raise ValueError("uretim_prompt_destek boolean olmalı")
-                        ayar["uretim_prompt_destek"] = req["uretim_prompt_destek"]
-                    if "uretim_prompt_ceviri" in req:
-                        if not isinstance(req.get("uretim_prompt_ceviri"), bool):
-                            raise ValueError("uretim_prompt_ceviri boolean olmalı")
-                        ayar["uretim_prompt_ceviri"] = req["uretim_prompt_ceviri"]
-                    if (ayar.get("uretim_prompt_ceviri")
-                            and ayar.get("uretim_prompt_destek")):
-                        raise ValueError(
-                            "Prompt çevirisi ve Prompt Stüdyosu desteği aynı anda açılamaz")
-                    _ayar_yaz(kullanici, ayar)
-                except ValueError as e:
-                    self._send(400, json.dumps({"hata": str(e)},
-                                               ensure_ascii=False))
-                    return
             llm_ctx_uygulama = None
             if "llm_ctx" in req:
-                llm_ctx_uygulama = {"istenen": ayar.get("llm_ctx"),
-                                    "uygulandi": False,
+                # Bağlamı yalnız LLM işçisi değiştirir; yeni iş ayarları diskten okur.
+                llm_ctx_uygulama = {"istenen": ayar["llm_ctx"], "uygulandi": False,
                                     "model_yeniden_baslatilacak": False,
-                                    "calisan_ctx": None}
-                try:
-                    if llm.istek_suruyor():
-                        llm_ctx_uygulama["not"] = \
-                            "süren LLM işi var; ayar sonraki başlatmada uygulanır"
-                    else:
-                        llm.baglam_ayarla(ayar["llm_ctx"])
-                        llm_ctx_uygulama["uygulandi"] = True
-                        llm_d = llm.durum()
-                        llm_ctx_uygulama["calisan_ctx"] = llm_d.get("calisan_ctx")
-                        if llm_d.get("canli") and llm_d.get("calisan_ctx") \
-                                and llm_d["calisan_ctx"] != ayar["llm_ctx"]:
-                            # Sunucu bos: guvenli kapat, yeni deger bir
-                            # sonraki is baslatmasinda gecerli olur.
-                            llm.durdur()
-                            llm_ctx_uygulama["model_yeniden_baslatilacak"] = True
-                except Exception:
-                    pass
+                                    "calisan_ctx": None,
+                                    "not": "Bir sonraki LLM işinde uygulanır"}
             self._send(200, json.dumps(
                 {"ayarlar": ayar, "llm_ctx_uygulama": llm_ctx_uygulama},
                 ensure_ascii=False))
@@ -3732,18 +3781,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self._kasa_gerekli(kullanici) is None:
                 return
             with _isler_kilit:
-                bekleyen = [i for i in list(_kuyruk)
-                            if (_isler.get(i) or {}).get("sahip") == kullanici]
+                bekleyen = [i for i in _kuyruk if _isler[i]["sahip"] == kullanici]
                 for is_id in bekleyen:
-                    _kuyruk.remove(is_id)
-                for is_id in bekleyen:
-                    job = _isler.get(is_id)
-                    if job is not None and job["durum"] == "kuyrukta":
-                        job["iptal"] = True
-                        job["durum"] = "durduruldu"
-                        job["bitis"] = time.time()
-                        _is_istegi_temizle(job)
-                        job["olay"].set()
+                    _bekleyen_isi_iptal_et(_isler[is_id])
             self._send(200, json.dumps({"temizlendi": len(bekleyen)}))
             return
         if parsed.path == "/api/is/iptal":
@@ -3762,26 +3802,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if job is None or job.get("sahip") != kullanici:
                 self._send(404, '{"hata":"bulunamadi"}')
                 return
-            if job["durum"] == "kuyrukta":
-                with _isler_kilit:
-                    if job["is_id"] in _kuyruk:
-                        _kuyruk.remove(job["is_id"])
-                job["iptal"] = True
-                job["durum"] = "durduruldu"
-                job["bitis"] = time.time()
-                _is_istegi_temizle(job)
-                job["olay"].set()
-            elif job["durum"] == "calisiyor":
-                job["iptal"] = True
-                # ComfyUI kesintisi yalniz aktif is de bu kullanicin ise yapilir.
-                if _aktif_llm.get("is_id") == job["is_id"]:
-                    llm.durdur()
-                elif _aktif.get("sahip") == kullanici:
-                    try:
-                        comfy_post_json("/interrupt", {})
-                    except Exception:
-                        pass
-            self._send(200, json.dumps({"iptal": True, "is_id": job["is_id"],
+            iptal = _isi_iptal_et(job)
+            self._send(200, json.dumps({"iptal": iptal, "is_id": job["is_id"],
                                         "durum": job["durum"]}))
             return
         if parsed.path == "/api/kasa/ac":
@@ -3914,10 +3936,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             req = self._json_oku()
             muhurlensin = req.get("mod") != "yeniden_baslat"
-            _kapatma_istegi.set()
-            self._send(200, '{"kapaniyor":true}')
-            threading.Thread(target=_sunucu_kapat_arka,
-                             args=(muhurlensin,), daemon=True).start()
+            with _kapatma_istek_kilit:
+                if _kapatma_istegi.is_set():
+                    self._send(409, '{"hata":"WebUI zaten kapanıyor"}')
+                    return
+                _kapatma_istegi.set()
+            try:
+                self._send(200, '{"kapaniyor":true}')
+            finally:
+                threading.Thread(target=_sunucu_kapat_arka,
+                                 args=(muhurlensin,), daemon=True).start()
             return
         if parsed.path == "/api/prompt-gecmisi/sil":
             kullanici = self._auth_gerekli()
@@ -4033,6 +4061,7 @@ _httpd = None
 _duzgun_kapat_kilit = threading.Lock()
 _duzgun_kapatildi = False
 _kapatma_istegi = threading.Event()
+_kapatma_istek_kilit = threading.Lock()
 
 
 def duzgun_kapat(muhurlensin=True):
@@ -4041,12 +4070,15 @@ def duzgun_kapat(muhurlensin=True):
     with _duzgun_kapat_kilit:
         if _duzgun_kapatildi:
             return
-        _kapatma_istegi.set()
+        with _http_yazma_kosulu:
+            _kapatma_istegi.set()
+            if not _http_yazma_kosulu.wait_for(lambda: not _http_yazma_istekleri, timeout=30):
+                raise RuntimeError("Açık yazma istekleri tamamlanmadı")
         islem = "kasalar mühürleniyor" if muhurlensin else "kasalar açık bırakılıyor"
         print("Kapanıyor: işler durduruluyor, %s..." % islem, flush=True)
         kullanicilar = kasa.aciklar()
         for kullanici in kullanicilar:
-            _kullanici_islerini_durdur(kullanici, bekle=True, tavan_sn=20)
+            _kasa_islerini_tamamla(kullanici)
             # Arka muhur isini bitirene kadar bekle; o is bittiginde bayrak
             # kendiliginden iner. Tavan asiminda kapanis_iptal cagirmayiz:
             # o bayragi yalnizca muhur sureci bitmisken indirir, aksi halde
@@ -4068,7 +4100,6 @@ def duzgun_kapat(muhurlensin=True):
 
 def _sunucu_kapat_arka(muhurlensin=True):
     """Başlatıcı isteğinde işleri bitir, istenen kasa politikasını uygula, sunucuyu durdur."""
-    time.sleep(1)
     try:
         duzgun_kapat(muhurlensin=muhurlensin)
     except Exception as e:
@@ -4082,13 +4113,55 @@ def _sunucu_kapat_arka(muhurlensin=True):
         print("WebUI sunucusu durdurulamadı: %s" % e, flush=True)
 
 
+class WebUIServer(http.server.ThreadingHTTPServer):
+    # Başlıkları tamamlanmamış bağlantılar uygulama işi sayılmaz.
+    daemon_threads = True
+
+    def __init__(self, *args, **kwargs):
+        self._istekler = set()
+        self._istek_kosulu = threading.Condition()
+        self._dinleme_bitti = False
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        conn, address = super().get_request()
+        conn.settimeout(30)
+        return conn, address
+
+    def istek_basladi(self, conn):
+        with self._istek_kosulu:
+            if self._dinleme_bitti:
+                return False
+            self._istekler.add(conn)
+            return True
+
+    def shutdown_request(self, conn):
+        try:
+            super().shutdown_request(conn)
+        finally:
+            with self._istek_kosulu:
+                self._istekler.discard(conn)
+                if not self._istekler:
+                    self._istek_kosulu.notify_all()
+
+    def server_close(self):
+        with self._istek_kosulu:
+            self._dinleme_bitti = True
+            self._istek_kosulu.wait_for(lambda: not self._istekler)
+        super().server_close()
+
+
 if __name__ == "__main__":
-    with http.server.ThreadingHTTPServer((WEBUI_HOST, WEBUI_PORT), Handler) as httpd:
+    if RUNPOD_MODE:
+        os.umask(0o077)
+        pod_setup.prepare_data(DATA_ROOT, _auth_store)
+        signal.signal(signal.SIGTERM, signal.default_int_handler)
+    with WebUIServer(("0.0.0.0", 8189), Handler) as httpd:
         _httpd = httpd
         httpd.allow_reuse_address = True
-        httpd.daemon_threads = False
-        httpd.block_on_close = True
-        print("Flux2 WebUI: http://%s:%d  (ComfyUI: %s)" % (WEBUI_HOST, WEBUI_PORT, COMFY),
+        if not RUNPOD_MODE:
+            prompt_translation.onisit()
+        print("Flux2 WebUI: http://0.0.0.0:8189  (yerel agdan telefonla erisim acik; ComfyUI: %s)" % COMFY,
               flush=True)
         try:
             if hasattr(signal, "SIGBREAK"):
@@ -4098,7 +4171,7 @@ if __name__ == "__main__":
         try:
             while True:
                 try:
-                    httpd.serve_forever()
+                    httpd.serve_forever(poll_interval=0.1)
                     break
                 except KeyboardInterrupt:
                     try:

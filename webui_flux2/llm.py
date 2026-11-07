@@ -21,10 +21,10 @@ from PIL import Image, ImageOps
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
-LLAMA_SERVER = os.environ.get(
-    "LLAMA_SERVER_PATH",
-    os.path.join(PROJECT_ROOT, "llama.cpp",
-                 "llama-server.exe" if os.name == "nt" else "llama-server"))
+LLAMA_SERVER = os.environ.get("LLAMA_SERVER_PATH", os.path.join(
+    PROJECT_ROOT, "llama.cpp", "llama-server.exe"))
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_linux_process = None
 
 def _llm_dbg(msg):
     try:
@@ -32,21 +32,15 @@ def _llm_dbg(msg):
             f.write(f"[LLMDBG {time.time():.0f}] {msg}\n")
     except Exception:
         pass
-MODEL_PATH = os.environ.get(
-    "LLM_MODEL_PATH",
-    os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
-                 "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"))
-MMPROJ_PATH = os.environ.get(
-    "LLM_MMPROJ_PATH",
-    os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
-                 "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf"))
+MODEL_PATH = os.environ.get("LLM_MODEL_PATH", os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
+                          "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"))
+MMPROJ_PATH = os.environ.get("LLM_MMPROJ_PATH", os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
+                           "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf"))
 # Q8_0 ayristirmasi: f16 mmproj'in yarisi boyutunda. llama-quantize'un
 # a.conv1d f32-tenensorlerinde boyut asserasyonu catirdigindan bu tensorler
 # f32 birakildi. Yarim boyut -> yuklemede yaklasik 3 sn kazanc.
-MMPROJ_Q8_PATH = os.environ.get(
-    "LLM_MMPROJ_Q8_PATH",
-    os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
-                 "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf"))
+MMPROJ_Q8_PATH = os.environ.get("LLM_MMPROJ_Q8_PATH", os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
+                              "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf"))
 MMPROJ_Q8_BEYIT = 555408320
 MMPROJ_Q8_KOD = "DC40C0FA3C765D90E744825EC567B1698847F033A06EE04CE5F7B0085D349C0E"
 MODEL_BEYIT = 5335285728
@@ -55,7 +49,7 @@ MODEL_KOD = "D0027DD3A9128D9323E9F282C8BF010A8526C46477584535991DC1A869B56E96"
 MMPROJ_KOD = "DEBAD39AB9C1152AB67695A674FB35E8375B2320C57BFD5075835D3CCB16C7DB"
 PORT = 8191
 # RTX 3050 Ti 4 GB: 38 layers loads faster; 42 layers decodes faster but loads slower.
-GPU_KATMAN = 38
+GPU_KATMAN = int(os.environ.get("LLAMA_GPU_LAYERS", "38"))
 CTX = 8000                 # varsayilan; kullanicinin llm_ctx ayari ile guncellenir
 BAGLAM_ALT = 1024
 BAGLAM_UST = 32768
@@ -106,7 +100,9 @@ MOD_TALIMATI = {
               "uzatma, teknik veya çok adımlı sorularda uygulanabilir ayrıntıları "
               "atlama. Görsel ekliyse yalnızca görülebilen özelliklere dayan. "
               "Gerektiğinde somut Flux/Z-Image önerisi ekle. Kullanıcının dilinde "
-              "doğal metin yaz; JSON veya iç düşünce dökümü verme.",
+              "doğal metin yaz. Kod, komut, kopyalanabilir prompt ve şablonları "
+              "ayrı bir Markdown kod bloğunda ver; açıklamaları bloğun dışında tut. "
+              "JSON veya iç düşünce dökümü verme.",
 }
 
 SEMA = {
@@ -283,6 +279,9 @@ def _surec_mem_byt(pid=None):
 def _surec_yasiyor(pid):
     if pid is None:
         return False
+    if os.name != "nt":
+        return (_linux_process is not None and _linux_process.pid == pid
+                and _linux_process.poll() is None)
     h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
     if h:
         ctypes.windll.kernel32.CloseHandle(h)
@@ -291,6 +290,10 @@ def _surec_yasiyor(pid):
 
 
 def _port_sahibi():
+    if os.name != "nt":
+        if _linux_process is not None and _linux_process.poll() is None and _saglik(1):
+            return _linux_process.pid
+        return None
     try:
         out = subprocess.check_output(["netstat", "-ano", "-p", "TCP"],
                                       creationflags=subprocess.CREATE_NO_WINDOW,
@@ -383,9 +386,9 @@ def _hazir_bekle(pid, baslama):
     return None
 
 
-def baslat():
+def baslat(*, gpu_hazirla=None):
     """Sunucuyu hazirlar. Donus: bu cagrida gecen yukleme ms (0 = zaten hazir)."""
-    global _calisan_ctx
+    global _calisan_ctx, _linux_process
     baslama = time.monotonic()
     _llm_dbg("baslat_basla")
     saglik = _saglik()
@@ -434,10 +437,6 @@ def baslat():
     except OSError:
         pass
 
-    _llm_dbg("baslat_isit_basla")
-    _dosyalari_isit()
-    _llm_dbg("baslat_isit_bitis")
-
     komut = [
         LLAMA_SERVER,
         "-m", MODEL_PATH, "--mmproj", _aktif_mmproj()[0],
@@ -461,15 +460,19 @@ def baslat():
         komut += ["--reasoning-format", "deepseek"]
     if GPU_KATMAN == 0:
         komut += ["-nkvo", "--no-mmproj-offload"]
+    _dosyalari_isit()
+    if gpu_hazirla is not None:
+        gpu_hazirla()
     try:
         log = open(LOG_PATH, "a", encoding="utf-8", errors="replace")
     except OSError as e:
         raise LLMHatasi("log dosyasi acilamadi: %s" % e, "surec")
-    _dosyalari_isit()
     try:
         surec = subprocess.Popen(komut, stdout=log, stderr=subprocess.STDOUT,
                                  stdin=subprocess.DEVNULL, shell=False,
-                                 creationflags=subprocess.CREATE_NO_WINDOW)
+                                 creationflags=_NO_WINDOW)
+        if os.name != "nt":
+            _linux_process = surec
     finally:
         log.close()
     _pid_yaz(surec.pid, CTX)
@@ -532,6 +535,15 @@ def _log_sonu(n):
 def durdur():
     global _calisan_ctx
     pid = _pid_oku()
+    if os.name != "nt" and _surec_yasiyor(pid):
+        try:
+            _linux_process.terminate()
+            _linux_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _linux_process.kill()
+            _linux_process.wait()
+        except ProcessLookupError:
+            pass
     if pid is not None and _surec_yasiyor(pid):
         try:
             subprocess.Popen(["taskkill", "/PID", str(pid), "/T"],
@@ -834,13 +846,13 @@ def canli_olcum():
     return d
 
 
-def hazirla():
+def hazirla(*, gpu_hazirla=None):
     """Modeli onceden yukle. Donus: durum sozlugu."""
     global _son_yukleme_ms
     if not _kilit.acquire(blocking=False):
         raise LLMHatasi("bir üretim zaten sürüyor", "mesgul")
     try:
-        sure = baslat()
+        sure = baslat(gpu_hazirla=gpu_hazirla)
         if sure:
             _son_yukleme_ms = sure
         _son_kullanim_guncelle()
@@ -851,18 +863,18 @@ def hazirla():
 
 
 def uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
-         sistem_ozel=None, mod_ozel=None):
+         sistem_ozel=None, mod_ozel=None, *, gpu_hazirla=None):
     if not _kilit.acquire(blocking=False):
         raise LLMHatasi("bir üretim zaten sürüyor", "mesgul")
     try:
         return _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
-                     sistem_ozel, mod_ozel)
+                     sistem_ozel, mod_ozel, gpu_hazirla=gpu_hazirla)
     finally:
         _kilit.release()
 
 
 def sohbet_et(mesajlar, yaraticilik=0.7, max_tokens=None, parca_geri=None,
-              dusunme_geri=None, stream=True):
+              dusunme_geri=None, stream=True, *, gpu_hazirla=None):
     """Serbest sohbet: sistem promptu + geçmiş + kullanıcı mesajı.
     mesajlar: [{"role": "user"/"assistant", "content": "..."}] listesi.
     max_tokens verilmezse modelin kendi karar vermesi için sınır gönderilmez.
@@ -876,7 +888,7 @@ def sohbet_et(mesajlar, yaraticilik=0.7, max_tokens=None, parca_geri=None,
             yaraticilik = max(0.2, min(1.2, float(yaraticilik)))
         except (TypeError, ValueError):
             yaraticilik = 0.7
-        _son_yukleme_ms = baslat()
+        _son_yukleme_ms = baslat(gpu_hazirla=gpu_hazirla)
         _son_kullanim_guncelle()
         gecmis = [{"role": "system", "content": SOHBET_SISTEM_PROMPTU}]
         if not isinstance(mesajlar, list):
@@ -1005,7 +1017,7 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
 
 
 def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
-          sistem_ozel=None, mod_ozel=None):
+          sistem_ozel=None, mod_ozel=None, *, gpu_hazirla=None):
     global _son_kullanim
     if mod not in MOD_TALIMATI:
         raise LLMHatasi("geçersiz mod", "istek")
@@ -1042,7 +1054,7 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
         icerik.append({"type": "image_url", "image_url": {"url": _gorsel_url(g)}})
 
     global _son_yukleme_ms
-    _son_yukleme_ms = baslat()
+    _son_yukleme_ms = baslat(gpu_hazirla=gpu_hazirla)
     _son_kullanim_guncelle()
     baslama = time.monotonic()
     mesajlar = [{"role": "system", "content": siste},

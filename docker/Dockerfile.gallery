@@ -1,0 +1,29 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl ffmpeg git gnupg libgomp1 python3 python3-venv tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/webui-venv \
+    && /opt/webui-venv/bin/pip install --no-cache-dir Pillow==12.2.0 huggingface-hub==0.36.2
+
+ENV WEBUI_RUNPOD=1 PYTHONUNBUFFERED=1 \
+    POD_RUNTIME_ROOT=/opt/runtime POD_VOLUME_MOUNT=/workspace \
+    POD_MODEL_CATALOG=/opt/pod/models.json \
+    WEBUI_DATA_ROOT=/workspace/user-data \
+    GPG_HOME=/opt/runtime/gnupg GPG_PATH=/usr/bin/gpg \
+    HF_HOME=/opt/runtime/hf-cache XDG_CACHE_HOME=/opt/runtime/cache \
+    COMFYUI_ROOT=/opt/runtime/ComfyUI COMFYUI_URL=127.0.0.1:8188 \
+    WEBUI_FLUX_UNET=flux-2-klein-4b.safetensors WEBUI_FLUX_ENCODER=qwen_3_4b.safetensors \
+    WEBUI_ZIMAGE_UNET=z_image_turbo_bf16.safetensors \
+    LLAMA_SERVER_PATH=/opt/runtime/bin/llama-server LLAMA_GPU_LAYERS=99 \
+    LLM_MODEL_PATH=/opt/runtime/ComfyUI/models/llm/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf \
+    LLM_MMPROJ_PATH=/opt/runtime/ComfyUI/models/llm/mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf \
+    LLM_MMPROJ_Q8_PATH=/opt/runtime/ComfyUI/models/llm/mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf \
+    NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/server.py webui_flux2/video_r2v_api.json /opt/webui_flux2/
+COPY webui_flux2/static/app.css webui_flux2/static/app.js /opt/webui_flux2/static/
+COPY docker/models.json /opt/pod/models.json
+WORKDIR /opt/webui_flux2
+EXPOSE 8189
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/opt/webui-venv/bin/python", "server.py"]
