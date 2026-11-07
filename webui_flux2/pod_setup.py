@@ -579,7 +579,8 @@ def _record_llama_cuda_scan(output):
     """Record only the short device probe so GPU setup failures are diagnosable."""
     with (ROOT / "setup.log").open("a", encoding="utf-8") as log:
         log.write("[llama] --list-devices çıktısı:\n")
-        log.write((output or "[boş çıktı]")[:4000] + "\n")
+        for line in (output or "[boş çıktı]")[:4000].splitlines():
+            log.write("[llama] " + line + "\n")
 
 
 def _install_llama(cancel):
@@ -609,9 +610,17 @@ def _install_llama(cancel):
     binary = next(llama.rglob("llama-server"), None)
     if binary is None:
         raise RuntimeError("llama-server pakette bulunamadı.")
+    # The upstream runtime archive has its own top-level directory.
+    runtime = next(llama.rglob("libcudart.so.12"), None)
+    if runtime is None:
+        raise RuntimeError("llama-server CUDA çalışma kitaplığı pakette bulunamadı.")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.unlink(missing_ok=True)
-    target.write_text(f'#!/bin/sh\nexport LD_LIBRARY_PATH="{binary.parent}:{llama}:${{LD_LIBRARY_PATH:-}}"\nexec "{binary}" "$@"\n')
+    target.write_text(
+        f'#!/bin/sh\nexport LD_LIBRARY_PATH="{binary.parent}:{runtime.parent}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"\n'
+        f'exec "{binary}" "$@"\n',
+        encoding="utf-8",
+    )
     target.chmod(0o755)
     _command([str(target), "--version"], "llama-server doğrulaması", cancel=cancel)
     devices = _llama_cuda_devices(target)
