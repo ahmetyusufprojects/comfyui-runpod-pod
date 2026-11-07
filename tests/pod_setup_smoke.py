@@ -72,7 +72,8 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         try:
             pod_setup._url_model(
                 cancel_target,
-                {"url": f"http://127.0.0.1:{server.server_port}/slow", "size": payload_size},
+                {"url": f"http://127.0.0.1:{server.server_port}/slow",
+                 "name": "cancel.bin", "size": payload_size},
                 cancel,
                 "synthetic-cancel",
             )
