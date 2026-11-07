@@ -298,19 +298,49 @@ def _model(file):
     if file.get("source") == "civitai":
         _civitai_model(target, file)
         return
+    incoming = directory / ".incoming"
+    stop = threading.Event()
+    monitor = threading.Thread(target=_watch_hf_download,
+                               args=(incoming, file["name"], stop), daemon=True)
+    monitor.start()
     try:
-        source = Path(hf_hub_download(
-            repo_id=file["repo"], revision=file.get("revision"), filename=file["path"],
-            local_dir=directory / ".incoming", token=os.environ.get("HF_TOKEN") or False))
-    except HfHubHTTPError as exc:
-        code = getattr(exc.response, "status_code", None)
-        if code in (401, 403):
-            raise RuntimeError("Model erişim izni gerekiyor. Pod’a HF_TOKEN ekleyin.") from None
-        raise RuntimeError(f"Model kaynağı yanıtı: HTTP {code}.") from None
+        try:
+            source = Path(hf_hub_download(
+                repo_id=file["repo"], revision=file.get("revision"), filename=file["path"],
+                local_dir=incoming, token=os.environ.get("HF_TOKEN") or False))
+        except HfHubHTTPError as exc:
+            code = getattr(exc.response, "status_code", None)
+            if code in (401, 403):
+                raise RuntimeError("Model erişim izni gerekiyor. Pod’a HF_TOKEN ekleyin.") from None
+            raise RuntimeError(f"Model kaynağı yanıtı: HTTP {code}.") from None
+    finally:
+        stop.set()
+        monitor.join()
     if not _valid_model(source, file):
         source.unlink(missing_ok=True)
         raise RuntimeError("Model dosyasının bütünlüğü doğrulanamadı.")
     source.replace(target)
+
+
+def _watch_hf_download(directory, name, stop):
+    def size():
+        total = 0
+        for root, _, files in os.walk(directory):
+            for filename in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, filename))
+                except OSError:
+                    pass
+        return total
+
+    start = previous = size()
+    previous_time = time.monotonic()
+    while not stop.wait(5):
+        now, current = time.monotonic(), size()
+        rate = max(0, current - previous) / max(now - previous_time, 0.001) / (1024 * 1024)
+        transferred = max(0, current - start) / (1024 * 1024)
+        print(f"[pod-setup] {name}: yaklaşık {transferred:.1f} MiB, {rate:.2f} MiB/sn", flush=True)
+        previous, previous_time = current, now
 
 
 def _civitai_model(target, file):
@@ -325,8 +355,19 @@ def _civitai_model(target, file):
         request.add_unredirected_header("Authorization", "Bearer " + token)
         try:
             with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as output:
-                import shutil
-                shutil.copyfileobj(response, output, 1024 * 1024)
+                total_header = response.headers.get("Content-Length", "")
+                total = int(total_header) if total_header.isdigit() else 0
+                downloaded = last_bytes = 0
+                last_time = time.monotonic()
+                while chunk := response.read(1024 * 1024):
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    now = time.monotonic()
+                    if now - last_time >= 5:
+                        rate = (downloaded - last_bytes) / (now - last_time) / (1024 * 1024)
+                        size = f" / {total / (1024 * 1024):.1f} MiB" if total else ""
+                        print(f"[pod-setup] {file['name']}: {downloaded / (1024 * 1024):.1f} MiB{size}, {rate:.2f} MiB/sn", flush=True)
+                        last_time, last_bytes = now, downloaded
         except urllib.error.HTTPError as exc:
             raise RuntimeError(f"Civitai indirme yanıtı: HTTP {exc.code}.") from None
         if not _valid_model(temp, file):
