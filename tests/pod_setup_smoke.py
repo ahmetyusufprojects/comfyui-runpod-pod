@@ -1,4 +1,6 @@
 import http.server
+import builtins
+import io
 import os
 import pathlib
 import sys
@@ -165,5 +167,38 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     assert "145" not in windows_normal
     assert windows_turbo["124"]["inputs"]["steps"] == 8
     assert windows_turbo["126"]["inputs"]["model"] == ["145", 0]
+
+    # A constrained Pod should report its own memory limit, with inactive
+    # filesystem cache counted as reclaimable, rather than the host's RAM.
+    import psutil
+    import types
+    original_open = builtins.open
+    original_virtual_memory = psutil.virtual_memory
+    gib = 1024 ** 3
+    fixture = {
+        "/sys/fs/cgroup/memory.max": str(48 * gib),
+        "/sys/fs/cgroup/memory.current": str(25 * gib),
+        "/sys/fs/cgroup/memory.stat": "inactive_file %d\n" % (2 * gib),
+    }
+    def fixture_open(path, *args, **kwargs):
+        if str(path) in fixture:
+            return io.StringIO(fixture[str(path)])
+        if str(path).startswith("/sys/fs/cgroup/"):
+            raise FileNotFoundError(str(path))
+        return original_open(path, *args, **kwargs)
+
+    try:
+        server.RUNPOD_MODE = True
+        psutil.virtual_memory = lambda: types.SimpleNamespace(total=512 * gib, available=400 * gib)
+        builtins.open = fixture_open
+        constrained = server._ram_bilgi()
+        assert constrained["toplam_mb"] == 48 * 1024, constrained
+        assert constrained["bos_mb"] == 25 * 1024, constrained
+        fixture["/sys/fs/cgroup/memory.max"] = "max"
+        unlimited = server._ram_bilgi()
+        assert unlimited["toplam_mb"] == 512 * 1024, unlimited
+    finally:
+        builtins.open = original_open
+        psutil.virtual_memory = original_virtual_memory
 
 print("model download, cancellation, GPU diagnostics, and log retrieval checks passed")
