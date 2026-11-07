@@ -9,7 +9,6 @@ import tarfile
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -325,31 +324,17 @@ def _civitai_model(target, file):
     temp = target.with_suffix(".part")
     url = f"https://civitai.com/api/download/models/{int(file['version'])}"
     try:
-        for use_query_token in (False, True):
-            request_url = url
-            request = urllib.request.Request(request_url)
-            if use_query_token:
-                request_url += "?" + urllib.parse.urlencode({"token": token})
-                request = urllib.request.Request(request_url)
-            else:
-                request.add_unredirected_header("Authorization", "Bearer " + token)
-            try:
-                with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as output:
-                    import shutil
-
-                    shutil.copyfileobj(response, output, 1024 * 1024)
-                if not _valid_model(temp, file):
-                    temp.unlink(missing_ok=True)
-                    if not use_query_token:
-                        continue
-                    raise RuntimeError("Moody Anima dosyasının bütünlüğü doğrulanamadı.")
-                temp.replace(target)
-                return
-            except urllib.error.HTTPError as exc:
-                temp.unlink(missing_ok=True)
-                if not use_query_token and exc.code in (401, 403):
-                    continue
-                raise RuntimeError(f"Civitai indirme yanıtı: HTTP {exc.code}.") from None
+        request = urllib.request.Request(url)
+        request.add_unredirected_header("Authorization", "Bearer " + token)
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as output:
+                import shutil
+                shutil.copyfileobj(response, output, 1024 * 1024)
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"Civitai indirme yanıtı: HTTP {exc.code}.") from None
+        if not _valid_model(temp, file):
+            raise RuntimeError("Moody Anima dosyasının bütünlüğü doğrulanamadı.")
+        temp.replace(target)
     finally:
         temp.unlink(missing_ok=True)
 
