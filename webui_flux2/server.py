@@ -4090,6 +4090,8 @@ def duzgun_kapat(muhurlensin=True):
             if basarisiz:
                 raise RuntimeError("Kasalar mühürlenemedi: %s" % ", ".join(basarisiz))
             print("Mühür sonucu: %s" % sonuc, flush=True)
+        if RUNPOD_MODE:
+            pod_setup.checkpoint()
         try:
             llm.durdur()
         except Exception as e:
@@ -4155,6 +4157,7 @@ if __name__ == "__main__":
     if RUNPOD_MODE:
         os.umask(0o077)
         pod_setup.prepare_data(DATA_ROOT, _auth_store)
+        kasa.kalici_kopya = pod_setup.checkpoint
         signal.signal(signal.SIGTERM, signal.default_int_handler)
     with WebUIServer(("0.0.0.0", 8189), Handler) as httpd:
         _httpd = httpd

@@ -33,26 +33,47 @@ _thread = None
 _state = {}
 _comfy_process = None
 _data_lock = None
+_flex = None
 
 
 def prepare_data(data_root, accounts):
     """Use one writer and require a mounted, explicitly selected data path."""
-    global _data_lock
+    global _data_lock, _flex
     mount = Path(os.environ.get("POD_VOLUME_MOUNT", "/workspace")).resolve()
     target = Path(data_root).resolve()
     mounts = Path("/proc/self/mountinfo").read_text().splitlines()
     if not any(line.split()[4] == str(mount) for line in mounts):
         raise RuntimeError("Kalıcı disk bağlı değil.")
-    if not target.is_relative_to(mount) or target == mount:
+    flex_prefix = os.environ.get("POD_FLEX_PREFIX")
+    if flex_prefix:
+        from flex_store import FlexStore
+
+        if not flex_prefix.isascii() or not flex_prefix.replace("-", "").isalnum():
+            raise RuntimeError("Flex dizini tek bir güvenli addan oluşmalı.")
+        if not target.is_relative_to(ROOT) or target == ROOT:
+            raise RuntimeError("Flex çalışma dizini geçici diskte olmalı.")
+        snapshots = (mount / flex_prefix).resolve()
+        if snapshots.parent != mount:
+            raise RuntimeError("Flex dizini seçilen bağlama noktasında olmalı.")
+        _flex = FlexStore(target, snapshots)
+    elif not target.is_relative_to(mount) or target == mount:
         raise RuntimeError("Kullanıcı dizini kalıcı diskin altında olmalı.")
     target.mkdir(mode=0o700, parents=True, exist_ok=True)
     _data_lock = (target / ".webui.lock").open("a")
     fcntl.flock(_data_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if _flex is not None and not Path(accounts.dosya).exists():
+        _flex.restore()
     password = os.environ.pop("WEBUI_BOOTSTRAP_PASSWORD", "")
     if not accounts.kurulu_mu():
         if Path(accounts.dosya).exists() or not password:
             raise RuntimeError("Kullanıcı kaydı eksik veya boş. İlk hesap ayrı olarak kurulmalı.")
         accounts.ilk_admin(os.environ.get("WEBUI_BOOTSTRAP_USER", "user"), password)
+        checkpoint()
+
+
+def checkpoint():
+    if _flex is not None:
+        _flex.save()
 
 
 def status():

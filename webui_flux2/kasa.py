@@ -25,6 +25,7 @@ from functools import wraps as _wraps
 import auth as _auth
 
 _NO_WINDOW = getattr(_sp, "CREATE_NO_WINDOW", 0)
+kalici_kopya = None
 
 BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
 
@@ -237,6 +238,8 @@ def _muhurle(kullanici, parola, kaynak_agac):
                 _os.replace(onceki, kasa)
             raise
         gizle(kasa)
+        if kalici_kopya is not None:
+            kalici_kopya()
     finally:
         try:
             _os.remove(yeni)

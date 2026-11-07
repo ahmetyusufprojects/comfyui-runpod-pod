@@ -21,7 +21,7 @@ ENV WEBUI_RUNPOD=1 PYTHONUNBUFFERED=1 \
     LLM_MMPROJ_Q8_PATH=/opt/runtime/ComfyUI/models/llm/mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/server.py webui_flux2/video_r2v_api.json /opt/webui_flux2/
+COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/flex_store.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/server.py webui_flux2/video_r2v_api.json /opt/webui_flux2/
 COPY webui_flux2/static/app.css webui_flux2/static/app.js /opt/webui_flux2/static/
 COPY docker/models.json /opt/pod/models.json
 WORKDIR /opt/webui_flux2
