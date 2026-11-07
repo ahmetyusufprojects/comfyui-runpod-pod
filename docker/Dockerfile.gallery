@@ -15,6 +15,10 @@ ENV WEBUI_RUNPOD=1 PYTHONUNBUFFERED=1 \
     COMFYUI_ROOT=/opt/runtime/ComfyUI COMFYUI_URL=127.0.0.1:8188 \
     WEBUI_FLUX_UNET=flux-2-klein-4b.safetensors WEBUI_FLUX_ENCODER=qwen_3_4b.safetensors \
     WEBUI_ZIMAGE_UNET=z_image_turbo_bf16.safetensors \
+    WEBUI_VIDEO_UNET=minimax_h3_ref2va_pruned_int8_convrot.safetensors \
+    WEBUI_VIDEO_CLIP=qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors \
+    WEBUI_VIDEO_VAE=minimax_h3_video_vae_int8_convrot.safetensors \
+    WEBUI_TRANSLATION_MODEL_DIR=/opt/runtime/ComfyUI/models/opus_mt_tr_en \
     LLAMA_SERVER_PATH=/opt/runtime/bin/llama-server LLAMA_GPU_LAYERS=99 \
     LLM_MODEL_PATH=/opt/runtime/ComfyUI/models/llm/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf \
     LLM_MMPROJ_PATH=/opt/runtime/ComfyUI/models/llm/mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf \

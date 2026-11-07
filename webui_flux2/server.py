@@ -537,6 +537,14 @@ def _video_sablon_yukle():
     """video_r2v_api.json'u okur; '_' ile baslayan aciklama anahtarlarini atar."""
     with open(VIDEO_SABLON_DOSYA, "r", encoding="utf-8") as f:
         ham = json.load(f)
+    if RUNPOD_MODE:
+        for node, field, env in (
+            ("127", "unet_name", "WEBUI_VIDEO_UNET"),
+            ("128", "clip_name", "WEBUI_VIDEO_CLIP"),
+            ("119", "vae_name", "WEBUI_VIDEO_VAE"),
+        ):
+            if os.environ.get(env):
+                ham[node]["inputs"][field] = os.environ[env]
     return {k: v for k, v in ham.items() if not k.startswith("_")}
 
 

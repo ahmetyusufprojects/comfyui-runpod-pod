@@ -129,6 +129,10 @@ def remove(group):
             import llm
 
             llm.durdur()
+        elif item["engine"] == "translation":
+            import prompt_translation
+
+            prompt_translation.modeli_bosalt()
         shared = {(file["dir"], file["name"])
                   for other, config in CATALOG.items()
                   if other != group and _state.get(other, ("idle",))[0] == "ready"
@@ -160,6 +164,9 @@ def _run():
                 _install_comfy()
                 _progress(group, "ComfyUI başlatılıyor, model indirmeleri başlıyor")
                 _launch_comfy()
+            elif item["engine"] == "translation":
+                _progress(group, "Çeviri bağımlılıkları hazırlanıyor")
+                _install_comfy()
             elif item["engine"] == "llama":
                 _progress(group, "llama-server hazırlanıyor")
                 _install_llama()
@@ -288,6 +295,9 @@ def _model(file):
     target = directory / file["name"]
     if _valid_model(target, file):
         return
+    if file.get("source") == "civitai":
+        _civitai_model(target, file)
+        return
     try:
         source = Path(hf_hub_download(
             repo_id=file["repo"], revision=file.get("revision"), filename=file["path"],
@@ -301,6 +311,29 @@ def _model(file):
         source.unlink(missing_ok=True)
         raise RuntimeError("Model dosyasının bütünlüğü doğrulanamadı.")
     source.replace(target)
+
+
+def _civitai_model(target, file):
+    token = os.environ.get("CIVITAI_TOKEN")
+    if not token or token.startswith("{{"):
+        raise RuntimeError("Moody Anima için Pod’a CIVITAI_TOKEN ekleyin.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_suffix(".part")
+    request = urllib.request.Request(
+        f"https://civitai.com/api/download/models/{int(file['version'])}")
+    request.add_unredirected_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as output:
+            import shutil
+
+            shutil.copyfileobj(response, output, 1024 * 1024)
+        if not _valid_model(temp, file):
+            raise RuntimeError("Moody Anima dosyasının bütünlüğü doğrulanamadı.")
+        temp.replace(target)
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Civitai indirme yanıtı: HTTP {exc.code}.") from None
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def _valid_model(path, file):

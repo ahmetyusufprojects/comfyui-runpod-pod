@@ -1,14 +1,16 @@
 """Local Turkish-to-English prompt translation with Helsinki-NLP OPUS-MT."""
 import os
 import re
+import site
+import sys
 import threading
 import time
 from collections import OrderedDict
 
 MODEL_NAME = "Helsinki-NLP/opus-mt-tr-en"
 MODEL_REVISION = "19c65427cc2af5f191337d4899e0348c4af25902"
-MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "models", "opus_mt_tr_en")
+MODEL_DIR = os.environ.get("WEBUI_TRANSLATION_MODEL_DIR", os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "models", "opus_mt_tr_en"))
 MODEL_WEIGHT = os.path.join(MODEL_DIR, "pytorch_model.bin")
 MODEL_WEIGHT_SIZE = 306727185
 MAX_SOURCE_CHARS = 24000
@@ -38,6 +40,13 @@ def _model_al():
                 "Çeviri modeli kurulu değil; install_prompt_translation_model.py çalıştırılmalı")
         if os.path.getsize(MODEL_WEIGHT) != MODEL_WEIGHT_SIZE:
             raise RuntimeError("Çeviri modeli dosya boyutu doğrulanamadı")
+        if os.environ.get("WEBUI_RUNPOD") == "1":
+            python = f"python{sys.version_info.major}.{sys.version_info.minor}"
+            packages = os.path.join(os.environ["POD_RUNTIME_ROOT"], "comfy-venv",
+                                    "lib", python, "site-packages")
+            if not os.path.isdir(packages):
+                raise RuntimeError("Çeviri bağımlılıkları kurulu değil")
+            site.addsitedir(packages)
         import torch
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
@@ -48,6 +57,13 @@ def _model_al():
             MODEL_DIR, local_files_only=True).eval()
         _MODEL = torch, tokenizer, model
         return _MODEL
+
+
+def modeli_bosalt():
+    global _MODEL
+    with _MODEL_LOCK, _CACHE_LOCK:
+        _MODEL = None
+        _CACHE.clear()
 
 
 def onisit():
