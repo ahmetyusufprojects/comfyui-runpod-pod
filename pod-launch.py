@@ -18,6 +18,7 @@ REPO = "ahmetyusufprojects/comfyui-runpod-pod"
 FLEX = "cmw3pwboc000008jp5i0j6vi8"
 NAME = "gallery-webui"
 DATA_PATH = "/opt/runtime/user-data"
+TEMPLATE_ID = "0ax45qxl0n"
 
 
 def request(url, method="GET", data=None, key=None):
@@ -129,7 +130,8 @@ def main():
         gpu_id, rate = gpu["gpuId"], gpu["securePricePerHr"]
         print(f"Deneniyor: {gpu_id}, {rate:.2f} USD/saat", flush=True)
         body = {
-            "name": NAME, "image": image, "cloud": "SECURE", "disk": 60,
+            "name": NAME, "templateId": TEMPLATE_ID, "image": image,
+            "cloud": "SECURE", "disk": 120,
             "gpu": {"id": gpu_id, "count": 1, "minCudaVersion": "12.8"},
             "ports": ["8189/http"], "env": env,
             "mounts": {"global": [{"volumeId": FLEX, "path": "/workspace"}]},
