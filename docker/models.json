@@ -32,11 +32,6 @@
       "video_vae_file": "minimax_h3_video_vae_int8_convrot.safetensors",
       "audio_vae_file": "minimax_h3_audio_vae_fp32.safetensors",
       "profiles": {
-        "fast": {
-          "group": "video",
-          "lora_file": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
-          "steps": 4
-        },
         "quality": {
           "group": "video_quality",
           "lora_file": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
@@ -113,8 +108,7 @@
         {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors","dir":"diffusion_models","name":"minimax_h3_ref2va_pruned_int8_convrot.safetensors"},
         {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors","dir":"text_encoders","name":"qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"},
         {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"vae/minimax_h3_video_vae_int8_convrot.safetensors","dir":"vae","name":"minimax_h3_video_vae_int8_convrot.safetensors"},
-        {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"vae/minimax_h3_audio_vae_fp32.safetensors","dir":"vae","name":"minimax_h3_audio_vae_fp32.safetensors"},
-        {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors","dir":"loras","name":"minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"}
+        {"repo":"Comfy-Org/MiniMax-H3","revision":"54472221d27c695fca9621b0c3ed52f06c4af707","path":"vae/minimax_h3_audio_vae_fp32.safetensors","dir":"vae","name":"minimax_h3_audio_vae_fp32.safetensors"}
       ]
     },
     "video_quality": {
