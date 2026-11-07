@@ -4631,6 +4631,7 @@ async function podKurulumYukle() {
           dugme.disabled = !uygun;
           satir.append(dugme);
         }
+        satir.append(podKurulumDugme('Sıradan çıkar', {grup: grup.id, islem: 'kaldir'}));
       } else if (grup.durum !== 'running') {
         const hazir = grup.durum === 'ready';
         satir.append(podKurulumDugme(hazir ? 'Modeli kaldır'

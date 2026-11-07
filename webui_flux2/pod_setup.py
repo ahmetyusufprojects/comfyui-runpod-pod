@@ -118,6 +118,10 @@ def remove(group):
     if not isinstance(group, str) or group not in CATALOG:
         raise ValueError("Bilinmeyen model grubu.")
     with _lock:
+        if group in _queue:
+            _queue.remove(group)
+            _state.pop(group, None)
+            return
         if _active is not None or _queue:
             raise RuntimeError("Devam eden model hazırlıkları tamamlanmalı.")
         item = CATALOG[group]
