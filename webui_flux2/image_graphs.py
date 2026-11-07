@@ -19,7 +19,7 @@ RUNPOD_WORKFLOWS = _runpod_workflows()
 
 def _model_file(workflow, key, fallback, env=None):
     configured = RUNPOD_WORKFLOWS.get(workflow, {}).get(key)
-    return os.environ.get(env) or configured or fallback
+    return (os.environ.get(env) if env else None) or configured or fallback
 
 
 DIFFUSION_FILE = _model_file(
