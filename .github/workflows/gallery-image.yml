@@ -7,6 +7,7 @@ on:
       - '.github/workflows/gallery-image.yml'
       - 'docker/Dockerfile.gallery'
       - 'docker/models.json'
+      - 'tests/**'
       - 'webui_flux2/**'
 
 permissions:
@@ -48,6 +49,11 @@ jobs:
               subprocess.run(["docker", "logs", "gallery-check"], check=False)
               raise SystemExit("Gallery did not start")
           PY
+      - name: Verify model download and cancellation workers
+        run: |
+          set -eu
+          docker cp tests/pod_setup_smoke.py gallery-check:/tmp/pod_setup_smoke.py
+          docker exec gallery-check /opt/webui-venv/bin/python /tmp/pod_setup_smoke.py
       - name: Publish the tested image
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -655,11 +655,11 @@ except HfHubHTTPError as e:
 """
     root_log = ROOT / "setup.log"
     ROOT.mkdir(parents=True, exist_ok=True)
+    source = incoming / file["path"]
+    source.parent.mkdir(parents=True, exist_ok=True)
     previous_time = time.monotonic()
     previous_size = source.stat().st_size if source.exists() else 0
     process = None
-    source = incoming / file["path"]
-    source.parent.mkdir(parents=True, exist_ok=True)
     try:
         with root_log.open("ab") as log:
             process = subprocess.Popen([sys.executable, "-c", helper], stdin=subprocess.PIPE,
