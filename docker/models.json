@@ -108,7 +108,7 @@
     "image": {
       "z_image": "llm_12b",
       "flux2": "llama",
-      "flux3": "llm_12b",
+      "flux3": "llama",
       "krea2": "llama",
       "illustrious": "llama"
     },

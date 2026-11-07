@@ -36,7 +36,7 @@ jobs:
           assert catalog['workflows']['illustrious']['lora_group'] == 'anime_desire_lora'
           assert catalog['groups']['anima']['enabled'] is False
           assert catalog['groups']['moody']['enabled'] is False
-          assert catalog['llm_defaults']['image']['flux3'] == 'llm_12b'
+          assert catalog['llm_defaults']['image']['flux3'] == 'llama'
           assert catalog['llm_defaults']['chat'] == 'llm_26b'
           print('model catalog checks passed')
           PY
