@@ -502,7 +502,16 @@ def _install_comfy(cancel):
              "ComfyUI Python ortamı", cancel=cancel)
     pip = [uv, "pip", "install", "--python", str(env / "bin/python")]
     before = time.monotonic()
-    _command(pip + ["--index-url", "https://download.pytorch.org/whl/cu128",
+    try:
+        driver = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            text=True, timeout=10).splitlines()[0].strip()
+        cuda_wheel = "cu130" if int(driver.split(".")[0]) >= 580 else "cu128"
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        cuda_wheel = "cu128"
+    with (ROOT / "setup.log").open("a", encoding="utf-8") as log:
+        log.write(f"[comfy] PyTorch sürümü: {cuda_wheel}\n")
+    _command(pip + ["--index-url", f"https://download.pytorch.org/whl/{cuda_wheel}",
                     "torch==2.11.0", "torchvision==0.26.0"],
              "GPU bağımlılıkları", cancel=cancel)
     stage_done("CUDA PyTorch", before)
