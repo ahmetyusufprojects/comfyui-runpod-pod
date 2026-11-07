@@ -321,7 +321,7 @@ def _civitai_model(target, file):
     temp = target.with_suffix(".part")
     url = f"https://civitai.com/api/download/models/{int(file['version'])}"
     try:
-        request = urllib.request.Request(url)
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         request.add_unredirected_header("Authorization", "Bearer " + token)
         try:
             with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as output:
