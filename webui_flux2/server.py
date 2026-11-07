@@ -2788,13 +2788,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """POST'lara CSRF perdesi: Origin/Referer varsa Host ile ayni olmali.
         Baslik yoksa (curl) gecer. Uymazsa 403 doner, True/False verir."""
         host = (self.headers.get("Host") or "").split(":")[0].lower()
+        pod_id = os.environ.get("RUNPOD_POD_ID", "") if RUNPOD_MODE else ""
+        proxy_host = f"{pod_id.lower()}-8189.proxy.runpod.net" if pod_id else None
         for baslik in ("Origin", "Referer"):
             deger = self.headers.get(baslik)
             if not deger:
                 continue
             try:
                 parca = urllib.parse.urlparse(deger)
-                if (parca.hostname or "").lower() != host:
+                origin_host = (parca.hostname or "").lower()
+                pod_proxy = (origin_host == proxy_host and parca.scheme == "https"
+                             and parca.port in (None, 443))
+                if origin_host != host and not pod_proxy:
                     self._send(403, '{"hata":"origin hatasi"}')
                     return False
             except Exception:
