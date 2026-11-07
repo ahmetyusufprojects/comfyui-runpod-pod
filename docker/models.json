@@ -1,13 +1,4 @@
 {
-  "flux": {
-    "label": "Flux 2 Klein",
-    "engine": "comfy",
-    "files": [
-      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/diffusion_models/flux-2-klein-4b.safetensors","dir":"diffusion_models","name":"flux-2-klein-4b.safetensors"},
-      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
-      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/vae/flux2-vae.safetensors","dir":"vae","name":"flux2-vae.safetensors"}
-    ]
-  },
   "zimage": {
     "label": "Z-Image Turbo",
     "engine": "comfy",
@@ -15,6 +6,15 @@
       {"repo":"Comfy-Org/Z-Image-Turbo","revision":"6fc90a3b1b653e935a0d175e260736de25b84df5","path":"split_files/diffusion_models/z_image_turbo_bf16.safetensors","dir":"diffusion_models","name":"z_image_turbo_bf16.safetensors"},
       {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
       {"repo":"Comfy-Org/Z-Image-Turbo","revision":"6fc90a3b1b653e935a0d175e260736de25b84df5","path":"split_files/vae/ae.safetensors","dir":"vae","name":"ae.safetensors"}
+    ]
+  },
+  "flux": {
+    "label": "Flux 2 Klein",
+    "engine": "comfy",
+    "files": [
+      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/diffusion_models/flux-2-klein-4b.safetensors","dir":"diffusion_models","name":"flux-2-klein-4b.safetensors"},
+      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/text_encoders/qwen_3_4b.safetensors","dir":"text_encoders","name":"qwen_3_4b.safetensors"},
+      {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/vae/flux2-vae.safetensors","dir":"vae","name":"flux2-vae.safetensors"}
     ]
   },
   "llama": {
