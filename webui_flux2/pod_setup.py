@@ -1,6 +1,7 @@
 """Optional RunPod setup. The gallery does not depend on this worker."""
 
 import hashlib
+import copy
 import json
 import os
 import re
@@ -24,8 +25,8 @@ COMFY_REF = "1332fabfcc507aa7c548cd5152071ed494c207e8"
 _CATALOG_DATA = json.loads(Path(os.environ["POD_MODEL_CATALOG"]).read_text(encoding="utf-8"))
 if _CATALOG_DATA.get("schema") != 2:
     raise RuntimeError("Model listesi desteklenmeyen biçimde.")
-CATALOG = _CATALOG_DATA.get("groups") or {}
-WORKFLOWS = _CATALOG_DATA.get("workflows") or {}
+CATALOG = copy.deepcopy(_CATALOG_DATA.get("groups") or {})
+WORKFLOWS = copy.deepcopy(_CATALOG_DATA.get("workflows") or {})
 LLAMA_TAG = "b12128"
 LLAMA_RELEASE = {
     f"llama-{LLAMA_TAG}-bin-ubuntu-cuda-12.8-x64.tar.gz":
