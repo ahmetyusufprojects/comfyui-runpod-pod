@@ -1007,10 +1007,13 @@ html[data-cinematic-mode] .izleme-ust-baslik{color:color-mix(in srgb,var(--brand
 
 /* Sohbet stüdyosu */
 #sohbetAna{background:radial-gradient(ellipse at 52% 18%,#182b38 0%,transparent 57%),#101722;color:#e9f2fa}
-#sohbetAna .sohbet-ust{min-height:67px;flex:none;display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid #263849;background:#101925}
+#sohbetAna .sohbet-ust{min-height:54px;flex:none;display:flex;align-items:center;gap:10px;padding:5px 14px;border-bottom:1px solid #263849;background:#101925}
 .sohbet-ust strong,.sohbet-ust small{display:block}
 .sohbet-ust strong{font-size:16px;letter-spacing:.01em}
 .sohbet-ust small{margin-top:3px;color:#a1b6c6;font-size:11px}
+.sohbet-model-secim{display:flex;align-items:center;gap:8px;flex:0 1 360px;min-width:0;margin:0}
+.sohbet-model-secim>span{flex:none;margin:0;color:#a1b6c6;font-size:10px;letter-spacing:.02em}
+.sohbet-model-secim select{width:auto;min-width:0;min-height:34px;flex:1;padding:6px 10px}
 #sohbetAna .sohbet-icerik-alani{padding-top:14px}
 #sohbetListe:empty{display:none}
 .sohbet-karsilama{align-self:center;width:min(100%,550px);text-align:center;padding:16px 0}
@@ -1066,11 +1069,13 @@ body.uygulama-acik.tam-calisma #uygulama>:is(#kartModel,#wsUretim,#wsStudyo){fle
 .sohbet-ust strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #sohbetListe{margin:auto 0 0}
 @media(max-width:699px){
-  #sohbetAna .sohbet-ust{min-height:49px;padding:4px 8px;gap:8px}
-  #sohbetAna .sohbet-baglam{width:37px;min-height:37px}
+  #sohbetAna .sohbet-ust{min-height:46px;padding:3px 8px;gap:8px}
+  #sohbetAna .sohbet-baglam{width:34px;min-height:34px}
   #sohbetAna .sohbet-menu-btn{min-height:32px;padding:4px 7px;font-size:11px}
   .sohbet-ust strong{font-size:14px}
   .sohbet-ust small,.sohbet-ipucu{display:none}
+  .sohbet-model-secim{flex:1 1 120px;gap:5px}
+  .sohbet-model-secim select{min-height:32px;padding:5px 7px;font-size:12px}
   #sohbetAna .sohbet-icerik-alani{padding:8px 10px 0}
   #sohbetAna .sohbet-girdi-kutusu{padding:5px 6px calc(5px + env(safe-area-inset-bottom))}
   #sohbetGirdi{min-height:36px;padding:6px;font-size:16px;resize:none}
