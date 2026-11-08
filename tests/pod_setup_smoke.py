@@ -54,6 +54,11 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     hf_progress_root = scratch / "hf-progress"
     hf_progress_root.mkdir()
     hf_progress_paths = get_local_download_paths(hf_progress_root, "fixture/weights.bin")
+    hf_partial_without_metadata = hf_progress_paths.incomplete_path("active-etag")
+    hf_partial_without_metadata.write_bytes(b"in progress")
+    assert pod_setup._hf_incomplete_file(
+        hf_progress_root, "fixture/weights.bin") == hf_partial_without_metadata
+    hf_partial_without_metadata.unlink()
     hf_progress_paths.metadata_path.write_text("0123456789abcdef\nfixture-etag\n0\n",
                                                encoding="utf-8")
     hf_partial = hf_progress_paths.incomplete_path("fixture-etag")

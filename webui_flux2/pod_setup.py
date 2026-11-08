@@ -1,5 +1,6 @@
 """Optional RunPod setup. The gallery does not depend on this worker."""
 
+import base64
 import hashlib
 import copy
 import json
@@ -1770,9 +1771,22 @@ def _hf_incomplete_file(local_dir, filename):
         from huggingface_hub._local_folder import get_local_download_paths
 
         paths = get_local_download_paths(Path(local_dir), filename)
-        metadata = paths.metadata_path.read_text(encoding="utf-8").splitlines()
-        if len(metadata) >= 2 and metadata[1]:
-            return paths.incomplete_path(metadata[1])
+        candidates = []
+        try:
+            metadata = paths.metadata_path.read_text(encoding="utf-8").splitlines()
+            if len(metadata) >= 2 and metadata[1]:
+                candidates.append(paths.incomplete_path(metadata[1]))
+        except OSError:
+            pass
+        # huggingface_hub writes the metadata only after it moves the finished file.
+        # While downloading, find its ETag-named temporary file by the stable filename hash.
+        prefix = base64.urlsafe_b64encode(
+            hashlib.sha1(paths.metadata_path.name.encode("utf-8")).digest()
+        ).decode("ascii")
+        candidates.extend(paths.metadata_path.parent.glob(prefix + ".*.incomplete"))
+        existing = [path for path in candidates if path.is_file()]
+        if existing:
+            return max(existing, key=lambda path: path.stat().st_mtime_ns)
     except (ImportError, OSError, ValueError, IndexError, AttributeError):
         pass
     return None
