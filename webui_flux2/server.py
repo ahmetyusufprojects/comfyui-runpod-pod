@@ -1222,7 +1222,7 @@ def _llm_kuyruk_isini_calistir(job):
             llm.ayarlarini_uygula(ayar)
         canli = llm.durum()["canli"]
         try:
-        llm.baglam_ayarla(_llm_istek_baglami(ayar, tur, req))
+            llm.baglam_ayarla(_llm_istek_baglami(ayar, tur, req))
         except llm.LLMHatasi:
             pass
         if llm.baglam_degisti() and not llm.istek_suruyor():
