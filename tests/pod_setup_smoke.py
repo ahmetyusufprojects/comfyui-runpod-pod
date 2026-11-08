@@ -438,7 +438,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
             {"source": "hf", "repo": "fixture/lora", "revision": "deadbeef",
              "path": "adapter.safetensors"}, ".safetensors")
         lora_settings = pod_setup.add_lora({
-            "model": "flux3", "name": "Synthetic LoRA",
+            "model": "z_image", "name": "Synthetic LoRA",
             "link": "https://huggingface.co/fixture/lora/resolve/main/adapter.safetensors"})
         custom = next(item for item in lora_settings["ayarlar"]["loras"]
                       if item["name"] == "Synthetic LoRA")
