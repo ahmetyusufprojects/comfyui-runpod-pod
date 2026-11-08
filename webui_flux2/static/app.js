@@ -39,14 +39,14 @@ function isTipiSec(){
   if(!refVar) return 'goruntu-uretim';
   return 'goruntu-duzenleme';
 }
-/* Otomatik model/iş akışı: düzenleme -> Flux2 Klein; saf üretim -> Z-Image veya Anima. */
+/* Otomatik model/iş akışı: RunPod seçili modeli kullanır; Windows Anima tercihini korur. */
 function refSayisi(){ return (fotoB64 ? 1 : 0) + (fotoB64_2 ? 1 : 0); }
 function animaModelSecimiUygula(model){
   const anima = $('animaModel'), moody = $('moodyAnimaModel');
   anima.checked = model === 'anima';
   moody.checked = model === 'moody_anima';
 }
-function animaSecili(){ return !videoMu() && !refSayisi() &&
+function animaSecili(){ return !RUNPOD_WEBUI && !videoMu() && !refSayisi() &&
   ($('animaModel').checked || $('moodyAnimaModel').checked); }
 function runpodLoraOku(){
   const root=$('runpodLoraOptions');

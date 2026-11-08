@@ -26,6 +26,7 @@ jobs:
           python3 -m py_compile webui_flux2/*.py
           node --check webui_flux2/static/app.js
           node --check webui_flux2/static/setup.js
+          node tests/app_selection_smoke.js
           python3 - <<'PY'
           import json
           from pathlib import Path

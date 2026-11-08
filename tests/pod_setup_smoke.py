@@ -185,6 +185,10 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     (log_root / "comfyui.log").write_text("synthetic ComfyUI output\n", encoding="utf-8")
     (log_root / "webui.log").write_text("WebUI 8189 portunda hazır.\n", encoding="utf-8")
     import server
+    with patch.object(server, "RUNPOD_MODE", True):
+        for retired_model in (server.MODEL_ANIMA, server.MODEL_MOODY_ANIMA):
+            rejected = server._is_dogrula({"model": retired_model})
+            assert rejected and "Anima kapatıldı" in rejected.get("hata", ""), rejected
     server.llm.LOG_PATH = str(log_root / "llm_server.log")
     llama_logs = "\n".join(server._log_tail("llama", 20))
     comfy_logs = "\n".join(server._log_tail("comfy", 20))
