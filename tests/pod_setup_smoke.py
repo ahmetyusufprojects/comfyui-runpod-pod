@@ -16,31 +16,35 @@ from unittest.mock import patch
 sys.path.insert(0, "/opt/webui_flux2")
 import pod_setup
 
-assert not pod_setup.workflow_enabled("flux3")
+assert pod_setup.workflow_enabled("flux3")
 assert not pod_setup.workflow_ready("flux3")
-assert "flux3" not in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
-try:
-    pod_setup.add_lora({"model": "flux3", "name": "disabled-model-test",
-                        "link": "https://huggingface.co/fixture/repo/resolve/main/lora.safetensors"})
-except ValueError:
-    pass
-else:
-    raise AssertionError("Flux 3 must not accept new LoRA records while disabled")
+assert "flux3" in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
 model_selector = re.search(
     r'<select id="runpodImageModel">(.*?)</select>',
     pathlib.Path("/opt/webui_flux2/index.html").read_text(encoding="utf-8"),
     re.DOTALL,
 )
 assert model_selector and re.search(
-    r'<option value="flux3" disabled>Flux 3 Klein · geçici olarak devre dışı</option>',
+    r'<option value="flux3">Flux 3 Klein · 16 adım</option>',
     model_selector.group(1),
 )
+saved_ready = pod_setup._ready
+pod_setup._ready = False
 try:
     pod_setup.start("flux3")
+except RuntimeError as exc:
+    assert "hazırlığı tamamlanmadı" in str(exc)
+else:
+    raise AssertionError("Flux 3 should wait for the ordinary ComfyUI setup path")
+finally:
+    pod_setup._ready = saved_ready
+
+try:
+    pod_setup.start("flux3-invalid")
 except ValueError:
     pass
 else:
-    raise AssertionError("Temporarily disabled Flux 3 group was accepted for install")
+    raise AssertionError("Unknown model groups must remain rejected")
 
 
 with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
@@ -375,13 +379,32 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         assert default_context["llm_ctx"] == 8192
     finally:
         server.RUNPOD_MODE = previous_runpod_mode
-    from image_graphs import _flux3_layout_elements
+    from image_graphs import _flux3_layout_elements, build_flux3_prompt
 
     bbox_caption, bbox_elements = _flux3_layout_elements(
         'A harbor at dawn. [{"id":"obj_1","desc":"red boat",'
         '"bbox":[120,180,640,820]}]', 1024, 1024)
     assert bbox_caption == "A harbor at dawn."
     assert bbox_elements == [{"type":"obj","bbox":[120,180,640,820],"desc":"red boat"}]
+
+    flux3_base = {"prompt": "A harbor at dawn. [{\"id\":\"boat_1\",\"bbox\":[120,180,640,820],\"desc\":\"red boat\"}]",
+                  "seed": 7, "width": 1024, "height": 1024,
+                  "steps": 16, "cfg": 1.0, "sampler": "euler",
+                  "scheduler": "simple", "flux3_bbox_mode": True}
+    graph, seed = build_flux3_prompt(flux3_base)
+    assert seed == 7 and graph["7"]["inputs"]["steps"] == 16
+    assert "CreateBoundingBoxes" in {node["class_type"] for node in graph.values()}
+    assert graph["4"]["inputs"]["text"] == ["15", 0]
+
+    flux3_edit = dict(flux3_base, prompt=(
+        'Change the boat <boat_1> in <ref_image_0> to red. '
+        '[{"id":"boat_1","from":"ref_image_0","src_bbox":[100,120,500,600],'
+        '"tgt_bbox":[120,180,640,820],"desc":"red boat"}]'))
+    edit_graph, _ = build_flux3_prompt(flux3_edit, "reference.png")
+    assert "CreateBoundingBoxes" not in {node["class_type"] for node in edit_graph.values()}
+    assert "src_bbox" in edit_graph["4"]["inputs"]["text"]
+    assert "tgt_bbox" in edit_graph["4"]["inputs"]["text"]
+    assert edit_graph["7"]["inputs"]["positive"][0] == "21"
 
     # Exercise universal settings, model-link reset, and editable LoRA records
     # using an isolated JSON file plus temporary model paths.

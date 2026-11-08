@@ -255,6 +255,7 @@ def build_flux3_prompt(p, image_name=None, image_name2=None):
     """FLUX 3 Klein distilled workflow with optional references and layout rows."""
     seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
     prompt_text = str(p["prompt"] or "")
+    refs = [ref for ref in (image_name, image_name2) if ref]
     pr = {
         "1": {"class_type": "UNETLoader",
               "inputs": {"unet_name": FLUX3_DIFFUSION_FILE,
@@ -284,7 +285,7 @@ def build_flux3_prompt(p, image_name=None, image_name2=None):
         "9": {"class_type": "SaveImage",
               "inputs": {"images": ["8", 0], "filename_prefix": "webui-flux3"}},
     }
-    if p.get("flux3_bbox_mode"):
+    if p.get("flux3_bbox_mode") and not refs:
         caption, elements = _flux3_layout_elements(prompt_text, p["width"], p["height"])
         if elements:
             pr["4"]["inputs"]["text"] = ["15", 0]
@@ -294,8 +295,10 @@ def build_flux3_prompt(p, image_name=None, image_name2=None):
                 "editor_state": [], "last_incoming": []}}
             pr["15"] = {"class_type": "Flux3LayoutPrompt", "inputs": {
                 "prompt": caption, "element": ["14", 2]}}
-    refs = [ref for ref in (image_name, image_name2) if ref]
     if refs:
+        # The official image-edit bbox table contains from/src_bbox/tgt_bbox.
+        # Pass that full table through unchanged: ComfyUI's CreateBoundingBoxes
+        # node intentionally reduces boxes to a generation-only layout table.
         ref_nodes = []
         for node_id, ref in enumerate(refs, start=20):
             pr[str(node_id)] = {"class_type": "LoadImage",
