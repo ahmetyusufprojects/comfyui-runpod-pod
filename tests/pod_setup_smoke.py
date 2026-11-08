@@ -452,8 +452,8 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         pod_setup.CATALOG.clear()
         pod_setup.CATALOG.update(saved_catalog)
 
-    # A fresh deployment starts the saved download order automatically, using
-    # only an isolated synthetic account record and volume prefix.
+    # A fresh deployment does not download until the saved setting enables it.
+    # An enabled order starts automatically, using isolated synthetic data.
     saved_ready = pod_setup._ready
     saved_flex = pod_setup._flex
     saved_data_lock = pod_setup._data_lock
@@ -461,8 +461,15 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     saved_validate_mount = pod_setup.validate_mount
     saved_prefix = os.environ.get("POD_FLEX_PREFIX")
     saved_bootstrap = os.environ.pop("WEBUI_BOOTSTRAP_PASSWORD", None)
+    saved_auto_download = os.environ.get("WEBUI_AUTO_DOWNLOAD")
     setup_volume = scratch / "auto-download-volume"
     setup_volume.mkdir()
+    settings_dir = setup_volume / "gallery-auto-test"
+    settings_dir.mkdir()
+    enabled_settings = copy.deepcopy(pod_setup._SYSTEM_SETTINGS_DEFAULT)
+    enabled_settings["auto_download"] = True
+    (settings_dir / "system-settings.json").write_text(
+        json.dumps(enabled_settings), encoding="utf-8")
     account_file = scratch / "auto-download-account.json"
     account_file.write_text("{}", encoding="utf-8")
 
@@ -476,6 +483,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     started_on_boot = []
     try:
         os.environ["POD_FLEX_PREFIX"] = "gallery-auto-test"
+        os.environ["WEBUI_AUTO_DOWNLOAD"] = "1"
         pod_setup.validate_mount = lambda: setup_volume
         pod_setup._ready = False
         pod_setup._flex = None
@@ -499,5 +507,9 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
             os.environ["POD_FLEX_PREFIX"] = saved_prefix
         if saved_bootstrap is not None:
             os.environ["WEBUI_BOOTSTRAP_PASSWORD"] = saved_bootstrap
+        if saved_auto_download is None:
+            os.environ.pop("WEBUI_AUTO_DOWNLOAD", None)
+        else:
+            os.environ["WEBUI_AUTO_DOWNLOAD"] = saved_auto_download
 
 print("model download, terminal speed logs, cancellation, LoRA/settings, prompts, GPU diagnostics, and log retrieval checks passed")
