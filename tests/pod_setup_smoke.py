@@ -181,7 +181,19 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         assert speed_text.count("synthetic-speed") == 2, speed_text
         assert "1.0 MiB / 10.0 MiB (10%)" in speed_text
         assert "6.0 MiB / 10.0 MiB (60%)" in speed_text
-        assert "2.0 MiB/sn" in speed_text and "kalan 2 sn" in speed_text
+        assert "1.0 MiB/sn" in speed_text and "kalan 4 sn" in speed_text
+        pod_setup._last_console_progress.clear()
+        undetected_speed = io.StringIO()
+        with contextlib.redirect_stdout(undetected_speed), \
+                patch.object(pod_setup.time, "monotonic",
+                             side_effect=(200.0, 205.0)):
+            pod_setup._progress(
+                "synthetic-speed", "İndiriliyor", name="cached.bin",
+                downloaded=0, total=10 * 1024 * 1024)
+            pod_setup._progress(
+                "synthetic-speed", "İndiriliyor", name="cached.bin",
+                downloaded=10 * 1024 * 1024, total=10 * 1024 * 1024)
+        assert "MiB/sn" not in undetected_speed.getvalue(), undetected_speed.getvalue()
     finally:
         pod_setup._last_console_progress.clear()
         pod_setup._last_console_progress.update(saved_progress_log)

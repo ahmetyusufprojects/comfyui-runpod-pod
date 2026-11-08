@@ -1121,6 +1121,7 @@ def remove(group):
 def _progress(group, stage, *, name=None, downloaded=None, total=None, rate=None):
     now = time.monotonic()
     log_line = False
+    log_rate = None
     with _lock:
         _state[group] = ("running", stage)
         _active_progress.update({"stage": stage, "file": name,
@@ -1129,12 +1130,39 @@ def _progress(group, stage, *, name=None, downloaded=None, total=None, rate=None
         progress_key = (group, name or "")
         previous = _last_console_progress.get(progress_key)
         if name and stage == "İndiriliyor":
-            log_line = (previous is None or previous[0] != stage
-                        or now - previous[1] >= 5.0)
+            if not isinstance(previous, dict) or previous.get("stage") != stage:
+                log_line = True
+                previous = {"stage": stage, "logged_at": now,
+                            "sample_at": now if rate is not None else None,
+                            "sample_size": downloaded if rate is not None else None}
+            else:
+                if rate is None or not isinstance(downloaded, (int, float)):
+                    previous["sample_at"] = None
+                    previous["sample_size"] = None
+                elif previous.get("sample_at") is None:
+                    previous["sample_at"] = now
+                    previous["sample_size"] = downloaded
+                if now - previous["logged_at"] >= 5.0:
+                    log_line = True
+                    sample_at = previous.get("sample_at")
+                    sample_size = previous.get("sample_size")
+                    if (rate is not None and isinstance(downloaded, (int, float))
+                            and isinstance(sample_at, (int, float))
+                            and isinstance(sample_size, (int, float))
+                            and now > sample_at and downloaded >= sample_size):
+                        log_rate = ((downloaded - sample_size) / (now - sample_at)
+                                    / (1024 * 1024))
+                    previous["logged_at"] = now
+                    previous["sample_at"] = now if rate is not None else None
+                    previous["sample_size"] = downloaded if rate is not None else None
+            _last_console_progress[progress_key] = previous
         else:
-            log_line = previous is None or previous[0] != stage
-        if log_line:
-            _last_console_progress[progress_key] = (stage, now)
+            log_line = (not isinstance(previous, dict)
+                        or previous.get("stage") != stage)
+            if log_line:
+                _last_console_progress[progress_key] = {
+                    "stage": stage, "logged_at": now,
+                    "sample_at": None, "sample_size": None}
     if log_line:
         parts = [f"[pod-setup] {group}: {stage}"]
         if name:
@@ -1147,12 +1175,12 @@ def _progress(group, stage, *, name=None, downloaded=None, total=None, rate=None
                               total / (1024 * 1024), percent))
             else:
                 parts.append("%.1f MiB" % (downloaded / (1024 * 1024)))
-        if isinstance(rate, (int, float)):
-            parts.append("%.1f MiB/sn" % max(0.0, rate))
+        if isinstance(log_rate, (int, float)):
+            parts.append("%.1f MiB/sn" % max(0.0, log_rate))
             if (isinstance(downloaded, (int, float))
                     and isinstance(total, (int, float))
-                    and total > downloaded and rate > 0):
-                remaining = (total - downloaded) / (rate * 1024 * 1024)
+                    and total > downloaded and log_rate > 0):
+                remaining = (total - downloaded) / (log_rate * 1024 * 1024)
                 if remaining < 60:
                     eta = "kalan %.0f sn" % remaining
                 elif remaining < 3600:
@@ -1502,8 +1530,10 @@ except HfHubHTTPError as e:
     source.parent.mkdir(parents=True, exist_ok=True)
     previous_time = time.monotonic()
     partial = _hf_incomplete_file(incoming, file["path"])
-    progress_file = partial if partial and partial.exists() else source
+    partial_visible = bool(partial and partial.exists())
+    progress_file = partial if partial_visible else source
     previous_size = progress_file.stat().st_size if progress_file.exists() else 0
+    previous_progress_path = progress_file if partial_visible else None
     process = None
     try:
         with root_log.open("ab") as log:
@@ -1523,13 +1553,20 @@ except HfHubHTTPError as e:
                 time.sleep(1)
                 now = time.monotonic()
                 partial = _hf_incomplete_file(incoming, file["path"])
-                progress_file = partial if partial and partial.exists() else source
+                partial_visible = bool(partial and partial.exists())
+                progress_file = partial if partial_visible else source
                 current_size = (progress_file.stat().st_size
                                 if progress_file.exists() else previous_size)
-                rate = max(0, current_size - previous_size) / max(now - previous_time, .001) / (1024 * 1024)
+                stable_partial = (partial_visible
+                                  and previous_progress_path == progress_file)
+                rate = (max(0, current_size - previous_size)
+                        / max(now - previous_time, .001) / (1024 * 1024)
+                        if stable_partial else None)
                 _progress(group, "İndiriliyor", name=file["name"],
-                          downloaded=current_size, total=file.get("size"), rate=round(rate, 2))
+                          downloaded=current_size, total=file.get("size"),
+                          rate=round(rate, 2) if rate is not None else None)
                 previous_time, previous_size = now, current_size
+                previous_progress_path = progress_file if partial_visible else None
     finally:
         if process is not None:
             with _lock:
