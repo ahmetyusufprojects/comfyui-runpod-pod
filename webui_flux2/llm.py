@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -54,6 +55,9 @@ def _load_runpod_profiles():
     try:
         with open(os.environ["POD_MODEL_CATALOG"], "r", encoding="utf-8") as stream:
             catalog = json.load(stream)
+        setup = sys.modules.get("pod_setup")
+        if setup is not None and getattr(setup, "_ready", False):
+            catalog["groups"] = setup.CATALOG
         root = os.path.join(os.environ["COMFYUI_ROOT"], "models")
         profiles = {}
         for name in ("llama", "llm_12b", "llm_26b"):
@@ -85,6 +89,13 @@ def _load_runpod_profiles():
 
 
 _RUNPOD_PROFILES = _load_runpod_profiles()
+
+def _refresh_runpod_profiles():
+    global _RUNPOD_PROFILES
+    if RUNPOD_MODE:
+        profiles = _load_runpod_profiles()
+        if profiles:
+            _RUNPOD_PROFILES = profiles
 
 def _llm_dbg(msg):
     try:
@@ -278,6 +289,7 @@ def _dosya_kod(yol, bek):
 
 def model_dogrula():
     global _ACTIVE_MTP_PATH
+    _refresh_runpod_profiles()
     if RUNPOD_MODE and _ACTIVE_PROFILE in _RUNPOD_PROFILES:
         config = _RUNPOD_PROFILES[_ACTIVE_PROFILE]
         check_files = [("model", MODEL_PATH)]
@@ -291,10 +303,10 @@ def model_dogrula():
                 raise LLMHatasi(os.path.basename(path) + " bulunamadı", "model")
         _ACTIVE_MTP_PATH = None
         mtp = config.get("mtp")
-        if (MTP_ENABLED and mtp and os.path.isfile(mtp)
-                and config.get("mtp_size") and config.get("mtp_sha256")):
+        if MTP_ENABLED and mtp and os.path.isfile(mtp):
             try:
-                _dosya_kod(mtp, (config["mtp_size"], config["mtp_sha256"]))
+                if config.get("mtp_size") and config.get("mtp_sha256"):
+                    _dosya_kod(mtp, (config["mtp_size"], config["mtp_sha256"]))
                 _ACTIVE_MTP_PATH = mtp
             except LLMHatasi:
                 # MTP only speeds decoding; an incompatible optional file cannot block the main model.
@@ -323,6 +335,7 @@ def model_ayarla(profile):
     global MODEL_PATH, MMPROJ_PATH, MODEL_BEYIT, MMPROJ_BEYIT
     global MODEL_KOD, MMPROJ_KOD, GPU_DEVICE, GPU_KATMAN, CTX
     global _ACTIVE_PROFILE, _ACTIVE_MTP_PATH
+    _refresh_runpod_profiles()
     if not RUNPOD_MODE:
         if profile not in (None, "llama"):
             raise LLMHatasi("Bulut LLM seçimi yalnızca RunPod üzerinde kullanılabilir.", "istek")
@@ -365,13 +378,17 @@ def ayarlarini_uygula(settings):
 
 
 def profil_vram_mb(profile=None, context=None):
+    _refresh_runpod_profiles()
     config = _RUNPOD_PROFILES.get(profile or _ACTIVE_PROFILE) or {}
-    weights = int(config.get("model_size") or 0)
+    def actual_size(key):
+        path = config.get(key)
+        return os.path.getsize(path) if path and os.path.isfile(path) else int(config.get(key + "_size") or 0)
+    weights = actual_size("model")
     if MULTIMODAL_ENABLED:
-        weights += int(config.get("mmproj_size") or 0)
+        weights += actual_size("mmproj")
     mtp = config.get("mtp")
     if MTP_ENABLED and mtp and os.path.isfile(mtp):
-        weights += int(config.get("mtp_size") or 0)
+        weights += actual_size("mtp")
     context = int(context or CTX)
     return int(weights / (1024 * 1024) + max(2500, context / 4))
 
@@ -383,6 +400,7 @@ def _runtime_signature():
 
 
 def model_profilleri():
+    _refresh_runpod_profiles()
     return [{"id": name, "ad": config.get("label", name),
              "model_bayt": config.get("model_size"),
              "mmproj_bayt": config.get("mmproj_size"),

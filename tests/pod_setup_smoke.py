@@ -459,8 +459,41 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
                                     "https://huggingface.co/fixture/replacement/resolve/main/weights.safetensors")
         assert model_file["repo"] == "fixture/replacement"
         assert model_file["size"] == 123
+        # A saved replacement without metadata must not inherit the original digest
+        # after restarting the setup worker.
+        override_key = "zimage/" + model_file["name"]
+        model_file["size"] = 999
+        model_file["sha256"] = "b" * 64
+        pod_setup._apply_saved_links({"link_overrides": {override_key: {
+            "source": "hf", "repo": "fixture/replacement", "revision": "main",
+            "path": "replacement.safetensors"}}})
+        assert "size" not in model_file and "sha256" not in model_file
         pod_setup.update_model_link("zimage", model_file["name"], "", restore=True)
         assert model_file["repo"] == saved_catalog["zimage"]["files"][0]["repo"]
+        # The LLM must validate the replacement, rather than the image's old
+        # catalog entry, even when the link changed after startup.
+        import hashlib
+        import llm
+        workflow = pod_setup.WORKFLOWS["llama"]
+        replacement = next(f for f in pod_setup.CATALOG[workflow["group"]]["files"]
+                           if f["name"] == workflow["model_file"])
+        before = dict(replacement)
+        model_path = scratch / "llm-test" / "models" / replacement["dir"] / replacement["name"]
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        model_path.write_bytes(b"different sized replacement")
+        try:
+            replacement["size"] = model_path.stat().st_size
+            replacement["sha256"] = hashlib.sha256(model_path.read_bytes()).hexdigest()
+            with patch.dict(os.environ, {"COMFYUI_ROOT": str(scratch / "llm-test")}), \
+                    patch.object(pod_setup, "_ready", True), \
+                    patch.object(llm, "MULTIMODAL_ENABLED", False):
+                llm.model_ayarla("llama")
+                llm.model_dogrula()
+                assert llm._RUNPOD_PROFILES["llama"]["model_size"] == model_path.stat().st_size
+        finally:
+            replacement.clear()
+            replacement.update(before)
+            llm._refresh_runpod_profiles()
         pod_setup._parse_lora_link = lambda value: (
             {"source": "hf", "repo": "fixture/lora", "revision": "deadbeef",
              "path": "adapter.safetensors"}, ".safetensors")

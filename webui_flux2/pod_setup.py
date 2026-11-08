@@ -354,15 +354,10 @@ def _apply_saved_links(settings):
             override = overrides.get(key)
             if not isinstance(override, dict):
                 continue
-            for field in ("source", "repo", "revision", "path", "url", "version"):
+            for field in ("source", "repo", "revision", "path", "url", "version", "size", "sha256"):
+                file.pop(field, None)
                 if field in override:
-                    file.pop(field, None)
                     file[field] = override[field]
-            if isinstance(override.get("size"), int) and override["size"] > 0:
-                file["size"] = override["size"]
-            if isinstance(override.get("sha256"), str) and re.fullmatch(
-                    r"[0-9a-fA-F]{64}", override["sha256"]):
-                file["sha256"] = override["sha256"].lower()
     _validate_catalog()
 
 
@@ -510,6 +505,9 @@ def update_model_link(group, name, link, restore=False):
                         shared.pop(field, None)
         target = MODELS / file["dir"] / file["name"]
         target.unlink(missing_ok=True)
+        # A partial transfer belongs to the previous URL and must not be resumed
+        # against a different source.
+        target.with_suffix(".part").unlink(missing_ok=True)
         _verification_file(target).unlink(missing_ok=True)
         _validate_catalog()
         _system_settings_write(settings)
