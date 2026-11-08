@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     with patch.object(pod_setup, '_command', side_effect=fake_package_command):
         pod_setup._download_llama_package(package, release_name, expected, threading.Event())
     assert len(attempts) == 3 and '--continue-at' in attempts[0]
-    assert '--continue-at' not in attempts[1] and 'application/octet-stream' in attempts[2]
+    assert '--continue-at' not in attempts[1] and 'Accept: application/octet-stream' in attempts[2]
     with patch.object(pod_setup, '_command', side_effect=AssertionError('valid package should be reused')):
         pod_setup._download_llama_package(package, release_name, expected, threading.Event())
 
