@@ -35,6 +35,10 @@ LLAMA_RELEASE = {
     f"cudart-llama-{LLAMA_TAG}-bin-ubuntu-cuda-12.8-x64.tar.gz":
         "d4db45f2cb9895ceaeb1f0e4d7885b60d1ec407ea212bce6131e8b714fd49497",
 }
+LLAMA_RELEASE_ASSETS = {
+    f"llama-{LLAMA_TAG}-bin-ubuntu-cuda-12.8-x64.tar.gz": 713618516,
+    f"cudart-llama-{LLAMA_TAG}-bin-ubuntu-cuda-12.8-x64.tar.gz": 713613150,
+}
 _lock = threading.Lock()
 _queue = []
 _active = None
@@ -1305,7 +1309,7 @@ def _command(args, label, *, cwd=None, cancel=None, timeout=1800):
             if cancel is not None and cancel.is_set():
                 raise DownloadCancelled("Hazırlık iptal edildi.")
             if process.returncode:
-                raise RuntimeError(f"{label} başarısız oldu.")
+                raise RuntimeError(f"{label} başarısız oldu (çıkış kodu {process.returncode}).")
             with (ROOT / "setup.log").open("a", encoding="utf-8") as log:
                 log.write(f"[timing] {label}: {time.monotonic() - start:.1f} sn\n")
         finally:
@@ -1434,6 +1438,47 @@ def _record_llama_cuda_scan(output):
             log.write("[llama] " + line + "\n")
 
 
+def _download_llama_package(archive, name, expected, cancel):
+    """Resume first; retry from scratch and then use GitHub's asset API."""
+    def valid():
+        if not archive.is_file() or not archive.stat().st_size:
+            return False
+        with archive.open('rb') as stream:
+            return hashlib.file_digest(stream, 'sha256').hexdigest() == expected
+
+    if valid():
+        return
+    direct = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/{name}"
+    asset = LLAMA_RELEASE_ASSETS[name]
+    api = f"https://api.github.com/repos/ggml-org/llama.cpp/releases/assets/{asset}"
+    last_error = None
+    for source, resume in ((direct, True), (direct, False), (api, False)):
+        if not resume:
+            archive.unlink(missing_ok=True)
+        cmd = ["curl", "--fail", "--location", "--retry", "3", "--retry-all-errors",
+               "--connect-timeout", "30", "--output", str(archive)]
+        if resume:
+            cmd.extend(["--continue-at", "-"])
+        if source == api:
+            cmd.extend(["--header", "Accept: application/octet-stream",
+                        "--header", "User-Agent: RunPod-WebUI"])
+        cmd.append(source)
+        try:
+            _command(cmd, "llama-server paketi", cancel=cancel)
+        except DownloadCancelled:
+            raise
+        except (OSError, RuntimeError) as exc:
+            last_error = str(exc)
+        else:
+            if valid():
+                return
+            last_error = "İndirilen paketin bütünlüğü doğrulanamadı."
+        with (ROOT / "setup.log").open("a", encoding="utf-8") as log:
+            log.write("[llama] Paket indirmesi tekrar denenecek: %s\n" % last_error)
+    raise RuntimeError("llama-server paketi indirilemedi. %s Kurulum logunu kontrol edin." %
+                       (last_error or "Bağlantı hatası."))
+
+
 def _install_llama(cancel):
     llama = ROOT / "llama"
     marker = llama / ".pod-ready"
@@ -1448,13 +1493,7 @@ def _install_llama(cancel):
     llama.mkdir(parents=True, exist_ok=True)
     for name, expected in LLAMA_RELEASE.items():
         archive = ROOT / name
-        url = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/{name}"
-        _command(["curl", "--fail", "--location", "--retry", "3", "--continue-at", "-",
-                  "--output", str(archive), url], "llama-server paketi", cancel=cancel)
-        with archive.open("rb") as file:
-            if hashlib.file_digest(file, "sha256").hexdigest() != expected:
-                archive.unlink()
-                raise RuntimeError("llama-server paketinin bütünlüğü doğrulanamadı.")
+        _download_llama_package(archive, name, expected, cancel)
         with tarfile.open(archive) as package:
             package.extractall(llama, filter="data")
         archive.unlink()

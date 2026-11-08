@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import http.server
 import builtins
 import copy
@@ -154,6 +155,24 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     assert not worker.is_alive(), "cancelled downloader did not stop"
     assert isinstance(result.get("error"), pod_setup.DownloadCancelled), result
     assert partial.stat().st_size < payload_size, "cancel did not stop the transfer"
+
+    # A rejected resume must retry without Range, then use the GitHub asset API.
+    package = scratch / 'llama-package.part'
+    package.write_bytes(b'partial')
+    expected = hashlib.sha256(b'complete-package').hexdigest()
+    release_name = next(iter(pod_setup.LLAMA_RELEASE_ASSETS))
+    attempts = []
+    def fake_package_command(args, label, **kwargs):
+        attempts.append(args)
+        if len(attempts) < 3:
+            raise RuntimeError('synthetic transfer failure')
+        package.write_bytes(b'complete-package')
+    with patch.object(pod_setup, '_command', side_effect=fake_package_command):
+        pod_setup._download_llama_package(package, release_name, expected, threading.Event())
+    assert len(attempts) == 3 and '--continue-at' in attempts[0]
+    assert '--continue-at' not in attempts[1] and 'application/octet-stream' in attempts[2]
+    with patch.object(pod_setup, '_command', side_effect=AssertionError('valid package should be reused')):
+        pod_setup._download_llama_package(package, release_name, expected, threading.Event())
 
     # CUDA discovery must preserve the real diagnostic instead of turning every
     # failure into an unexplained empty result.
