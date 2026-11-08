@@ -133,7 +133,8 @@ function runpodLlmListesiGuncelle(data, preferred){
   if(!RUNPOD_WEBUI) return;
   const items=data.llm_models||[];
   if(!items.length) return;
-  const signature=JSON.stringify(items.map(item=>[item.id,item.ad,item.hazir]));
+  const signature=JSON.stringify(items.map(item=>[item.id,item.ad,item.hazir,
+    item.gorsel_dosyasi,item.gorsel_hazir]));
   if(signature===runpodLlmSignature){
     if(preferred&&items.some(item=>item.id===preferred)&&$('llmModel'))
       $('llmModel').value=preferred;
@@ -156,7 +157,8 @@ function runpodLlmListesiGuncelle(data, preferred){
     select.replaceChildren();
     for(const item of items){
       const option=document.createElement('option'); option.value=item.id;
-      option.textContent=item.ad+(item.hazir?'':' · kurulu değil');
+      const durum=item.gorsel_hazir?'':(item.gorsel_dosyasi?' · görsel eki bekliyor':' · metin modeli');
+      option.textContent=item.ad+(item.hazir?'':' · kurulu değil')+durum;
       select.append(option);
     }
     const wanted=[saved,previous,defaultId].find(value=>items.some(item=>item.id===value));

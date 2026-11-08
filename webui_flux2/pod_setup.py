@@ -456,6 +456,9 @@ def model_options():
                        "builtin": bool(record.get("builtin")),
                        "primary_file": primary_name,
                        "files": [{"name": file["name"], "dir": file["dir"],
+                                  "optional": bool(file.get("optional")),
+                                  "workflow_key": next((key for key, value in workflow.items()
+                                                        if value == file["name"]), None),
                                   "link": _file_link(file),
                                   "default_link": _file_link(
                                       file.get("_default_source") or file)}
@@ -489,6 +492,14 @@ def create_model_instance(payload):
     links = payload.get("links") or {}
     if not isinstance(links, dict) or len(links) > 12:
         raise ValueError("Model dosyası bağlantıları geçersiz.")
+    excluded = payload.get("exclude_files") or []
+    if (not isinstance(excluded, list) or len(excluded) > 12
+            or any(not isinstance(item, str) for item in excluded)):
+        raise ValueError("İsteğe bağlı dosya seçimi geçersiz.")
+    optional_names = {file["name"] for file in base_group.get("files", [])
+                      if file.get("optional")}
+    if not set(excluded).issubset(optional_names):
+        raise ValueError("Zorunlu veya bilinmeyen bir dosya devre dışı bırakılamaz.")
     primary = next((key for key in ("diffusion_file", "checkpoint_file",
                                     "unet_file", "model_file")
                     if base_workflow.get(key)), None)
@@ -511,6 +522,11 @@ def create_model_instance(payload):
     rewritten = []
     for file in group.get("files", []):
         old_name = file["name"]
+        if old_name in excluded:
+            for key, value in list(workflow.items()):
+                if value == old_name:
+                    workflow.pop(key, None)
+            continue
         file["_default_source"] = {
             key: value for key, value in file.items()
             if key in ("source", "repo", "revision", "path", "url",

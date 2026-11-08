@@ -493,6 +493,42 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
                        if item["name"] == "Smoke · alternatif")
         assert variant["family"] == "z_image" and not variant["ready"]
         assert variant["id"] != "z_image" and variant["group"].startswith("variant_")
+        llm_workflow = pod_setup.WORKFLOWS["llm_26b"]
+        llm_instance = next(item for item in pod_setup.model_options()
+                            if item["id"] == "llm_26b")
+        llm_files = {item["name"]: item for item in llm_instance["files"]}
+        main_file = llm_workflow["model_file"]
+        mmproj_file = llm_workflow["mmproj_file"]
+        mtp_file = llm_workflow["mtp_file"]
+        assert llm_files[mmproj_file]["optional"]
+        assert llm_files[mtp_file]["optional"]
+        with patch.object(pod_setup, "_hf_resolve_metadata", return_value={}):
+            qwen = pod_setup.create_model_instance({
+                "family": "llm_26b", "name": "Qwen · görüntülü",
+                "links": {
+                    main_file: "https://huggingface.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF/resolve/main/Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q4_K_M.gguf",
+                    mmproj_file: "https://huggingface.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF/resolve/main/mmproj-F32.gguf",
+                },
+                "exclude_files": [mtp_file],
+            })
+        qwen_record = next(item for item in qwen["model_instances"]
+                           if item["name"] == "Qwen · görüntülü")
+        assert "mtp_file" not in qwen_record["workflow"]
+        assert qwen_record["workflow"]["mmproj_file"] != mmproj_file
+        assert mtp_file not in {item["name"] for item in qwen_record["files"]}
+        with patch.object(pod_setup, "_hf_resolve_metadata", return_value={}):
+            text_only = pod_setup.create_model_instance({
+                "family": "llm_26b", "name": "Yalnız metin",
+                "links": {main_file: "https://huggingface.co/fixture/text/resolve/main/model.gguf"},
+                "exclude_files": [mmproj_file, mtp_file],
+            })
+        text_only_record = next(item for item in text_only["model_instances"]
+                                if item["name"] == "Yalnız metin")
+        assert "mmproj_file" not in text_only_record["workflow"]
+        assert "mtp_file" not in text_only_record["workflow"]
+        assert len(text_only_record["files"]) == 1
+        pod_setup.delete_model_instance(qwen_record["id"])
+        pod_setup.delete_model_instance(text_only_record["id"])
         renamed = pod_setup.rename_model_instance(variant["id"], "Smoke · yeniden adlandırıldı")
         assert any(item["id"] == variant["id"] and
                    item["name"] == "Smoke · yeniden adlandırıldı"

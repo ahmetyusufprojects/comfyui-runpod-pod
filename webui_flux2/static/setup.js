@@ -94,14 +94,34 @@ function drawVariantFiles(data) {
   root.replaceChildren();
   if(!instance) return;
   for(const file of instance.files||[]){
-    const label=document.createElement('label'); label.className='model-variant-file';
+    const row=document.createElement('div'); row.className='model-variant-file';
+    const head=document.createElement('div'); head.className='model-variant-file-head';
     const name=document.createElement('span'); name.textContent=file.name;
+    if(file.optional){
+      const toggle=document.createElement('label'); toggle.className='model-variant-optional';
+      const check=document.createElement('input'); check.type='checkbox';
+      check.dataset.optionalFile=file.name;
+      const caption=document.createElement('span'); caption.textContent='İsteğe bağlı';
+      toggle.append(check,caption); head.append(toggle);
+    }
+    head.append(name);
     const input=document.createElement('input'); input.type='url';
-    input.value=file.default_link||file.link||''; input.dataset.file=file.name;
+    input.value=file.optional?'':(file.default_link||file.link||''); input.dataset.file=file.name;
     input.dataset.defaultLink=file.default_link||file.link||'';
     input.required=file.name===instance.primary_file;
+    input.disabled=!!file.optional;
+    input.placeholder=file.optional?'Dahil edeceksen indirme bağlantısını gir.':
+      (file.name===instance.primary_file?'Ana dosyanın yeni indirme bağlantısı':'Varsayılan bağlantı kullanılır');
     input.setAttribute('aria-label',file.name+' model bağlantısı');
-    label.append(name,input); root.append(label);
+    if(file.optional){
+      const check=head.querySelector('input[data-optional-file]');
+      check.onchange=()=>{
+        input.disabled=!check.checked;
+        input.required=check.checked;
+        if(!check.checked) input.value='';
+      };
+    }
+    row.append(head,input); root.append(row);
   }
 }
 function drawModelInstances(data) {
@@ -306,9 +326,16 @@ $('modelForm').addEventListener('submit',async event=>{
   event.preventDefault();
   const status=$('modelFormStatus'), family=$('modelFamily').value;
   const base=(systemSettingsData?.model_instances||[]).find(item=>item.id===family);
-  const links={};
+  const links={}, exclude_files=[];
   for(const input of $('modelVariantFiles').querySelectorAll('input[data-file]')){
+    const optional=Array.from($('modelVariantFiles').querySelectorAll('input[data-optional-file]'))
+      .find(item=>item.dataset.optionalFile===input.dataset.file);
+    if(optional&&!optional.checked){exclude_files.push(input.dataset.file);continue;}
     const link=input.value.trim();
+    if(optional&&!link){
+      status.textContent=`${input.dataset.file} için bağlantı gir veya bu dosyayı isteğe bağlı bölümünde kapalı bırak.`;
+      return;
+    }
     if(link!==input.dataset.defaultLink) links[input.dataset.file]=link;
   }
   if(!base || !links[base.primary_file]){
@@ -318,7 +345,7 @@ $('modelForm').addEventListener('submit',async event=>{
   status.textContent='Model kaydı ekleniyor…';
   try{
     const data=await api('/api/system-settings',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({islem:'model_ekle',family,name:$('modelName').value.trim(),links})});
+      body:JSON.stringify({islem:'model_ekle',family,name:$('modelName').value.trim(),links,exclude_files})});
     drawSystemSettings(data); $('modelName').value='';
     status.textContent='Model kaydedildi. İndirmeyi İndirmeler bölümünden başlatabilirsin.';
     lastStatus=await api('/api/pod-kurulum'); draw(lastStatus);

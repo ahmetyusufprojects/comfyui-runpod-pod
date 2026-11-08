@@ -56,7 +56,8 @@ def _runpod_llama_settings():
         model_root = os.path.join(os.environ["COMFYUI_ROOT"], "models", "llm")
         return {
             "model": os.path.join(model_root, workflow["model_file"]),
-            "mmproj": os.path.join(model_root, workflow["mmproj_file"]),
+            "mmproj": (os.path.join(model_root, workflow["mmproj_file"])
+                       if workflow.get("mmproj_file") else None),
             "gpu_device": workflow.get("gpu_device", "CUDA0"),
             "gpu_layers": workflow.get("gpu_layers", "all"),
         }
@@ -87,13 +88,15 @@ def _load_runpod_profiles():
             files = group.get("files") or []
             by_name = {item.get("name"): item for item in files}
             model = by_name.get(workflow.get("model_file"), {})
-            mmproj = by_name.get(workflow.get("mmproj_file"), {})
+            mmproj_file = workflow.get("mmproj_file")
+            mmproj = by_name.get(mmproj_file, {}) if mmproj_file else {}
             mtp = by_name.get(workflow.get("mtp_file"), {})
-            if not workflow.get("model_file") or not workflow.get("mmproj_file"):
+            if not workflow.get("model_file"):
                 continue
             profiles[name] = {
                 "model": os.path.join(root, model.get("dir", "llm"), workflow["model_file"]),
-                "mmproj": os.path.join(root, mmproj.get("dir", "llm"), workflow["mmproj_file"]),
+                "mmproj": (os.path.join(root, mmproj.get("dir", "llm"), mmproj_file)
+                           if mmproj_file else None),
                 "model_size": model.get("size"), "model_sha256": model.get("sha256"),
                 "mmproj_size": mmproj.get("size"), "mmproj_sha256": mmproj.get("sha256"),
                 "mtp": os.path.join(root, mtp.get("dir", "llm"), workflow["mtp_file"])
@@ -126,9 +129,10 @@ def _llm_dbg(msg):
         pass
 MODEL_PATH = os.environ.get("LLM_MODEL_PATH", _RUNPOD_LLAMA.get("model") or os.path.join(PROJECT_ROOT, "Gemma-4E4B-3",
                           "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"))
-MMPROJ_PATH = os.environ.get("LLM_MMPROJ_PATH", _RUNPOD_LLAMA.get("mmproj") or os.path.join(
+_DEFAULT_MMPROJ_PATH = (_RUNPOD_LLAMA.get("mmproj") or "") if RUNPOD_MODE else os.path.join(
     PROJECT_ROOT, "Gemma-4E4B-3",
-    "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf"))
+    "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf")
+MMPROJ_PATH = os.environ.get("LLM_MMPROJ_PATH", _DEFAULT_MMPROJ_PATH)
 # Q8_0 ayristirmasi: f16 mmproj'in yarisi boyutunda. llama-quantize'un
 # a.conv1d f32-tenensorlerinde boyut asserasyonu catirdigindan bu tensorler
 # f32 birakildi. Yarim boyut -> yuklemede yaklasik 3 sn kazanc.
@@ -365,7 +369,7 @@ def model_ayarla(profile):
     """Select a RunPod LLM profile; the server restarts on its next queued job."""
     global MODEL_PATH, MMPROJ_PATH, MODEL_BEYIT, MMPROJ_BEYIT
     global MODEL_KOD, MMPROJ_KOD, GPU_DEVICE, GPU_KATMAN, CTX
-    global _ACTIVE_PROFILE, _ACTIVE_MTP_PATH
+    global _ACTIVE_PROFILE, _ACTIVE_MTP_PATH, MULTIMODAL_ENABLED
     _refresh_runpod_profiles()
     if not RUNPOD_MODE:
         if profile not in (None, "llama"):
@@ -374,13 +378,16 @@ def model_ayarla(profile):
     if profile not in _RUNPOD_PROFILES:
         raise LLMHatasi("Seçilen LLM modeli bu imajda tanımlı değil.", "istek")
     config = _RUNPOD_PROFILES[profile]
-    MODEL_PATH, MMPROJ_PATH = config["model"], config["mmproj"]
+    MODEL_PATH, MMPROJ_PATH = config["model"], config.get("mmproj") or ""
     MODEL_BEYIT, MODEL_KOD = config.get("model_size"), config.get("model_sha256")
     MMPROJ_BEYIT, MMPROJ_KOD = config.get("mmproj_size"), config.get("mmproj_sha256")
     GPU_DEVICE, GPU_KATMAN = config["gpu_device"], str(config["gpu_layers"])
     CTX = int(config.get("context") or 8192)
     _ACTIVE_PROFILE = profile
     _ACTIVE_MTP_PATH = None
+    if not MMPROJ_PATH:
+        # A text-only profile must not inherit the previous model's vision path.
+        MULTIMODAL_ENABLED = False
     return profile
 
 
@@ -437,9 +444,11 @@ def model_profilleri():
              "mmproj_bayt": config.get("mmproj_size"),
              "mtp_bayt": config.get("mtp_size"),
              "mtp_dosyasi": bool(config.get("mtp")),
+             "gorsel_dosyasi": bool(config.get("mmproj")),
              "ctx": config.get("context", 8192),
-             "hazir": (os.path.isfile(config.get("model", ""))
-                       and os.path.isfile(config.get("mmproj", "")))}
+             "hazir": os.path.isfile(config.get("model", "")),
+             "gorsel_hazir": bool(config.get("mmproj")
+                                  and os.path.isfile(config.get("mmproj", "")))}
             for name, config in _RUNPOD_PROFILES.items()]
 
 
