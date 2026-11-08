@@ -97,10 +97,17 @@ def _load_runpod_profiles():
                 "model": os.path.join(root, model.get("dir", "llm"), workflow["model_file"]),
                 "mmproj": (os.path.join(root, mmproj.get("dir", "llm"), mmproj_file)
                            if mmproj_file else None),
+                "model_identity": " ".join(str(value or "") for value in (
+                    name, group.get("label"), workflow.get("model_file"),
+                    model.get("repo"), model.get("path"), model.get("url"))),
                 "model_size": model.get("size"), "model_sha256": model.get("sha256"),
                 "mmproj_size": mmproj.get("size"), "mmproj_sha256": mmproj.get("sha256"),
                 "mtp": os.path.join(root, mtp.get("dir", "llm"), workflow["mtp_file"])
                         if workflow.get("mtp_file") else None,
+                "mtp_embedded": bool(workflow.get("mtp_embedded") or re.search(
+                    r"mtp", " ".join(str(value or "") for value in (
+                        workflow.get("model_file"), model.get("path"),
+                        model.get("url"))), re.IGNORECASE)),
                 "mtp_size": mtp.get("size"), "mtp_sha256": mtp.get("sha256"),
                 "gpu_device": workflow.get("gpu_device", "CUDA0"),
                 "gpu_layers": workflow.get("gpu_layers", "all"),
@@ -160,6 +167,13 @@ TOP_K = 40
 REPEAT_PENALTY = 1.05
 MTP_ENABLED = True
 MULTIMODAL_ENABLED = True
+FLASH_ATTENTION = "on"
+KV_CACHE_TYPE_K = "f16"
+KV_CACHE_TYPE_V = "f16"
+MTP_DRAFT_TOKENS = 3
+REASONING_MODE = "on"
+REASONING_EFFORT = "default"
+REASONING_BUDGET = 160
 BAGLAM_ALT = 1024
 BAGLAM_UST = 32768
 LOG_PATH = os.path.join(BASE_DIR, "llm_server.log")
@@ -253,12 +267,6 @@ METIN_SINIR = 6000
 GORSEL_HAM_SINIR = 20 * 1024 * 1024
 GORSEL_UZUN_KENAR = 1024
 
-# LLM düşünme/reasoning modu: llama-server CLI bayrağıyla açılır.
-# "on" = her zaman düşünmeye aç, "off" = kapalı, "auto" = şablon/model karar verir.
-REASONING_MODE = "on"
-REASONING_EFFORT = "default"
-REASONING_BUDGET = 160
-
 SOHBET_SISTEM_PROMPTU = """Sen Türkçe dâhil kullanıcının tercih ettiği dilde yardımcı olan, dikkatli ve doğal bir asistansın.
 Önce kullanıcının asıl ihtiyacını belirle ve doğrudan yanıtla. Amacın işi çözmek veya soruyu yanıtlamaktır; genel giriş, kullanıcının söylediklerini tekrar etme ve konu dışı ek önerilerle yanıtı dağıtma.
 Basit soruları birkaç net cümleyle yanıtla. Teknik veya çok adımlı konularda sonucu uygulamaya yetecek bağlamı ve sıralı adımları ver; önemli bir ayrıntıyı yalnızca kısa görünmek için atlama. Başlıkları ve listeleri ancak okunabilirliği artırıyorsa kullan.
@@ -323,7 +331,7 @@ def _dosya_kod(yol, bek):
 
 
 def model_dogrula():
-    global _ACTIVE_MTP_PATH
+    global _ACTIVE_MTP_PATH, _ACTIVE_MTP_EMBEDDED
     _refresh_runpod_profiles()
     if RUNPOD_MODE and _ACTIVE_PROFILE in _RUNPOD_PROFILES:
         config = _RUNPOD_PROFILES[_ACTIVE_PROFILE]
@@ -337,12 +345,14 @@ def model_dogrula():
             elif not os.path.isfile(path):
                 raise LLMHatasi(os.path.basename(path) + " bulunamadı", "model")
         _ACTIVE_MTP_PATH = None
+        _ACTIVE_MTP_EMBEDDED = bool(config.get("mtp_embedded"))
         mtp = config.get("mtp")
         if MTP_ENABLED and mtp and os.path.isfile(mtp):
             try:
                 if config.get("mtp_size") and config.get("mtp_sha256"):
                     _dosya_kod(mtp, (config["mtp_size"], config["mtp_sha256"]))
                 _ACTIVE_MTP_PATH = mtp
+                _ACTIVE_MTP_EMBEDDED = False
             except LLMHatasi:
                 # MTP only speeds decoding; an incompatible optional file cannot block the main model.
                 _ACTIVE_MTP_PATH = None
@@ -361,6 +371,7 @@ def _aktif_mmproj():
 
 _ACTIVE_PROFILE = "llm_26b" if RUNPOD_MODE else "llama"
 _ACTIVE_MTP_PATH = None
+_ACTIVE_MTP_EMBEDDED = False
 _calisan_profile = None
 _calisan_signature = None
 
@@ -369,7 +380,7 @@ def model_ayarla(profile):
     """Select a RunPod LLM profile; the server restarts on its next queued job."""
     global MODEL_PATH, MMPROJ_PATH, MODEL_BEYIT, MMPROJ_BEYIT
     global MODEL_KOD, MMPROJ_KOD, GPU_DEVICE, GPU_KATMAN, CTX
-    global _ACTIVE_PROFILE, _ACTIVE_MTP_PATH, MULTIMODAL_ENABLED
+    global _ACTIVE_PROFILE, _ACTIVE_MTP_PATH, _ACTIVE_MTP_EMBEDDED, MULTIMODAL_ENABLED
     _refresh_runpod_profiles()
     if not RUNPOD_MODE:
         if profile not in (None, "llama"):
@@ -385,32 +396,98 @@ def model_ayarla(profile):
     CTX = int(config.get("context") or 8192)
     _ACTIVE_PROFILE = profile
     _ACTIVE_MTP_PATH = None
+    _ACTIVE_MTP_EMBEDDED = bool(config.get("mtp_embedded"))
     if not MMPROJ_PATH:
         # A text-only profile must not inherit the previous model's vision path.
         MULTIMODAL_ENABLED = False
     return profile
 
 
-def ayarlarini_uygula(settings):
+def _profil_ayar_varsayilanlari(profile=None):
+    config = _RUNPOD_PROFILES.get(profile or _ACTIVE_PROFILE) or {}
+    identity = " ".join(str(value or "") for value in (
+        profile, config.get("label"), config.get("model_identity"),
+        os.path.basename(config.get("model") or "")))
+    qwen = "qwen" in identity.casefold()
+    mtp = bool(config.get("mtp") or config.get("mtp_embedded"))
+    return {
+        "gpu_layers": "auto" if qwen else config.get("gpu_layers", "auto"),
+        "context": 8192 if qwen else int(config.get("context") or 8192),
+        "threads": 8,
+        "batch": 2048 if qwen else 4096,
+        "ubatch": 512 if qwen else 1024,
+        "flash_attn": "on",
+        "cache_type_k": "q8_0" if qwen else "f16",
+        "cache_type_v": "q8_0" if qwen else "f16",
+        "top_p": 0.80 if qwen else 0.95,
+        "top_k": 20 if qwen else 40,
+        "repeat_penalty": 1.0 if qwen else 1.05,
+        "temperature": 0.7,
+        "use_mtp": mtp,
+        "multimodal": bool(config.get("mmproj")),
+        "reasoning": "on",
+        "reasoning_effort": "low" if qwen else "default",
+        "reasoning_budget": 160,
+        "mtp_draft_tokens": 2 if qwen and mtp else 3,
+    }
+
+
+def ayarlarini_uygula(settings, profile=None):
     global GPU_KATMAN, LLAMA_THREADS, LLAMA_BATCH, LLAMA_UBATCH
     global TOP_P, TOP_K, REPEAT_PENALTY, MTP_ENABLED, MULTIMODAL_ENABLED
+    global CTX, FLASH_ATTENTION, KV_CACHE_TYPE_K, KV_CACHE_TYPE_V
+    global REASONING_MODE, REASONING_EFFORT, REASONING_BUDGET
+    global MTP_DRAFT_TOKENS
     if not isinstance(settings, dict):
         return
-    layers = settings.get("llm_gpu_layers")
-    if layers == "all":
-        GPU_KATMAN = "all"
+    profile = profile or _ACTIVE_PROFILE
+    defaults = _profil_ayar_varsayilanlari(profile)
+    profiles = settings.get("llm_model_tuning")
+    selected = profiles.get(profile) if isinstance(profiles, dict) else None
+    if isinstance(selected, dict):
+        tuning = dict(defaults)
+        tuning.update(selected)
+    else:
+        # Keep old account settings effective until the user saves per-model values.
+        tuning = dict(defaults)
+        if not profiles and not ("qwen" in str(_RUNPOD_PROFILES.get(profile, {}).get(
+                "model_identity", "")).casefold()):
+            for field, legacy in (("gpu_layers", "llm_gpu_layers"),
+                                  ("threads", "llm_threads"),
+                                  ("batch", "llm_batch"),
+                                  ("top_p", "llm_top_p"),
+                                  ("top_k", "llm_top_k"),
+                                  ("repeat_penalty", "llm_repeat_penalty"),
+                                  ("temperature", "llm_temperature"),
+                                  ("use_mtp", "llm_use_mtp"),
+                                  ("multimodal", "llm_multimodal")):
+                if legacy in settings:
+                    tuning[field] = settings[legacy]
+    layers = tuning.get("gpu_layers", "auto")
+    if layers in ("all", "auto"):
+        GPU_KATMAN = layers
     elif isinstance(layers, int) and not isinstance(layers, bool) and 0 <= layers <= 512:
         GPU_KATMAN = str(layers)
-    LLAMA_THREADS = max(1, min(64, int(settings.get("llm_threads", 8))))
-    LLAMA_BATCH = max(128, min(8192, int(settings.get("llm_batch", 4096))))
-    LLAMA_UBATCH = min(1024, LLAMA_BATCH)
-    TOP_P = max(0.05, min(1.0, float(settings.get("llm_top_p", 0.95))))
-    TOP_K = max(0, min(1000, int(settings.get("llm_top_k", 40))))
-    REPEAT_PENALTY = max(0.8, min(2.0, float(settings.get("llm_repeat_penalty", 1.05))))
-    MTP_ENABLED = settings.get("llm_use_mtp", True) is not False
-    wants_multimodal = settings.get("llm_multimodal", True) is not False
+    else:
+        GPU_KATMAN = str(defaults["gpu_layers"])
+    CTX = max(BAGLAM_ALT, min(BAGLAM_UST, int(tuning.get("context", defaults["context"]))))
+    LLAMA_THREADS = max(1, min(64, int(tuning.get("threads", defaults["threads"]))))
+    LLAMA_BATCH = max(128, min(8192, int(tuning.get("batch", defaults["batch"]))))
+    LLAMA_UBATCH = max(128, min(LLAMA_BATCH, int(tuning.get("ubatch", defaults["ubatch"]))))
+    TOP_P = max(0.05, min(1.0, float(tuning.get("top_p", defaults["top_p"]))))
+    TOP_K = max(0, min(1000, int(tuning.get("top_k", defaults["top_k"]))))
+    REPEAT_PENALTY = max(0.8, min(2.0, float(tuning.get("repeat_penalty", defaults["repeat_penalty"]))))
+    MTP_ENABLED = tuning.get("use_mtp", defaults["use_mtp"]) is not False
+    wants_multimodal = tuning.get("multimodal", defaults["multimodal"]) is not False
     MULTIMODAL_ENABLED = wants_multimodal and (
         not RUNPOD_MODE or os.path.isfile(MMPROJ_PATH))
+    FLASH_ATTENTION = tuning.get("flash_attn", "on")
+    KV_CACHE_TYPE_K = tuning.get("cache_type_k", "f16")
+    KV_CACHE_TYPE_V = tuning.get("cache_type_v", "f16")
+    REASONING_MODE = tuning.get("reasoning", "on")
+    REASONING_EFFORT = tuning.get("reasoning_effort", "default")
+    REASONING_BUDGET = max(-1, min(32768, int(tuning.get("reasoning_budget", 160))))
+    MTP_DRAFT_TOKENS = max(1, min(16, int(tuning.get("mtp_draft_tokens", 3))))
     if wants_multimodal and not MULTIMODAL_ENABLED:
         _llm_dbg("mmproj dosyası yok; ana Gemma modeli görsel girişi olmadan devam edecek")
 
@@ -432,20 +509,39 @@ def profil_vram_mb(profile=None, context=None):
 
 
 def _runtime_signature():
-    return [(_ACTIVE_PROFILE if RUNPOD_MODE else "llama"), CTX, str(GPU_KATMAN),
-            LLAMA_THREADS, LLAMA_BATCH, LLAMA_UBATCH, bool(MTP_ENABLED),
-            bool(MULTIMODAL_ENABLED)]
+    profile = _ACTIVE_PROFILE if RUNPOD_MODE else "llama"
+    config = _RUNPOD_PROFILES.get(profile) or {}
+    file_state = []
+    for path in (MODEL_PATH, MMPROJ_PATH, config.get("mtp")):
+        if not path:
+            file_state.append(None)
+            continue
+        try:
+            stat = os.stat(path)
+            file_state.append((path, stat.st_size, stat.st_mtime_ns))
+        except OSError:
+            file_state.append((path, None, None))
+    return [profile, config.get("model_identity"), tuple(file_state),
+            CTX, str(GPU_KATMAN), LLAMA_THREADS, LLAMA_BATCH, LLAMA_UBATCH, bool(MTP_ENABLED),
+            bool(MULTIMODAL_ENABLED), FLASH_ATTENTION, KV_CACHE_TYPE_K,
+            KV_CACHE_TYPE_V, REASONING_MODE, REASONING_EFFORT,
+            REASONING_BUDGET, MTP_DRAFT_TOKENS,
+            _ACTIVE_MTP_PATH, bool(_ACTIVE_MTP_EMBEDDED)]
 
 
 def model_profilleri():
     _refresh_runpod_profiles()
     return [{"id": name, "ad": config.get("label", name),
+             "tuning_family": ("qwen" if "qwen" in str(
+                 config.get("model_identity", "")).casefold() else "generic"),
              "model_bayt": config.get("model_size"),
              "mmproj_bayt": config.get("mmproj_size"),
              "mtp_bayt": config.get("mtp_size"),
              "mtp_dosyasi": bool(config.get("mtp")),
+             "mtp_dahili": bool(config.get("mtp_embedded")),
              "gorsel_dosyasi": bool(config.get("mmproj")),
              "ctx": config.get("context", 8192),
+             "tuning_defaults": _profil_ayar_varsayilanlari(name),
              "hazir": os.path.isfile(config.get("model", "")),
              "gorsel_hazir": bool(config.get("mmproj")
                                   and os.path.isfile(config.get("mmproj", "")))}
@@ -594,7 +690,7 @@ def durum(detayli=False):
          "saglik": _saglik() if canli else None,
          "model": _ACTIVE_PROFILE if RUNPOD_MODE else "llama",
          "multimodal": bool(MULTIMODAL_ENABLED),
-         "mtp": bool(MTP_ENABLED)}
+         "mtp": bool(MTP_ENABLED and (_ACTIVE_MTP_PATH or _ACTIVE_MTP_EMBEDDED))}
     if detayli:
         komut_parcalar = [LLAMA_SERVER, "-m", MODEL_PATH]
         if MULTIMODAL_ENABLED:
@@ -602,24 +698,38 @@ def durum(detayli=False):
         komut_parcalar += ["--host", "127.0.0.1", "--port", str(PORT),
                            "-c", str(CTX), "-ngl", str(GPU_KATMAN),
                            "-t", str(LLAMA_THREADS), "-b", str(LLAMA_BATCH),
-                           "-ub", str(LLAMA_UBATCH), "-np", "1"]
+                           "-ub", str(LLAMA_UBATCH), "-np", "1",
+                           "-fa", str(FLASH_ATTENTION), "-ctk", KV_CACHE_TYPE_K,
+                           "-ctv", KV_CACHE_TYPE_V, "--fit", "on"]
         if os.name != "nt":
             komut_parcalar += ["--device", GPU_DEVICE]
         if REASONING_MODE == "off":
             komut_parcalar += ["-rea", "off"]
         else:
-            komut_parcalar += ["-rea", REASONING_MODE]
-            if REASONING_MODE != "auto":
-                komut_parcalar += ["--reasoning-effort", REASONING_EFFORT]
-            if isinstance(REASONING_BUDGET, int) and REASONING_BUDGET > 0:
+            komut_parcalar += ["-rea", REASONING_MODE,
+                               "--reasoning-effort", REASONING_EFFORT]
+            if isinstance(REASONING_BUDGET, int):
                 komut_parcalar += ["--reasoning-budget", str(REASONING_BUDGET)]
             komut_parcalar += ["--reasoning-format", "deepseek"]
+        if MTP_ENABLED and _ACTIVE_MTP_PATH:
+            komut_parcalar += ["--spec-type", "draft-mtp", "--spec-draft-model",
+                               _ACTIVE_MTP_PATH, "--spec-draft-n-max",
+                               str(MTP_DRAFT_TOKENS)]
+        elif MTP_ENABLED and _ACTIVE_MTP_EMBEDDED:
+            komut_parcalar += ["--spec-type", "draft-mtp", "--spec-draft-n-max",
+                               str(MTP_DRAFT_TOKENS)]
         komut_parcalar += ["--no-webui", "--cache-reuse", "256", "-lm", "mmap",
                            "--no-warmup"]
         d.update({"port": PORT, "ngl": GPU_KATMAN, "ctx": CTX,
                   "gpu_device": GPU_DEVICE if os.name != "nt" else None,
                   "calisan_ctx": _calisan_ctx,
                   "calisan_model": _calisan_profile,
+                  "flash_attn": FLASH_ATTENTION,
+                  "cache_type_k": KV_CACHE_TYPE_K,
+                  "cache_type_v": KV_CACHE_TYPE_V,
+                  "reasoning": REASONING_MODE,
+                  "reasoning_effort": REASONING_EFFORT,
+                  "mtp_embedded": _ACTIVE_MTP_EMBEDDED,
                   "komut": " ".join(komut_parcalar),
                   "ram_byt": _surec_mem_byt(pid),
                   "son_kullanim_sn": round(time.monotonic()
@@ -692,7 +802,7 @@ def _linux_llama_command(pid):
 
 
 def _gpu_sureci_mi(pid):
-    """A healthy RunPod llama process must explicitly target CUDA and all layers."""
+    """A healthy RunPod llama process must explicitly target CUDA and GPU layers."""
     if os.name == "nt":
         return True
     args = _linux_llama_command(pid)
@@ -706,17 +816,19 @@ def _gpu_sureci_mi(pid):
     if device != GPU_DEVICE:
         return False
     try:
+        # auto/all let llama.cpp place as many layers on the GPU as fit.
         # Layer count zero is an explicit user choice (all layers stay on CPU).
         # The server still has to be launched with CUDA0 and the CUDA backend
         # itself is verified separately by _gpu_backend_dogrula().
-        return layers.lower() == "all" or int(layers) >= 0
+        return layers.lower() in ("all", "auto") or int(layers) >= 0
     except (TypeError, ValueError):
         return False
 
 
 def baslat(*, gpu_hazirla=None, iptal=None):
     """Sunucuyu hazirlar. Donus: bu cagrida gecen yukleme ms (0 = zaten hazir)."""
-    global _calisan_ctx, _linux_process, _calisan_profile, _ACTIVE_MTP_PATH
+    global _calisan_ctx, _linux_process, _calisan_profile
+    global _ACTIVE_MTP_PATH, _ACTIVE_MTP_EMBEDDED
     global _calisan_signature
     baslama = time.monotonic()
     _llm_dbg("baslat_basla")
@@ -749,11 +861,18 @@ def baslat(*, gpu_hazirla=None, iptal=None):
         else:
             if sahibi is not None:
                 _pid_yaz(sahibi)
-            _calisan_ctx = _pid_ctx_oku()
-            _calisan_profile = _ACTIVE_PROFILE
-            _calisan_signature = _runtime_signature()
-            _llm_dbg(f"baslat_zaten_hazir ms={int((time.monotonic()-baslama)*1000)}")
-            return 0
+            signature = _runtime_signature()
+            if _calisan_signature != signature:
+                _llm_dbg("baslat_ayarlar_degisti_yeniden_yukleniyor")
+                durdur()
+                saglik = None
+                pid = None
+            else:
+                _calisan_ctx = _pid_ctx_oku()
+                _calisan_profile = _ACTIVE_PROFILE
+                _calisan_signature = signature
+                _llm_dbg(f"baslat_zaten_hazir ms={int((time.monotonic()-baslama)*1000)}")
+                return 0
 
     if saglik == "loading":
         sahibi = _port_sahibi()
@@ -797,7 +916,9 @@ def baslat(*, gpu_hazirla=None, iptal=None):
         "--host", "127.0.0.1", "--port", str(PORT),
         "-c", str(CTX), "-ngl", str(GPU_KATMAN), "-t", str(LLAMA_THREADS),
         "-b", str(LLAMA_BATCH), "-ub", str(LLAMA_UBATCH), "-np", "1",
-        "-kvu", "-ctxcp", "32", "-fa", "on", "-lm", "mmap",
+        "-kvu", "-ctxcp", "32", "-fa", str(FLASH_ATTENTION),
+        "-ctk", str(KV_CACHE_TYPE_K), "-ctv", str(KV_CACHE_TYPE_V),
+        "--fit", "on", "-lm", "mmap",
         "--no-webui", "--cache-reuse", "256",
         # Warmup bos bir kosu calistirir ve ~18 sn surer; ilk istekte zaten
         # graph'lar olusur. Atlaninca model acilisi yaklasik ikiye katlanir.
@@ -808,16 +929,20 @@ def baslat(*, gpu_hazirla=None, iptal=None):
     if REASONING_MODE == "off":
         komut += ["-rea", "off"]
     else:
-        komut += ["-rea", REASONING_MODE]
-        if REASONING_MODE != "auto":
-            komut += ["--reasoning-effort", REASONING_EFFORT]
-        if isinstance(REASONING_BUDGET, int) and REASONING_BUDGET > 0:
+        komut += ["-rea", REASONING_MODE,
+                  "--reasoning-effort", REASONING_EFFORT]
+        if isinstance(REASONING_BUDGET, int):
             komut += ["--reasoning-budget", str(REASONING_BUDGET)]
         komut += ["--reasoning-format", "deepseek"]
     if str(GPU_KATMAN) == "0":
         komut += ["-nkvo", "--no-mmproj-offload"]
     if MTP_ENABLED and _ACTIVE_MTP_PATH and os.path.isfile(_ACTIVE_MTP_PATH):
-        komut += ["--spec-type", "draft-mtp", "--spec-draft-model", _ACTIVE_MTP_PATH]
+        komut += ["--spec-type", "draft-mtp", "--spec-draft-model", _ACTIVE_MTP_PATH,
+                  "--spec-draft-n-max", str(MTP_DRAFT_TOKENS)]
+    elif MTP_ENABLED and _ACTIVE_MTP_EMBEDDED:
+        # This GGUF contains its own MTP head; it does not need a draft sidecar.
+        komut += ["--spec-type", "draft-mtp", "--spec-draft-n-max",
+                  str(MTP_DRAFT_TOKENS)]
     _dosyalari_isit()
     if gpu_hazirla is not None:
         gpu_hazirla()
@@ -843,9 +968,10 @@ def baslat(*, gpu_hazirla=None, iptal=None):
         durdur()
         raise LLMHatasi("İş durduruldu", "iptal")
     if sure is None:
-        if _ACTIVE_MTP_PATH:
+        if _ACTIVE_MTP_PATH or _ACTIVE_MTP_EMBEDDED:
             _llm_dbg("MTP ile model başlayamadı; MTP olmadan tekrar deneniyor")
             _ACTIVE_MTP_PATH = None
+            _ACTIVE_MTP_EMBEDDED = False
             durdur()
             return baslat(gpu_hazirla=gpu_hazirla)
         if surec.poll() is not None:
@@ -1519,7 +1645,7 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
     except (TypeError, ValueError):
         yaraticilik = 0.7
     if uzunluk not in DUAL_UZUNLUK_TOKEN:
-        uzunluk = "orta"
+        uzunluk = None
     if dil not in ("en", "tr"):
         dil = "en"
     if model_prompt_profile not in (None, "", "auto", "general",
@@ -1555,7 +1681,7 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
                        DUAL_UZUNLUK_TOKEN)
     token_artis_limitleri = (VIDEO_UZUNLUK_MAX if mod == "video" else
                              DUAL_UZUNLUK_MAX)
-    max_token = min(token_limitleri[uzunluk], tavan)
+    max_token = tavan if uzunluk is None else min(token_limitleri[uzunluk], tavan)
     for deneme in range(1, JSON_DENEME + 2):
         deneme_sayisi = deneme
         if deneme == 1:
@@ -1592,7 +1718,8 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
         sonuc = _sema_uygun(ham) if ham else None
         if sonuc:
             break
-        if son_olcum.get("finish") == "length" and max_token < tavan:
+        if (son_olcum.get("finish") == "length" and uzunluk is not None
+                and max_token < tavan):
             max_token = min(tavan, token_artis_limitleri[uzunluk],
                             max_token + 400)
         time.sleep(0.15)

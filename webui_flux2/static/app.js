@@ -28,6 +28,7 @@ let uretimKesintisizAktif = false, uretimKesintisizIstek = null;
 let llmVarsayilanlar = null;
 let runpodModelOptions = [], runpodLlmOptions = [];
 let runpodModelSignature = '', runpodLlmSignature = '';
+let runpodLlmTuningDraft = {}, runpodLlmTuningReady = false;
 let runpodLoraCurrentModel = null, runpodLoraSaved = null;
 const runpodLoraSelections = new Map();
 let runpodLoraRequestId = 0;
@@ -134,16 +135,18 @@ function runpodLlmListesiGuncelle(data, preferred){
   const items=data.llm_models||[];
   if(!items.length) return;
   const signature=JSON.stringify(items.map(item=>[item.id,item.ad,item.hazir,
-    item.gorsel_dosyasi,item.gorsel_hazir]));
+    item.gorsel_dosyasi,item.gorsel_hazir,item.mtp_dahili,item.mtp_dosyasi,
+    item.tuning_family,item.tuning_defaults]));
   if(signature===runpodLlmSignature){
     if(preferred&&items.some(item=>item.id===preferred)&&$('llmModel'))
       $('llmModel').value=preferred;
+    if(runpodLlmTuningReady) llmTuningSeciliModeliYukle();
     return;
   }
   runpodLlmSignature=signature;
   runpodLlmOptions=items;
   const defaultId=items.some(item=>item.id==='llm_26b')?'llm_26b':items[0].id;
-  const selectors=['llmModel','sohbetLlmModel','psLlmModel','uretimLlmModel'];
+  const selectors=['llmModel','sohbetLlmModel','psLlmModel','uretimLlmModel','llmTuneModel'];
   for(const id of selectors){
     const select=$(id); if(!select) continue;
     const previous=select.value;
@@ -153,7 +156,8 @@ function runpodLlmListesiGuncelle(data, preferred){
         uretimLlmModel:'uretim_llm_model'}[id];
       if(key) stored=localStorage.getItem(key);
     }catch(_){}
-    const saved=preferred&&id==='llmModel'?preferred:stored;
+    const saved=preferred&&id==='llmModel'?preferred:
+      (id==='llmTuneModel'&&preferred?preferred:stored);
     select.replaceChildren();
     for(const item of items){
       const option=document.createElement('option'); option.value=item.id;
@@ -164,6 +168,62 @@ function runpodLlmListesiGuncelle(data, preferred){
     const wanted=[saved,previous,defaultId].find(value=>items.some(item=>item.id===value));
     select.value=wanted||items[0].id;
   }
+  if(runpodLlmTuningReady) llmTuningSeciliModeliYukle();
+}
+function llmTuningVarsayilan(item){
+  return Object.assign({gpu_layers:'auto',context:item?.ctx||8192,threads:8,
+    batch:2048,ubatch:512,flash_attn:'on',cache_type_k:'f16',cache_type_v:'f16',
+    top_p:0.95,top_k:40,repeat_penalty:1.05,temperature:0.7,use_mtp:false,
+    multimodal:!!item?.gorsel_dosyasi,reasoning:'on',reasoning_effort:'default',
+    reasoning_budget:160,mtp_draft_tokens:3},item?.tuning_defaults||{});
+}
+function llmTuningFormOku(){
+  const layers=$('llmGpuLayers').value;
+  return {gpu_layers:['auto','all'].includes(layers)?layers:Number(layers),
+    context:Number($('llmCtxModel').value),threads:Number($('llmThreads').value),
+    batch:Number($('llmBatch').value),ubatch:Number($('llmUbatch').value),
+    flash_attn:$('llmFlashAttention').value,cache_type_k:$('llmCacheK').value,
+    cache_type_v:$('llmCacheV').value,top_p:Number($('llmTopP').value),
+    top_k:Number($('llmTopK').value),repeat_penalty:Number($('llmRepeatPenalty').value),
+    temperature:Number($('llmTemperature').value),use_mtp:$('llmUseMtp').checked,
+    multimodal:$('llmMultimodal').checked,reasoning:$('llmReasoning').value,
+    reasoning_effort:$('llmReasoningEffort').value,
+    reasoning_budget:Number($('llmReasoningBudget').value),
+    mtp_draft_tokens:Number($('llmMtpTokens').value)};
+}
+function llmTuningFormYaz(t){
+  $('llmGpuLayers').value=String(t.gpu_layers??'auto');
+  $('llmCtxModel').value=t.context??8192;$('llmThreads').value=t.threads??8;
+  $('llmBatch').value=t.batch??2048;$('llmUbatch').value=t.ubatch??512;
+  $('llmFlashAttention').value=t.flash_attn||'on';
+  $('llmCacheK').value=t.cache_type_k||'f16';$('llmCacheV').value=t.cache_type_v||'f16';
+  $('llmTopP').value=t.top_p??0.95;$('llmTopK').value=t.top_k??40;
+  $('llmRepeatPenalty').value=t.repeat_penalty??1.05;
+  $('llmTemperature').value=t.temperature??0.7;
+  $('llmUseMtp').checked=!!t.use_mtp;$('llmMultimodal').checked=!!t.multimodal;
+  $('llmReasoning').value=t.reasoning||'on';
+  $('llmReasoningEffort').value=t.reasoning_effort||'default';
+  $('llmReasoningBudget').value=t.reasoning_budget??160;
+  $('llmMtpTokens').value=t.mtp_draft_tokens??3;
+}
+function llmTuningSeciliModeliKaydet(){
+  const id=$('llmTuneModel')?.value;
+  if(id&&runpodLlmOptions.some(item=>item.id===id))
+    runpodLlmTuningDraft[id]=llmTuningFormOku();
+}
+function llmTuningSeciliModeliYukle(){
+  if(!RUNPOD_WEBUI||!$('llmTuneModel')) return;
+  const item=runpodLlmOptions.find(value=>value.id===$('llmTuneModel').value)||runpodLlmOptions[0];
+  if(!item) return;
+  $('llmTuneModel').value=item.id;
+  const t=Object.assign(llmTuningVarsayilan(item),runpodLlmTuningDraft[item.id]||{});
+  llmTuningFormYaz(t);
+  const mtp=!!(item.mtp_dahili||item.mtp_dosyasi);
+  $('llmUseMtp').disabled=!mtp;
+  $('llmMtpTokens').disabled=!mtp;
+  $('llmMtpInfo').textContent=item.mtp_dahili?'Bu modelin dosyasında yerleşik MTP var.':
+    (item.mtp_dosyasi?'Ayrı MTP dosyası tanımlı.':
+      'Bu modelde MTP desteği bulunamadı; ayar diğer modelleri etkilemez.');
 }
 function otomatikModel(){
   const runpodModel = runpodModelSecili();
@@ -275,7 +335,7 @@ function kullaniciAyarlariniVarsayilanaAl(){
     llmLowBandwidth: false, llmSistem: '', llmSistemSohbet: '',
     llmModFikir: '', llmModGorsel: '', llmModBirlestir: '',
     llmModCeviri: '', llmModSohbet: '', psYaraticilik: 0.7,
-    psUzunluk: 'orta', psDil: 'en', logSatir: 200, logKaynak: 'llama',
+    psDil: 'en', logSatir: 200, logKaynak: 'llama',
     psGecmisArama: '', gecArama: '',
     historyAlbums: false, continuousGeneration: false, cinematicMode: 'off',
     autoOpenResult: true
@@ -2636,7 +2696,6 @@ $('gorAkis').onclick = () => {
 /* Ayarlar */
 const uiAyarAlanlari = {
   ps_creativity: 'psYaraticilik',
-  ps_length: 'psUzunluk',
   ps_language: 'psDil',
   ps_prompt_profile: 'psPromptProfile',
   ps_bbox_mode: 'psFlux3BboxMode',
@@ -2884,7 +2943,6 @@ function uiAyarlariniUygula(ayarlar){
     else if(el.type === 'number')
       el.value = key === 'ps_creativity' ? '0.7' :
         (key === 'log_lines' ? '200' : '');
-    else if(key === 'ps_length') el.value = 'orta';
     else if(key === 'ps_language') el.value = 'en';
     else if(key === 'ps_prompt_profile') el.value = 'auto';
     else if(key === 'log_source') el.value = 'llama';
@@ -3357,7 +3415,6 @@ function psSonucuGoster(s){
     if(s.ctx) p.push('ctx ' + s.ctx);
     p.push('sistem ' + (PS_PROFIL_ADLARI[psAktifProfil] || 'Genel'));
     p.push('yaratıcılık ' + ($('psYaraticilik').value || ''));
-    p.push('uzunluk ' + ($('psUzunluk').value || ''));
     p.push('dil ' + ($('psDil').value || ''));
     p.push('mod ' + psOtomatikMod());
     $('psBilgi').textContent = p.join(' · ');
@@ -3621,7 +3678,7 @@ $('psUret').onclick = async () => {
     const r = await fetch('/api/prompt-uret', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({mod: m, metin: $('psMetin').value, dil: $('psDil').value,
-        yaraticilik: +$('psYaraticilik').value, uzunluk: $('psUzunluk').value,
+        yaraticilik: +$('psYaraticilik').value,
         gorseller, model_prompt_profile: profile,
         llm_model: RUNPOD_WEBUI && $('psLlmModel') ? $('psLlmModel').value : undefined,
         bbox_mode: profile === 'flux3' && $('psFlux3BboxMode').checked})});
@@ -4276,10 +4333,12 @@ function uretimArayuzunuKur(){
   $('uretimIlerlemeMount').appendChild($('kartIs'));
   const durumGozlemci = new MutationObserver(() => {
     const aktif = !!$('ilerleme').textContent.trim() || $('progBlok').style.display !== 'none';
+    $('kartIs').classList.toggle('uretim-ilerleme-aktif', $('progBlok').style.display !== 'none');
     $('kartIs').classList.toggle('uretim-durum-goster', aktif);
   });
   durumGozlemci.observe($('kartIs'), {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['style']});
   $('kartIs').classList.remove('uretim-durum-goster');
+  $('kartIs').classList.remove('uretim-ilerleme-aktif');
   $('uretimPreview1').append($('oniz'), $('fotoKaldir'));
   $('uretimPreview2').append($('oniz2'), $('foto2Kaldir'));
   $('uretimGoruntuMount').appendChild($('galeri'));
@@ -5074,20 +5133,40 @@ async function llmSistemYukle(){
     const a = (j && j.ayarlar) || {};
     $('runpodLlmSettings').hidden=!RUNPOD_WEBUI;
     $('llmAdvancedActions').hidden=!RUNPOD_WEBUI;
+    $('llmLegacyCtx').hidden=RUNPOD_WEBUI;
     if(RUNPOD_WEBUI){
       $('llmModel').value=a.llm_model||'auto';
-      $('llmGpuLayers').value=String(a.llm_gpu_layers??'all');
-      $('llmThreads').value=a.llm_threads||8;
-      $('llmBatch').value=a.llm_batch||4096;
-      $('llmTopP').value=a.llm_top_p??0.95;
-      $('llmTopK').value=a.llm_top_k??40;
-      $('llmRepeatPenalty').value=a.llm_repeat_penalty??1.05;
-      $('llmTemperature').value=a.llm_temperature??0.7;
-      $('llmUseMtp').checked=a.llm_use_mtp!==false;
-      $('llmMultimodal').checked=a.llm_multimodal!==false;
       try{
         const state=await (await fetch('/api/durum')).json();
         runpodLlmListesiGuncelle(state,a.llm_model);
+        runpodLlmTuningDraft=(a.llm_model_tuning&&typeof a.llm_model_tuning==='object')?
+          JSON.parse(JSON.stringify(a.llm_model_tuning)):{};
+        Object.keys(runpodLlmTuningDraft).forEach(id=>{
+          if(!runpodLlmOptions.some(item=>item.id===id)) delete runpodLlmTuningDraft[id];
+        });
+        const tuneId=runpodLlmOptions.some(item=>item.id===a.llm_model)?a.llm_model:
+          (runpodLlmOptions[0]?.id||'');
+        if(!Object.keys(runpodLlmTuningDraft).length&&tuneId){
+          const item=runpodLlmOptions.find(value=>value.id===tuneId);
+          const legacy=llmTuningVarsayilan(item);
+          const isQwen=item?.tuning_family==='qwen';
+          if(!isQwen){
+            legacy.gpu_layers=a.llm_gpu_layers??legacy.gpu_layers;
+            legacy.context=a.llm_ctx??legacy.context;
+            legacy.threads=a.llm_threads??legacy.threads;
+            legacy.batch=a.llm_batch??legacy.batch;
+            legacy.top_p=a.llm_top_p??legacy.top_p;
+            legacy.top_k=a.llm_top_k??legacy.top_k;
+            legacy.repeat_penalty=a.llm_repeat_penalty??legacy.repeat_penalty;
+            legacy.temperature=a.llm_temperature??legacy.temperature;
+            legacy.use_mtp=a.llm_use_mtp??legacy.use_mtp;
+            legacy.multimodal=a.llm_multimodal??legacy.multimodal;
+          }
+          runpodLlmTuningDraft[tuneId]=legacy;
+        }
+        $('llmTuneModel').value=tuneId||$('llmTuneModel').value;
+        runpodLlmTuningReady=true;
+        llmTuningSeciliModeliYukle();
         const model=state.llm||{};
         const label={llama:'Gemma 4 E4B',llm_12b:'Gemma 4 12B',llm_26b:'Gemma 4 26B A4B'}[model.calisan_model||model.model]||model.calisan_model||model.model||'Model seçilmedi';
         $('llmRuntimeInfo').textContent=model.canli?`Çalışıyor · ${label} · GPU katmanı ${model.ngl} · bağlam ${model.calisan_ctx||model.ctx}`:'Kapalı · Sonraki hazırlamada seçili ayarlar kullanılacak.';
@@ -5124,16 +5203,24 @@ for(const [id,key] of [['sohbetLlmModel','sohbet_llm_model'],
     try{localStorage.setItem(key,$(id).value);}catch(_){}
   });
 }
+$('llmTuneModel').addEventListener('change',()=>{
+  llmTuningSeciliModeliKaydet();llmTuningSeciliModeliYukle();
+});
+for(const id of ['llmGpuLayers','llmCtxModel','llmThreads','llmBatch','llmUbatch',
+  'llmFlashAttention','llmCacheK','llmCacheV','llmTopP','llmTopK',
+  'llmRepeatPenalty','llmTemperature','llmUseMtp','llmMultimodal',
+  'llmReasoning','llmReasoningEffort','llmReasoningBudget','llmMtpTokens']){
+  $(id).addEventListener('input',llmTuningSeciliModeliKaydet);
+  $(id).addEventListener('change',llmTuningSeciliModeliKaydet);
+}
 $('llmModelYenidenYukle').onclick=async()=>{
   const info=$('llmApplyInfo'),button=$('llmModelYenidenYukle');button.disabled=true;info.textContent='Ayarlar kaydediliyor…';
   try{
-    const body={llm_model:$('llmModel').value,llm_gpu_layers:$('llmGpuLayers').value==='all'?'all':Number($('llmGpuLayers').value),
-      llm_threads:Number($('llmThreads').value),llm_batch:Number($('llmBatch').value),llm_top_p:Number($('llmTopP').value),
-      llm_top_k:Number($('llmTopK').value),llm_repeat_penalty:Number($('llmRepeatPenalty').value),
-      llm_temperature:Number($('llmTemperature').value),llm_use_mtp:$('llmUseMtp').checked,llm_multimodal:$('llmMultimodal').checked};
+    llmTuningSeciliModeliKaydet();
+    const body={llm_model:$('llmModel').value,llm_model_tuning:runpodLlmTuningDraft};
     const saved=await ayarlarGuncelle(body),result=await saved.json().catch(()=>({}));
     if(!saved.ok) throw new Error(result.hata||'Ayarlar kaydedilemedi');
-    const response=await fetch('/api/llm/hazirla',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const response=await fetch('/api/llm/hazirla',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({llm_model:$('llmTuneModel').value})});
     const job=await response.json().catch(()=>({}));if(!response.ok||!job.is_id) throw new Error(job.hata||'Model hazırlama kuyruğa eklenemedi');
     info.textContent='Model hazırlanıyor'+(job.sira?' · sıra '+job.sira:'');llmIsTakipEt(job.is_id,'llm_preload');
   }catch(error){info.textContent='Hata: '+error.message;button.disabled=false;}

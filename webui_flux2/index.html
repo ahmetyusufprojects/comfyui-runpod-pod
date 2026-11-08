@@ -426,24 +426,46 @@
         <label for="llmModel">Kullanılacak LLM modeli</label>
         <p class="ayar-aciklama">Bu tercih varsayılan sohbet modelidir. Sohbet, Prompt Stüdyosu ve üretim öncesi yardımda modeli ayrıca seçebilirsin.</p>
         <select id="llmModel"><option value="llm_26b">Gemma 4 26B A4B</option></select>
-          <div class="ayar-form-grid uc">
-          <div class="ayar-alan"><label for="llmGpuLayers">GPU’da çalışacak katman</label><select id="llmGpuLayers"><option value="all">Tümü · hızlı</option><option value="48">48 · GPU/CPU dengeli</option><option value="32">32 · daha az VRAM</option><option value="16">16 · daha az VRAM</option><option value="0">0 · CPU ağırlıklı</option></select><span class="ayar-yardim">GPU’ya sığmayan katmanlar CPU’da çalışır; varsayılan tüm katmanları GPU’ya alır.</span></div>
+        <hr>
+        <label for="llmTuneModel">Ayarlarını düzenle</label>
+        <p class="ayar-aciklama">Buradaki değerler seçtiğin LLM profiline özeldir. Model değiştirirken yalnızca o modelin ayarları kullanılır.</p>
+        <select id="llmTuneModel"><option value="llm_26b">Gemma 4 26B A4B</option></select>
+        <div class="ayar-form-grid uc">
+          <div class="ayar-alan"><label for="llmCtxModel">Bağlam boyutu</label><input id="llmCtxModel" type="number" min="1024" max="32768" step="128" value="8192"></div>
+          <div class="ayar-alan"><label for="llmGpuLayers">GPU katmanları</label><input id="llmGpuLayers" type="text" value="auto" placeholder="auto, all veya sayı"><span class="ayar-yardim">auto, all ya da 0–512 arasında bir sayı yaz.</span></div>
           <div class="ayar-alan"><label for="llmThreads">CPU iş parçacığı</label><input id="llmThreads" type="number" min="1" max="64" step="1" value="8"></div>
-          <div class="ayar-alan"><label for="llmBatch">Batch</label><input id="llmBatch" type="number" min="128" max="8192" step="128" value="4096"></div>
+        </div>
+        <div class="ayar-form-grid uc">
+          <div class="ayar-alan"><label for="llmBatch">Batch</label><input id="llmBatch" type="number" min="128" max="8192" step="128" value="2048"></div>
+          <div class="ayar-alan"><label for="llmUbatch">Fiziksel batch</label><input id="llmUbatch" type="number" min="128" max="8192" step="128" value="512"></div>
+          <div class="ayar-alan"><label for="llmFlashAttention">Flash Attention</label><select id="llmFlashAttention"><option value="on">Açık</option><option value="auto">Otomatik</option><option value="off">Kapalı</option></select></div>
+        </div>
+        <div class="ayar-form-grid iki">
+          <div class="ayar-alan"><label for="llmCacheK">K önbellek türü</label><select id="llmCacheK"><option value="f16">F16 · kalite</option><option value="q8_0">Q8 · daha az bellek</option><option value="q5_0">Q5</option><option value="q5_1">Q5_1</option><option value="q4_0">Q4 · en az bellek</option><option value="q4_1">Q4_1</option><option value="iq4_nl">IQ4_NL</option><option value="bf16">BF16</option><option value="f32">F32</option></select></div>
+          <div class="ayar-alan"><label for="llmCacheV">V önbellek türü</label><select id="llmCacheV"><option value="f16">F16 · kalite</option><option value="q8_0">Q8 · daha az bellek</option><option value="q5_0">Q5</option><option value="q5_1">Q5_1</option><option value="q4_0">Q4 · en az bellek</option><option value="q4_1">Q4_1</option><option value="iq4_nl">IQ4_NL</option><option value="bf16">BF16</option><option value="f32">F32</option></select></div>
         </div>
         <div class="ayar-form-grid uc">
           <div class="ayar-alan"><label for="llmTopP">Top-p</label><input id="llmTopP" type="number" min="0.05" max="1" step="0.05" value="0.95"></div>
           <div class="ayar-alan"><label for="llmTopK">Top-k</label><input id="llmTopK" type="number" min="0" max="1000" step="1" value="40"></div>
           <div class="ayar-alan"><label for="llmRepeatPenalty">Tekrar cezası</label><input id="llmRepeatPenalty" type="number" min="0.8" max="2" step="0.05" value="1.05"></div>
         </div>
-        <div class="ayar-alan"><label for="llmTemperature">Sohbet yaratıcılığı · sıcaklık</label><input id="llmTemperature" type="number" min="0.1" max="2" step="0.05" value="0.7"><span class="ayar-yardim">Düşük değer daha tutarlı, yüksek değer daha çeşitli yanıt üretir.</span></div>
+        <div class="ayar-form-grid uc">
+          <div class="ayar-alan"><label for="llmTemperature">Sohbet yaratıcılığı · sıcaklık</label><input id="llmTemperature" type="number" min="0.1" max="2" step="0.05" value="0.7"></div>
+          <div class="ayar-alan"><label for="llmReasoning">Düşünme</label><select id="llmReasoning"><option value="auto">Model seçsin</option><option value="on">Açık</option><option value="off">Kapalı</option></select></div>
+          <div class="ayar-alan"><label for="llmReasoningEffort">Düşünme düzeyi</label><select id="llmReasoningEffort"><option value="default">Varsayılan</option><option value="minimal">En az</option><option value="low">Düşük · hızlı</option><option value="medium">Orta</option><option value="high">Yüksek</option><option value="xhigh">Çok yüksek</option><option value="max">Maksimum</option></select></div>
+        </div>
+        <div class="ayar-form-grid uc">
+          <div class="ayar-alan"><label for="llmReasoningBudget">Düşünme token sınırı</label><input id="llmReasoningBudget" type="number" min="-1" max="32768" step="32" value="160"><span class="ayar-yardim">-1: sınırsız</span></div>
+          <div class="ayar-alan"><label for="llmMtpTokens">MTP tahmin adedi</label><input id="llmMtpTokens" type="number" min="1" max="16" step="1" value="2"></div>
+          <div class="ayar-alan"><span class="ayar-yardim" id="llmMtpInfo" role="status"></span></div>
+        </div>
         <div class="ayar-tercihler">
-          <label class="ayar-toggle"><input id="llmUseMtp" type="checkbox" checked><span><b>MTP hızlandırmasını dene</b><small>Model desteklemiyorsa ana model MTP olmadan açılır.</small></span></label>
+          <label class="ayar-toggle"><input id="llmUseMtp" type="checkbox" checked><span><b>MTP hızlandırmasını dene</b><small>Dosyada MTP başlığı varsa ayrıca küçük model indirmek gerekmez.</small></span></label>
           <label class="ayar-toggle"><input id="llmMultimodal" type="checkbox" checked><span><b>Görsel anlama</b><small>mmproj dosyası hazırsa sohbet ve Prompt Stüdyosu görsel alabilir.</small></span></label>
         </div>
         <div class="ayar-bilgi" id="llmRuntimeInfo" role="status"></div>
       </div>
-      <div class="ayar-alan">
+      <div class="ayar-alan" id="llmLegacyCtx">
         <label for="llmCtx">Bağlam boyutu</label>
         <p class="ayar-aciklama">1024–32768 token · Varsayılan 8000. Tüm sohbet ve prompt görevlerinde kullanılır.</p>
         <div class="ayar-eylem-satiri"><div class="ayar-deger-birim"><input id="llmCtx" type="number" value="8000" min="1024" max="32768" step="128"><span>token</span></div><button id="llmCtxKaydet" class="ayar-birincil">Bağlamı kaydet</button></div>

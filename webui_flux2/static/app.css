@@ -293,7 +293,7 @@ details.dusunme-kutu pre{margin:6px 0 0;max-height:200px;overflow:auto;font-size
 .uretim-sahne{position:relative;display:flex;flex:0 0 auto;flex-direction:column;width:100%;height:100%;min-height:100%;max-height:100%;background:#0a0d12}
 .uretim-ust-overlay{position:relative;flex:none;width:100%;z-index:4;padding:6px 8px;pointer-events:none;background:linear-gradient(180deg,rgba(4,6,10,.55),transparent)}
 .uretim-ust-overlay > *{pointer-events:auto}
-.uretim-alt{flex:none;display:flex;flex-direction:column;gap:0;padding:4px 5px calc(4px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:#0f141c}
+.uretim-alt{flex:none;display:flex;flex-direction:column;gap:0;padding:2px 3px calc(3px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:#0f141c}
 .calisma-yan .izgara{flex:1;min-height:0;overflow-y:auto;margin-top:6px;padding-right:2px}
 .izgara-yan{grid-template-columns:repeat(2,1fr)}
 .izgara-yan img,.izgara-yan video{height:84px}
@@ -524,11 +524,13 @@ body.uretim-tam-ekran{overflow:hidden}
 #kartIs h3{display:none}
 #kartIs #ilerleme,#kartIs #progYazi{font-size:10px;line-height:1.2;color:var(--faint)}
 #kartIs #progYazi{min-height:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#kartIs #progBlok{margin-top:2px!important}
-#kartIs .ilerlebar{height:2px}
+#kartIs.uretim-ilerleme-aktif #ilerleme{display:none}
+#kartIs.uretim-ilerleme-aktif #progBlok{display:flex!important;align-items:center;gap:8px;min-width:0;margin:0!important}
+#kartIs.uretim-ilerleme-aktif .ilerlebar{flex:0 0 52px;height:2px}
+#kartIs.uretim-ilerleme-aktif #progYazi{flex:1;min-width:0}
 #uretimComposerMount{flex:none}
 #uretimComposerMount .kart{width:100%}
-#kartPrompt.uretim-composer-kart{padding:9px 11px;border-color:#252e3b;border-radius:14px;background:#111720;box-shadow:none}
+#kartPrompt.uretim-composer-kart{padding:5px 8px;border-color:#252e3b;border-radius:12px;background:#111720;box-shadow:none}
 .uretim-composer{display:flex;min-width:0}
 .uretim-ref-onizleme{position:absolute;right:14px;bottom:14px;left:14px;z-index:5;display:flex;flex-wrap:wrap;gap:8px;pointer-events:none}
 .uretim-ref-onizleme[hidden],.uretim-ref-slot[hidden]{display:none}
@@ -552,7 +554,7 @@ body.uretim-tam-ekran{overflow:hidden}
 .uretim-composer-satir{display:flex;flex:1 1 0;width:100%;min-width:0}
 .uretim-yazim-satiri{width:100%}
 .composer-icon{flex:0 0 34px;width:34px;min-height:34px;border-radius:9px;font-size:18px}
-.uretim-yazim-satiri #prompt{display:block;flex:1 1 0;width:100%;min-width:0;height:42px;min-height:42px;max-height:42px;margin:0;padding:8px 11px;border-color:#252e3b;border-radius:10px;background:#0d1219;font-size:14px;line-height:1.4;resize:none}
+.uretim-yazim-satiri #prompt{display:block;flex:1 1 0;width:100%;min-width:0;height:44px;min-height:44px;max-height:44px;margin:0;padding:8px 11px;border-color:#252e3b;border-radius:10px;background:#0d1219;font-size:14px;line-height:1.4;resize:none}
 .uretim-gonder{flex:0 0 36px;width:36px;min-height:36px;border-radius:10px;font-size:18px}
 .uretim-durdur{flex:0 0 32px;width:32px;min-height:32px;border-radius:9px;font-size:13px}
 .uretim-ayarlari-kararti{position:absolute;inset:0;z-index:10;background:rgba(4,6,10,.58)}

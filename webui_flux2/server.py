@@ -585,6 +585,78 @@ def _ayar_degisikliklerini_uygula(ayar, req):
         if not isinstance(model, str) or model not in allowed:
             raise ValueError("llm_model seçimi geçersiz")
         ayar["llm_model"] = model
+    if "llm_model_tuning" in req:
+        profiles = req.get("llm_model_tuning")
+        if not isinstance(profiles, dict) or len(profiles) > 100:
+            raise ValueError("llm_model_tuning model ayarları sözlüğü olmalı")
+        allowed = ({item["id"] for item in llm.model_profilleri()}
+                   if RUNPOD_MODE else {"llama"})
+        temiz_profiller = {}
+        cache_types = {"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1",
+                       "iq4_nl", "q5_0", "q5_1"}
+        for profile, values in profiles.items():
+            if profile not in allowed or not isinstance(values, dict):
+                raise ValueError("LLM model ayarı geçersiz")
+            tune = {}
+            if "gpu_layers" in values:
+                layers = values["gpu_layers"]
+                if layers in ("auto", "all"):
+                    tune["gpu_layers"] = layers
+                elif isinstance(layers, int) and not isinstance(layers, bool) and 0 <= layers <= 512:
+                    tune["gpu_layers"] = layers
+                else:
+                    raise ValueError("GPU katman ayarı geçersiz")
+            integer_ranges = {
+                "context": (1024, 32768), "threads": (1, 64),
+                "batch": (128, 8192), "ubatch": (128, 8192),
+                "top_k": (0, 1000), "reasoning_budget": (-1, 32768),
+                "mtp_draft_tokens": (1, 16),
+            }
+            for key, (low, high) in integer_ranges.items():
+                if key in values:
+                    try:
+                        raw = values[key]
+                        number = int(raw)
+                    except (TypeError, ValueError, OverflowError):
+                        raise ValueError("LLM ayarı sayı olmalı: " + key)
+                    try:
+                        tam_sayi = float(raw) == number
+                    except (TypeError, ValueError, OverflowError):
+                        tam_sayi = False
+                    if isinstance(raw, bool) or not tam_sayi or not low <= number <= high:
+                        raise ValueError("LLM ayarı aralık dışında: " + key)
+                    tune[key] = number
+            float_ranges = {
+                "top_p": (0.05, 1.0), "repeat_penalty": (0.8, 2.0),
+                "temperature": (0.1, 2.0),
+            }
+            for key, (low, high) in float_ranges.items():
+                if key in values:
+                    try:
+                        raw = values[key]
+                        number = float(raw)
+                    except (TypeError, ValueError, OverflowError):
+                        raise ValueError("LLM ayarı sayı olmalı: " + key)
+                    if isinstance(raw, bool) or not low <= number <= high:
+                        raise ValueError("LLM ayarı aralık dışında: " + key)
+                    tune[key] = round(number, 4)
+            for key in ("use_mtp", "multimodal"):
+                if key in values:
+                    if not isinstance(values[key], bool):
+                        raise ValueError("LLM ayarı doğru/yanlış olmalı: " + key)
+                    tune[key] = values[key]
+            for key, choices in (
+                    ("flash_attn", {"on", "off", "auto"}),
+                    ("cache_type_k", cache_types), ("cache_type_v", cache_types),
+                    ("reasoning", {"on", "off", "auto"}),
+                    ("reasoning_effort", {"default", "minimal", "low", "medium",
+                                           "high", "xhigh", "max"})):
+                if key in values:
+                    if not isinstance(values[key], str) or values[key] not in choices:
+                        raise ValueError("LLM ayarı geçersiz: " + key)
+                    tune[key] = values[key]
+            temiz_profiller[profile] = tune
+        ayar["llm_model_tuning"] = temiz_profiller
     for key, low, high in (("llm_threads", 1, 64), ("llm_batch", 128, 8192),
                            ("llm_top_k", 0, 1000)):
         if key in req:
@@ -1204,8 +1276,13 @@ RUNPOD_VIDEO_PROMPT_CTX = 16384
 
 def _llm_istek_baglami(ayar, tur, req):
     """Keep long RunPod video prompts inside the model context without saving a user setting."""
+    profile = req.get("llm_model") or ayar.get("llm_model")
+    tuning = (ayar.get("llm_model_tuning") or {}).get(profile, {})
     try:
-        context = int(ayar.get("llm_ctx") or _LLM_VARSAYILAN_CTX)
+        context = int(tuning.get("context") or ayar.get("llm_ctx") or
+                      next((item.get("tuning_defaults", {}).get("context")
+                            for item in llm.model_profilleri()
+                            if item.get("id") == profile), _LLM_VARSAYILAN_CTX))
     except (TypeError, ValueError, OverflowError):
         context = _LLM_VARSAYILAN_CTX
     if not RUNPOD_MODE:
@@ -1233,8 +1310,10 @@ def _llm_kuyruk_isini_calistir(job):
         _dbg("chat_bosalti_basla")
         ok, neden = _comfy_bosalti_ve_dogrula(job=job)
         _dbg(f"chat_bosalti_bitis ok={ok}")
-        if not ok or job.get("iptal"):
-            raise RuntimeError(neden or "iptal edildi")
+        if job.get("iptal") or neden == "iptal":
+            raise RuntimeError("İş durduruldu")
+        if not ok:
+            raise RuntimeError(neden or "GPU belleği hazırlanamadı")
 
     try:
         if job.get("iptal"):
@@ -1249,7 +1328,7 @@ def _llm_kuyruk_isini_calistir(job):
             if not pod_setup.workflow_ready(llm_secimi):
                 raise RuntimeError("Seçilen LLM henüz indirilmedi. Kurulum ekranından bu modeli hazırlayın.")
             llm.model_ayarla(llm_secimi)
-            llm.ayarlarini_uygula(ayar)
+            llm.ayarlarini_uygula(ayar, llm_secimi)
         canli = llm.durum()["canli"]
         try:
             llm.baglam_ayarla(_llm_istek_baglami(ayar, tur, req))
@@ -1404,8 +1483,10 @@ def _llm_kuyruk_isini_calistir(job):
                                        "calisan": "Yanıt yazılıyor", "oran": 0.6}
 
                 job["sonuc"] = {}
+                model_tuning = (ayar.get("llm_model_tuning") or {}).get(llm_secimi, {})
                 yanit, olcum = llm.sohbet_et(
-                    istek_mesajlari, req.get("yaraticilik", ayar.get("llm_temperature", 0.7)),
+                    istek_mesajlari, req.get("yaraticilik", model_tuning.get(
+                        "temperature", ayar.get("llm_temperature", 0.7))),
                     req.get("max_tokens"), parca_geri=parca_guncelle,
                     dusunme_geri=dusunme_guncelle,
                     stream=bool(ayar.get("llm_streaming", True)),
@@ -1430,16 +1511,20 @@ def _llm_kuyruk_isini_calistir(job):
             job["ilerleme"] = {"bitti": True, "oran": 1.0}
             job["durum"] = "bitti"
     except Exception as e:
-        traceback.print_exc()
-        try:
-            with open(os.path.join(BASE_DIR, "webui_error.log"), "a", encoding="utf-8") as ef:
-                ef.write("===== %s =====\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
-                traceback.print_exc(file=ef)
-                ef.write("\n\n")
-        except Exception:
-            pass
-        job["durum"] = "durduruldu" if job.get("iptal") else "hata"
-        job["hata"] = str(e)[:1000]
+        durduruldu = (job.get("iptal") or
+                      (isinstance(e, llm.LLMHatasi) and e.kod == "iptal") or
+                      str(e).strip().casefold() == "iptal")
+        if not durduruldu:
+            traceback.print_exc()
+            try:
+                with open(os.path.join(BASE_DIR, "webui_error.log"), "a", encoding="utf-8") as ef:
+                    ef.write("===== %s =====\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+                    traceback.print_exc(file=ef)
+                    ef.write("\n\n")
+            except Exception:
+                pass
+        job["durum"] = "durduruldu" if durduruldu else "hata"
+        job["hata"] = "İş durduruldu" if durduruldu else str(e)[:1000]
     finally:
         job["bitis"] = time.time()
         with _llm_is_gecis_kilit:
@@ -4711,7 +4796,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             if self._kasa_kapaniyor_mu(kullanici):
                 return
-            job, sira = _kuyruga_ekle({}, kullanici, tur="llm_preload")
+            req = self._json_oku()
+            if "__hata__" in req:
+                self._send(400, json.dumps({"hata": req["__hata__"]}))
+                return
+            model = req.get("llm_model")
+            if model is not None and (not isinstance(model, str) or model not in {
+                    item["id"] for item in llm.model_profilleri()}):
+                self._send(400, '{"hata":"LLM model seçimi geçersiz"}')
+                return
+            job, sira = _kuyruga_ekle(
+                ({"llm_model": model} if model else {}), kullanici,
+                tur="llm_preload")
             if job is None:
                 self._send(409, '{"hata":"bellek bosaltilirken yeni is kuyruga eklenemez"}')
                 return
