@@ -13,9 +13,7 @@ root = Path('/opt/runtime/app-update')
 web = Path('/opt/webui_flux2')
 catalog = Path('/opt/pod/models.json')
 stage = root / 'stage'
-backup = Path('/opt/webui-update-backup')
-next_web = Path('/opt/webui-update-next')
-next_catalog = Path('/opt/pod/models.update-next.json')
+backup = root / 'backup'
 request = root / 'apply.json'
 result = root / 'result.json'
 child = None
@@ -53,20 +51,25 @@ while True:
         sys.exit(code)
     if not request.is_file():
         sys.exit(code)
+    backed_up = False
     try:
         info = json.loads(request.read_text(encoding='utf-8'))
         request.unlink()
         if backup.exists():
             shutil.rmtree(backup)
-        if next_web.exists():
-            shutil.rmtree(next_web)
-        shutil.copytree(stage / 'webui_flux2', next_web)
-        shutil.copy2(stage / 'models.json', next_catalog)
         backup.mkdir()
-        os.replace(web, backup / 'webui_flux2')
-        os.replace(catalog, backup / 'models.json')
-        os.replace(next_web, web)
-        os.replace(next_catalog, catalog)
+        for source in (stage / 'webui_flux2').rglob('*'):
+            if source.is_file():
+                relative = source.relative_to(stage / 'webui_flux2')
+                current = web / relative
+                if current.is_file():
+                    saved = backup / 'webui_flux2' / relative
+                    saved.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(current, saved)
+        shutil.copy2(catalog, backup / 'models.json')
+        backed_up = True
+        shutil.copytree(stage / 'webui_flux2', web, dirs_exist_ok=True)
+        shutil.copy2(stage / 'models.json', catalog)
         child = launch()
         if not healthy(child):
             raise RuntimeError('Yeni sürüm başlatılamadı')
@@ -79,13 +82,14 @@ while True:
             child.terminate()
             try: child.wait(timeout=30)
             except subprocess.TimeoutExpired: child.kill(); child.wait()
-        if (backup / 'webui_flux2').exists():
-            if web.exists(): shutil.rmtree(web)
-            os.replace(backup / 'webui_flux2', web)
-        if (backup / 'models.json').exists():
-            os.replace(backup / 'models.json', catalog)
-        if next_web.exists():
-            shutil.rmtree(next_web)
-        next_catalog.unlink(missing_ok=True)
+        if backed_up and (backup / 'webui_flux2').exists():
+            for source in (stage / 'webui_flux2').rglob('*'):
+                if source.is_file():
+                    relative = source.relative_to(stage / 'webui_flux2')
+                    if not (backup / 'webui_flux2' / relative).exists():
+                        (web / relative).unlink(missing_ok=True)
+            shutil.copytree(backup / 'webui_flux2', web, dirs_exist_ok=True)
+        if backed_up and (backup / 'models.json').exists():
+            shutil.copy2(backup / 'models.json', catalog)
         result.write_text(json.dumps({'status': 'error', 'message': str(exc)[:200]}), encoding='utf-8')
         child = launch()
