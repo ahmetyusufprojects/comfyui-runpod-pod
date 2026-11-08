@@ -26,6 +26,8 @@ let promptDestekYaraticilik = 0.7, promptDestekUzunluk = 'orta';
 let uretimVarsayilan = {steps: 9, seed: -1, max_side: 1536};
 let uretimKesintisizAktif = false, uretimKesintisizIstek = null;
 let llmVarsayilanlar = null;
+let runpodModelOptions = [], runpodLlmOptions = [];
+let runpodModelSignature = '', runpodLlmSignature = '';
 let runpodLoraCurrentModel = null, runpodLoraSaved = null;
 const runpodLoraSelections = new Map();
 let runpodLoraRequestId = 0;
@@ -96,17 +98,74 @@ async function runpodLoraYukle(){
 }
 function runpodModelSecili(){
   const secim = $('runpodImageModel');
-  if(!RUNPOD_WEBUI || !secim || secim.value === 'auto' ||
-      secim.selectedOptions[0]?.disabled) return null;
+  if(!RUNPOD_WEBUI || !secim || !secim.value || secim.value === 'auto') return null;
+  const instance=runpodModelOptions.find(item=>item.id===secim.value);
+  return instance?.family || secim.selectedOptions[0]?.dataset.family || secim.value;
+}
+function runpodModelInstanceSecili(){
+  const secim=$('runpodImageModel');
+  if(!RUNPOD_WEBUI||!secim||!secim.value||secim.value==='auto') return null;
   return secim.value;
+}
+function runpodModelListesiGuncelle(data){
+  if(!RUNPOD_WEBUI) return;
+  const select=$('runpodImageModel');
+  const allowed=new Set(['z_image','flux2','flux3','krea2','illustrious']);
+  const items=(data.model_instances||[]).filter(item=>item.engine==='comfy'&&allowed.has(item.family));
+  if(!select||!items.length) return;
+  const signature=JSON.stringify(items.map(item=>[item.id,item.name,item.ready]));
+  if(signature===runpodModelSignature) return;
+  runpodModelSignature=signature;
+  const previous=select.value;
+  runpodModelOptions=items;
+  select.replaceChildren();
+  for(const item of items){
+    const option=document.createElement('option');
+    option.value=item.id; option.dataset.family=item.family;
+    option.textContent=item.name+(item.ready?'':' · kurulu değil');
+    select.append(option);
+  }
+  select.value=items.some(item=>item.id===previous)?previous:
+    (items.some(item=>item.id==='z_image')?'z_image':items[0].id);
+  uretimModGuncelle();
+}
+function runpodLlmListesiGuncelle(data, preferred){
+  if(!RUNPOD_WEBUI) return;
+  const items=data.llm_models||[];
+  if(!items.length) return;
+  const signature=JSON.stringify(items.map(item=>[item.id,item.ad,item.hazir]));
+  if(signature===runpodLlmSignature){
+    if(preferred&&items.some(item=>item.id===preferred)&&$('llmModel'))
+      $('llmModel').value=preferred;
+    return;
+  }
+  runpodLlmSignature=signature;
+  runpodLlmOptions=items;
+  const defaultId=items.some(item=>item.id==='llm_26b')?'llm_26b':items[0].id;
+  const selectors=['llmModel','sohbetLlmModel','psLlmModel','uretimLlmModel'];
+  for(const id of selectors){
+    const select=$(id); if(!select) continue;
+    const previous=select.value;
+    let stored=null;
+    try{
+      const key={sohbetLlmModel:'sohbet_llm_model',psLlmModel:'ps_llm_model',
+        uretimLlmModel:'uretim_llm_model'}[id];
+      if(key) stored=localStorage.getItem(key);
+    }catch(_){}
+    const saved=preferred&&id==='llmModel'?preferred:stored;
+    select.replaceChildren();
+    for(const item of items){
+      const option=document.createElement('option'); option.value=item.id;
+      option.textContent=item.ad+(item.hazir?'':' · kurulu değil');
+      select.append(option);
+    }
+    const wanted=[saved,previous,defaultId].find(value=>items.some(item=>item.id===value));
+    select.value=wanted||items[0].id;
+  }
 }
 function otomatikModel(){
   const runpodModel = runpodModelSecili();
-  if(runpodModel){
-    if(refSayisi() && (runpodModel === 'krea2' || runpodModel === 'illustrious'))
-      return 'flux2';
-    return runpodModel;
-  }
+  if(runpodModel) return runpodModel;
   if(refSayisi()) return 'flux2';
   if(animaSecili()) return $('moodyAnimaModel').checked ? 'moody_anima' : 'anima';
   return 'z_image';
@@ -417,11 +476,12 @@ async function kasaKontrol(){
   if(kd && kd.acik) veriYukle(kd);
   else kasaEkraniAc(kd);
 }
-function veriYukle(){
+async function veriYukle(){
   try{
     gorunum('uygulama');
     cozunurlukGorunumu(); oranKilitGuncelle(); pinEtiket(); gecGorunumUygula();
-    durum(); kutuphaneYukle(); promptListele(); gecSayfa = 1; gecmisYukle(true); ayarYukle(); kuyrukYenile(); arsivYukle(true);
+    await durum();
+    kutuphaneYukle(); promptListele(); gecSayfa = 1; gecmisYukle(true); ayarYukle(); kuyrukYenile(); arsivYukle(true);
     try{ llmSistemYukle(); }catch(e){}
     aktifMenu = 'uretim';
     menuUygula(); llmIsleriniBagla(); sonIsiBaglan(); kasaSaatiBaslat();
@@ -459,6 +519,12 @@ async function boot(){
       const k = await kurulumYaniti.json();
       if(!k){ girisEkraniAc(); bootCalisiyor = false; return; }
       RUNPOD_WEBUI = k.runpod === true;
+      for(const id of ['sohbetLlmModel','psLlmModel','uretimLlmModel']){
+        const field=$(id);
+        const wrapper=id==='sohbetLlmModel'||id==='uretimLlmModel'?
+          field?.closest('label'):field?.parentElement;
+        if(wrapper) wrapper.hidden=!RUNPOD_WEBUI;
+      }
       if($('runpodInstallerLink')){
         $('runpodInstallerLink').hidden=!RUNPOD_WEBUI;
         if(RUNPOD_WEBUI) $('runpodInstallerLink').href=runpodKurulumAdres();
@@ -943,6 +1009,8 @@ function durum(){
 async function durumVerisiniCiz(){
   try{
     const r = await fetch('/api/durum'); const j = await r.json();
+    runpodModelListesiGuncelle(j);
+    runpodLlmListesiGuncelle(j);
     const ok = !!j.comfy;
     const llm = j.llm || {};
     $('nokta').className = 'nokta ' + (ok ? 'acik' : 'kapali');
@@ -995,6 +1063,8 @@ function formVerisi(istekSecenekleri){
     prompt: $('prompt').value, negative: $('negatif').value,
     model: otomatikModel(),
     image_model: RUNPOD_WEBUI && $('runpodImageModel') ? $('runpodImageModel').value : 'auto',
+    model_instance: RUNPOD_WEBUI ? runpodModelInstanceSecili() : null,
+    llm_model: RUNPOD_WEBUI && $('uretimLlmModel') ? $('uretimLlmModel').value : undefined,
     flux3_bbox_mode: RUNPOD_WEBUI && $('flux3BboxMode') ? $('flux3BboxMode').checked : false,
     width: +$('w').value, height: +$('h').value,
     max_side: +$('maxside').value, max_olcek: $('maxolcek').checked,
@@ -1296,8 +1366,12 @@ async function durdur(){
   uretimKesintisizIstek = null;
   $('ilerleme').textContent = 'Durdurma gönderildi...';
   try{
-    const r = await fetch('/api/durdur', {method: 'POST'});
-    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const r = await fetch('/api/durdur', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({is_id: takipIs})});
+    const j = await r.json().catch(() => ({}));
+    if(!r.ok || !j.durduruldu) throw new Error(j.hata || 'İş artık etkin değil');
+    $('ilerleme').textContent = 'Durduruluyor…';
   }catch(e){
     const hata = 'Durdurma isteği başarısız: ' + (e.message || e);
     $('ilerleme').textContent = hata;
@@ -3544,9 +3618,10 @@ $('psUret').onclick = async () => {
   try{
     const r = await fetch('/api/prompt-uret', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({mod: m, metin: $('psMetin').value, dil: $('psDil').value,
+    body: JSON.stringify({mod: m, metin: $('psMetin').value, dil: $('psDil').value,
         yaraticilik: +$('psYaraticilik').value, uzunluk: $('psUzunluk').value,
         gorseller, model_prompt_profile: profile,
+        llm_model: RUNPOD_WEBUI && $('psLlmModel') ? $('psLlmModel').value : undefined,
         bbox_mode: profile === 'flux3' && $('psFlux3BboxMode').checked})});
     const j = await r.json().catch(() => ({}));
      if(r.ok && j.is_id){
@@ -4052,6 +4127,7 @@ async function sohbetBaslat(gecmis, ekstra, id = sohbetId, kes = null){
     const r = await fetch('/api/sohbet', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({mesajlar: sohbetMesajlariniHazirla(gecmis), yaraticilik: 0.7,
+        llm_model: RUNPOD_WEBUI && $('sohbetLlmModel') ? $('sohbetLlmModel').value : undefined,
         sohbet_id: id, ...ekstra})});
     const j = await r.json();
     if(nesil !== oturumNesli) return;
@@ -5008,7 +5084,9 @@ async function llmSistemYukle(){
       $('llmUseMtp').checked=a.llm_use_mtp!==false;
       $('llmMultimodal').checked=a.llm_multimodal!==false;
       try{
-        const state=await (await fetch('/api/durum')).json();const model=state.llm||{};
+        const state=await (await fetch('/api/durum')).json();
+        runpodLlmListesiGuncelle(state,a.llm_model);
+        const model=state.llm||{};
         const label={llama:'Gemma 4 E4B',llm_12b:'Gemma 4 12B',llm_26b:'Gemma 4 26B A4B'}[model.calisan_model||model.model]||model.calisan_model||model.model||'Model seçilmedi';
         $('llmRuntimeInfo').textContent=model.canli?`Çalışıyor · ${label} · GPU katmanı ${model.ngl} · bağlam ${model.calisan_ctx||model.ctx}`:'Kapalı · Sonraki hazırlamada seçili ayarlar kullanılacak.';
       }catch(_){$('llmRuntimeInfo').textContent='Model durumu henüz alınamadı.';}
@@ -5036,6 +5114,13 @@ async function llmSistemYukle(){
     if($('llmModCeviri')) $('llmModCeviri').value = m.ceviri || varsayilanlar.mod.ceviri || '';
     if($('llmModSohbet')) $('llmModSohbet').value = m.sohbet || varsayilanlar.mod.sohbet || '';
   }catch(e){ bilgi('Model tercihleri yüklenemedi: ' + (e.message || e)); }
+}
+for(const [id,key] of [['sohbetLlmModel','sohbet_llm_model'],
+                        ['psLlmModel','ps_llm_model'],
+                        ['uretimLlmModel','uretim_llm_model']]){
+  if($(id)) $(id).addEventListener('change',()=>{
+    try{localStorage.setItem(key,$(id).value);}catch(_){}
+  });
 }
 $('llmModelYenidenYukle').onclick=async()=>{
   const info=$('llmApplyInfo'),button=$('llmModelYenidenYukle');button.disabled=true;info.textContent='Ayarlar kaydediliyor…';

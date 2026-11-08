@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -27,6 +28,23 @@ LLAMA_SERVER = os.environ.get("LLAMA_SERVER_PATH", os.path.join(
     PROJECT_ROOT, "llama.cpp", "llama-server.exe"))
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _linux_process = None
+_active_request_cancel = None
+_active_request_cancel_lock = threading.Lock()
+
+
+def iptal_istegi():
+    """Ask the active generation to stop without unloading its model."""
+    with _active_request_cancel_lock:
+        event = _active_request_cancel
+    if event is None:
+        return False
+    event.set()
+    return True
+
+
+def _iptal_kontrolu(iptal):
+    if iptal is not None and iptal.is_set():
+        raise LLMHatasi("İş durduruldu", "iptal")
 
 
 def _runpod_llama_settings():
@@ -58,11 +76,14 @@ def _load_runpod_profiles():
         setup = sys.modules.get("pod_setup")
         if setup is not None and getattr(setup, "_ready", False):
             catalog["groups"] = setup.CATALOG
+            catalog["workflows"] = setup.WORKFLOWS
         root = os.path.join(os.environ["COMFYUI_ROOT"], "models")
         profiles = {}
-        for name in ("llama", "llm_12b", "llm_26b"):
-            workflow = (catalog.get("workflows") or {}).get(name) or {}
+        for name, workflow in (catalog.get("workflows") or {}).items():
+            workflow = workflow or {}
             group = (catalog.get("groups") or {}).get(workflow.get("group")) or {}
+            if group.get("engine") != "llama" or not group.get("enabled", True):
+                continue
             files = group.get("files") or []
             by_name = {item.get("name"): item for item in files}
             model = by_name.get(workflow.get("model_file"), {})
@@ -334,7 +355,7 @@ def _aktif_mmproj():
     return MMPROJ_PATH, MMPROJ_BEYIT, MMPROJ_KOD
 
 
-_ACTIVE_PROFILE = "llama"
+_ACTIVE_PROFILE = "llm_26b" if RUNPOD_MODE else "llama"
 _ACTIVE_MTP_PATH = None
 _calisan_profile = None
 _calisan_signature = None
@@ -416,7 +437,9 @@ def model_profilleri():
              "mmproj_bayt": config.get("mmproj_size"),
              "mtp_bayt": config.get("mtp_size"),
              "mtp_dosyasi": bool(config.get("mtp")),
-             "ctx": config.get("context", 8192)}
+             "ctx": config.get("context", 8192),
+             "hazir": (os.path.isfile(config.get("model", ""))
+                       and os.path.isfile(config.get("mmproj", "")))}
             for name, config in _RUNPOD_PROFILES.items()]
 
 
@@ -618,9 +641,10 @@ def _pid_yaz(pid, ctx=None):
         pass
 
 
-def _hazir_bekle(pid, baslama):
+def _hazir_bekle(pid, baslama, iptal=None):
     """Saglik 'ok' olana kadar 0.25 sn araliklarla bekle. Donus: yukleme ms."""
     while time.monotonic() - baslama < YUKLEME_BEKLEME:
+        _iptal_kontrolu(iptal)
         if not _surec_yasiyor(pid):
             return None
         durum = _saglik()
@@ -681,7 +705,7 @@ def _gpu_sureci_mi(pid):
         return False
 
 
-def baslat(*, gpu_hazirla=None):
+def baslat(*, gpu_hazirla=None, iptal=None):
     """Sunucuyu hazirlar. Donus: bu cagrida gecen yukleme ms (0 = zaten hazir)."""
     global _calisan_ctx, _linux_process, _calisan_profile, _ACTIVE_MTP_PATH
     global _calisan_signature
@@ -731,7 +755,7 @@ def baslat(*, gpu_hazirla=None):
             _calisan_profile = _ACTIVE_PROFILE
             _calisan_signature = _runtime_signature()
             _pid_yaz(sahibi, _calisan_ctx)
-            kalan = _hazir_bekle(sahibi, baslama)
+            kalan = _hazir_bekle(sahibi, baslama, iptal)
             if kalan is not None:
                 _llm_dbg(f"baslat_bekle_bitis ms={int((time.monotonic()-baslama)*1000)}")
                 return kalan
@@ -746,7 +770,7 @@ def baslat(*, gpu_hazirla=None):
             raise LLMHatasi("port %d başka bir süreçte (%d); o süreç kapatılmalı"
                             % (PORT, sahibi), "surec")
         _calisan_ctx = _pid_ctx_oku()
-        kalan = _hazir_bekle(sahibi, baslama)
+        kalan = _hazir_bekle(sahibi, baslama, iptal)
         if kalan is not None:
             _llm_dbg(f"baslat_port_sahibi_bekle_bitis ms={int((time.monotonic()-baslama)*1000)}")
             return kalan
@@ -805,7 +829,10 @@ def baslat(*, gpu_hazirla=None):
     _calisan_profile = _ACTIVE_PROFILE
     _calisan_signature = _runtime_signature()
 
-    sure = _hazir_bekle(surec.pid, baslama)
+    sure = _hazir_bekle(surec.pid, baslama, iptal)
+    if iptal is not None and iptal.is_set():
+        durdur()
+        raise LLMHatasi("İş durduruldu", "iptal")
     if sure is None:
         if _ACTIVE_MTP_PATH:
             _llm_dbg("MTP ile model başlayamadı; MTP olmadan tekrar deneniyor")
@@ -946,14 +973,27 @@ def istek_suruyor():
     return _kilit.locked() or _uretim["aktif"]
 
 
-def _istek_gon(payload):
+def _istek_gon(payload, iptal=None):
     veri = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(ADRES + "/v1/chat/completions", data=veri,
                                  headers={"Content-Type": "application/json"},
                                  method="POST")
     try:
         with urllib.request.urlopen(req, timeout=ISTEK_SURE) as r:
-            yanit = json.loads(r.read().decode("utf-8"))
+            sock = getattr(getattr(getattr(r, "fp", None), "raw", None), "_sock", None)
+            if sock is not None:
+                sock.settimeout(0.5)
+            chunks = []
+            while True:
+                _iptal_kontrolu(iptal)
+                try:
+                    chunk = r.read1(65536) if hasattr(r, "read1") else r.read(65536)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            yanit = json.loads(b"".join(chunks).decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
             detay = json.loads(e.read().decode("utf-8"))
@@ -997,7 +1037,8 @@ def _aki_parca(satir):
         return None
 
 
-def _istek_gon_akis(payload, parca_geri=None, dusunme_geri=None, deneme=0):
+def _istek_gon_akis(payload, parca_geri=None, dusunme_geri=None, deneme=0,
+                    iptal=None):
     """SSE akışlı sohbet isteği. Yanıt metin parçaları parca_geri ile,
     canlı düşünme (reasoning_content) parçaları dusunme_geri ile iletilir.
     Bağlantı sıfırlanması durumunda en fazla 2 kez yeniden denenir."""
@@ -1010,10 +1051,20 @@ def _istek_gon_akis(payload, parca_geri=None, dusunme_geri=None, deneme=0):
                                           "Connection": "close"})
     try:
         with urllib.request.urlopen(req, timeout=ISTEK_SURE) as r:
+            sock = getattr(getattr(getattr(r, "fp", None), "raw", None), "_sock", None)
+            if sock is not None:
+                sock.settimeout(0.5)
             icerik = ""
             reasoning = ""
             final = {}
-            for satir in r:
+            while True:
+                _iptal_kontrolu(iptal)
+                try:
+                    satir = r.readline()
+                except socket.timeout:
+                    continue
+                if not satir:
+                    break
                 satir = satir.decode("utf-8", "replace").strip()
                 parca = _aki_parca(satir)
                 if parca is None or parca == "__DONE__":
@@ -1057,11 +1108,13 @@ def _istek_gon_akis(payload, parca_geri=None, dusunme_geri=None, deneme=0):
         raise LLMHatasi("llama-server hatası: " + str(mesaj)[:200], "model")
     except (urllib.error.URLError, ConnectionResetError, ConnectionAbortedError,
             BrokenPipeError, OSError) as e:
+        if iptal is not None and iptal.is_set():
+            raise LLMHatasi("İş durduruldu", "iptal")
         if deneme < 2:
             time.sleep(0.5)
             return _istek_gon_akis(payload, parca_geri=parca_geri,
                                    dusunme_geri=dusunme_geri,
-                                   deneme=deneme + 1)
+                                   deneme=deneme + 1, iptal=iptal)
         raise LLMHatasi("llama-server bağlantısı sıfırlandı: %s" % str(e)[:200], "surec")
     timings = final.get("timings") or {}
     usage = final.get("usage") or {}
@@ -1208,16 +1261,23 @@ def hazirla(*, gpu_hazirla=None):
 def uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
          sistem_ozel=None, mod_ozel=None, *, gpu_hazirla=None,
          model_prompt_profile=None, bbox_mode=False):
+    global _active_request_cancel
     if gorseller and not MULTIMODAL_ENABLED:
         raise LLMHatasi("Görsel anlama LLM ayarlarından kapalı.", "istek")
     if not _kilit.acquire(blocking=False):
         raise LLMHatasi("bir üretim zaten sürüyor", "mesgul")
+    cancel = threading.Event()
+    with _active_request_cancel_lock:
+        _active_request_cancel = cancel
     try:
         return _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
                      sistem_ozel, mod_ozel, gpu_hazirla=gpu_hazirla,
                      model_prompt_profile=model_prompt_profile,
-                     bbox_mode=bbox_mode)
+                     bbox_mode=bbox_mode, iptal=cancel)
     finally:
+        with _active_request_cancel_lock:
+            if _active_request_cancel is cancel:
+                _active_request_cancel = None
         _kilit.release()
 
 
@@ -1228,15 +1288,18 @@ def sohbet_et(mesajlar, yaraticilik=0.7, max_tokens=None, parca_geri=None,
     max_tokens verilmezse modelin kendi karar vermesi için sınır gönderilmez.
     stream=False ise tek seferlik yanıt alınır (canlı parça aktarım kapalı).
     Dönüş: (yanıt_metni, ölçüm). Tek eşzamanlı kilit kullanır."""
-    global _son_yukleme_ms
+    global _son_yukleme_ms, _active_request_cancel
     if not _kilit.acquire(blocking=False):
         raise LLMHatasi("bir üretim zaten sürüyor", "mesgul")
+    cancel = threading.Event()
+    with _active_request_cancel_lock:
+        _active_request_cancel = cancel
     try:
         try:
             yaraticilik = max(0.2, min(1.2, float(yaraticilik)))
         except (TypeError, ValueError):
             yaraticilik = 0.7
-        _son_yukleme_ms = baslat(gpu_hazirla=gpu_hazirla)
+        _son_yukleme_ms = baslat(gpu_hazirla=gpu_hazirla, iptal=cancel)
         _son_kullanim_guncelle()
         gecmis = [{"role": "system", "content": SOHBET_SISTEM_PROMPTU}]
         if not isinstance(mesajlar, list):
@@ -1296,9 +1359,10 @@ def sohbet_et(mesajlar, yaraticilik=0.7, max_tokens=None, parca_geri=None,
         try:
             if stream:
                 icerik, olcum = _istek_gon_akis(payload, parca_geri=parca_geri,
-                                                dusunme_geri=dusunme_geri)
+                                                dusunme_geri=dusunme_geri,
+                                                iptal=cancel)
             else:
-                icerik, olcum = _istek_gon(payload)
+                icerik, olcum = _istek_gon(payload, iptal=cancel)
         except Exception:
             _olcum_bitir({})
             raise
@@ -1311,6 +1375,9 @@ def sohbet_et(mesajlar, yaraticilik=0.7, max_tokens=None, parca_geri=None,
         _son_kullanim_guncelle()
         return icerik, olcum
     finally:
+        with _active_request_cancel_lock:
+            if _active_request_cancel is cancel:
+                _active_request_cancel = None
         _kilit.release()
 
 
@@ -1393,11 +1460,6 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
             "koru; yalnızca açıklama metinlerini Türkçeye çevir. Dış uygulama "
             "JSON'una bbox için yeni alan ekleme.")
     if mod == "gorsel":
-        hedef = {"kisa": "10-25", "orta": "20-45", "uzun": "35-70"}[uzunluk]
-        bolumler.append(
-            "Düzenleme promptu uzunluğu: positive %s kelimeyi hedeflesin; "
-            "positive_tr aynı düzenlemeyi sadakatle karşılasın. Bu sınır, "
-            "değişmeyen fotoğrafı tarif etmek için kullanılmamalıdır." % hedef)
         bolumler.append(
             "ZORUNLU DÜZENLEME SINIRI: positive yeni bir görselin tam sahne "
             "betimi değil, yalnızca istenen değişiklik talimatıdır. Değişmeyen "
@@ -1419,18 +1481,12 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
             "işaretleri değiştirme. Kullanılmayan ses veya referans türü uydurma. "
             "MiniMax video akışında negatif prompt kullanılmadığından negative "
             "değerini boş dize bırak.")
-    elif not (model_prompt_profile == "flux3" and bbox_mode):
-        hedef = {"kisa": "60-90", "orta": "100-140",
-                 "uzun": "150-220"}[uzunluk]
-        bolumler.append(
-            "positive %s kelimeyi hedeflesin; positive_tr anlamı ve ayrıntıları "
-            "koruyan Türkçe karşılığı olsun." % hedef)
     return "\n".join(bolumler)
 
 
 def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
           sistem_ozel=None, mod_ozel=None, *, gpu_hazirla=None,
-          model_prompt_profile=None, bbox_mode=False):
+          model_prompt_profile=None, bbox_mode=False, iptal=None):
     global _son_kullanim
     if mod not in MOD_TALIMATI:
         raise LLMHatasi("geçersiz mod", "istek")
@@ -1471,7 +1527,7 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
         icerik.append({"type": "image_url", "image_url": {"url": _gorsel_url(g)}})
 
     global _son_yukleme_ms
-    _son_yukleme_ms = baslat(gpu_hazirla=gpu_hazirla)
+    _son_yukleme_ms = baslat(gpu_hazirla=gpu_hazirla, iptal=iptal)
     _son_kullanim_guncelle()
     baslama = time.monotonic()
     mesajlar = [{"role": "system", "content": siste},
@@ -1518,7 +1574,7 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
                    "response_format": sema}
         _olcum_baslat()
         try:
-            son_icerik, son_olcum = _istek_gon(payload)
+            son_icerik, son_olcum = _istek_gon(payload, iptal=iptal)
         except Exception:
             _olcum_bitir({})
             raise

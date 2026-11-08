@@ -129,12 +129,13 @@ def build_prompt(p, image_name=None, image_name2=None):
     """API-format prompt. Referanslar zincirlenir (Moody mantigi):
     foto1 -> Ref -> foto2 -> Ref -> guider. Referans yoksa passthrough."""
     seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
+    files = p.get("model_files") or {}
     pr = {
         "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": DIFFUSION_FILE, "weight_dtype": "default"}},
+              "inputs": {"unet_name": files.get("diffusion", DIFFUSION_FILE), "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": TEXT_ENCODER_FILE, "type": "flux2", "device": "default"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_FILE}},
+              "inputs": {"clip_name": files.get("text_encoder", TEXT_ENCODER_FILE), "type": "flux2", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": files.get("vae", VAE_FILE)}},
         "4": {"class_type": "CLIPTextEncode",
               "inputs": {"text": p["prompt"], "clip": ["2", 0]}},
         "5": {"class_type": "CLIPTextEncode",
@@ -184,12 +185,13 @@ def build_prompt(p, image_name=None, image_name2=None):
 def build_z_image_prompt(p, image_name=None, image_name2=None):
     """Z-Image Turbo API workflow; optional references use its Omni encoder."""
     seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
+    files = p.get("model_files") or {}
     pr = {
         "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": Z_IMAGE_DIFFUSION_FILE, "weight_dtype": "default"}},
+              "inputs": {"unet_name": files.get("diffusion", Z_IMAGE_DIFFUSION_FILE), "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": Z_IMAGE_TEXT_ENCODER_FILE, "type": "lumina2", "device": "default"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": Z_IMAGE_VAE_FILE}},
+              "inputs": {"clip_name": files.get("text_encoder", Z_IMAGE_TEXT_ENCODER_FILE), "type": "lumina2", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": files.get("vae", Z_IMAGE_VAE_FILE)}},
         "5": {"class_type": "CLIPTextEncode",
               "inputs": {"text": p.get("negative", ""), "clip": ["2", 0]}},
         "6": {"class_type": "EmptySD3LatentImage",
@@ -400,15 +402,16 @@ def _flux3_layout_elements(prompt, width, height):
 def build_krea2_prompt(p):
     """ComfyUI stock-node workflow matching the supplied Krea 2 example."""
     seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
+    files = p.get("model_files") or {}
     pr = {
         "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": KREA2_DIFFUSION_FILE,
+              "inputs": {"unet_name": files.get("diffusion", KREA2_DIFFUSION_FILE),
                          "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": KREA2_TEXT_ENCODER_FILE,
+              "inputs": {"clip_name": files.get("text_encoder", KREA2_TEXT_ENCODER_FILE),
                          "type": "krea2", "device": "default"}},
         "3": {"class_type": "VAELoader",
-              "inputs": {"vae_name": KREA2_VAE_FILE}},
+              "inputs": {"vae_name": files.get("vae", KREA2_VAE_FILE)}},
         "4": {"class_type": "CLIPTextEncode",
               "inputs": {"text": p["prompt"], "clip": ["2", 0]}},
         "5": {"class_type": "CLIPTextEncode",
@@ -436,9 +439,10 @@ def build_krea2_prompt(p):
 def build_illustrious_prompt(p):
     """SDXL checkpoint workflow with the checkpoint's v-prediction sampling."""
     seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
+    files = p.get("model_files") or {}
     pr = {
         "1": {"class_type": "CheckpointLoaderSimple",
-              "inputs": {"ckpt_name": ILLUSTRIOUS_CHECKPOINT_FILE}},
+              "inputs": {"ckpt_name": files.get("checkpoint", ILLUSTRIOUS_CHECKPOINT_FILE)}},
         "2": {"class_type": "ModelSamplingDiscrete",
               "inputs": {"model": ["1", 0], "sampling": "v_prediction",
                          "zsnr": True}},

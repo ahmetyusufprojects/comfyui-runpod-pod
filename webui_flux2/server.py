@@ -451,9 +451,10 @@ def _form_temizle(ham):
                          MODEL_MOODY_ANIMA, MODEL_FLUX3, MODEL_KREA2,
                          MODEL_ILLUSTRIOUS):
                     temiz[k] = v
-            elif k == "image_model":
-                if v in ("auto", MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_FLUX3,
-                         MODEL_KREA2, MODEL_ILLUSTRIOUS):
+            elif k in ("image_model", "model_instance"):
+                allowed = ("auto", MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_FLUX3,
+                           MODEL_KREA2, MODEL_ILLUSTRIOUS)
+                if v in allowed or (RUNPOD_MODE and pod_setup.model_instance(v)):
                     temiz[k] = v
             elif k == "flux3_bbox_mode":
                 if isinstance(v, bool):
@@ -579,7 +580,9 @@ def _ayar_degisikliklerini_uygula(ayar, req):
         ayar["llm_ctx"] = ctx_deger
     if "llm_model" in req:
         model = req.get("llm_model")
-        if model not in ("auto", "llama", "llm_12b", "llm_26b"):
+        allowed = ({item["id"] for item in llm.model_profilleri()}
+                   if RUNPOD_MODE else {"llama"})
+        if not isinstance(model, str) or model not in allowed:
             raise ValueError("llm_model seçimi geçersiz")
         ayar["llm_model"] = model
     for key, low, high in (("llm_threads", 1, 64), ("llm_batch", 128, 8192),
@@ -1058,6 +1061,10 @@ def _is_dogrula(req):
         return {"hata": "prompt_ceviri boolean olmali"}
     if req.get("prompt_ceviri") and req.get("prompt_destek"):
         return {"hata": "Prompt çevirisi ve Prompt Stüdyosu desteği aynı anda kullanılamaz"}
+    if req.get("llm_model") is not None:
+        allowed_llm = {item["id"] for item in llm.model_profilleri()}
+        if req.get("llm_model") not in allowed_llm:
+            return {"hata": "Seçilen LLM modeli bulunamadı. Ayarlardan geçerli bir model seç."}
     try:
         n_ref = (1 if req.get("image_base64") else 0) \
             + (1 if req.get("image2_base64") else 0)
@@ -1088,9 +1095,13 @@ def _is_dogrula(req):
                        MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
                        MODEL_ILLUSTRIOUS: "illustrious"}.get(model)
     if RUNPOD_MODE and runpod_workflow:
-        if not pod_setup.workflow_enabled(runpod_workflow):
+        instance_id = req.get("model_instance") or runpod_workflow
+        instance = pod_setup.model_instance(instance_id)
+        if instance is None or instance.get("family") != runpod_workflow:
+            return {"hata": "Seçilen model kaydı bu üretim türüyle eşleşmiyor."}
+        if not pod_setup.workflow_enabled(instance_id):
             return {"hata": "Bu görsel modeli şu anda geçici olarak devre dışı."}
-        if not pod_setup.workflow_ready(runpod_workflow):
+        if not pod_setup.workflow_ready(instance_id):
             return {"hata": "Bu görsel modeli henüz hazır değil. 8192 portundaki Kurulum panelinden modeli indir."}
     return None
 
@@ -1229,34 +1240,15 @@ def _llm_kuyruk_isini_calistir(job):
         if job.get("iptal"):
             raise RuntimeError("iptal edildi")
         ayar = _ayar_oku(sahip)
-        llm_secimi = ayar.get("llm_model", "auto")
-        model_yedek_bilgisi = None
+        llm_secimi = req.get("llm_model") or ayar.get(
+            "llm_model", "llm_26b" if RUNPOD_MODE else "llama")
         if RUNPOD_MODE:
-            if llm_secimi == "auto":
-                sohbet_isi = tur in ("llm_chat", "llm_preload")
-                model_ad = req.get("model")
-                if tur == "llm_prompt" and not model_ad:
-                    model_ad = ((ayar.get("form") or {}).get("image_model") or "z_image")
-                model_ad = {MODEL_Z_IMAGE: "z_image", MODEL_FLUX2: "flux2",
-                            MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
-                            MODEL_ILLUSTRIOUS: "illustrious"}.get(model_ad, model_ad)
-                istenen_model = pod_setup.default_llm_for(model_ad, chat=sohbet_isi)
-            else:
-                istenen_model = llm_secimi
-            secilecek = pod_setup.llm_profile_fallback(istenen_model)
-            if secilecek is None:
-                raise RuntimeError(
-                    "Seçilen model ve ondan küçük Gemma modelleri henüz kurulu değil. "
-                    "Kurulum sayfasından kullanmak istediğin modeli indir.")
-            if secilecek != istenen_model:
-                adlar = {"llm_26b": "Gemma 4 26B A4B",
-                         "llm_12b": "Gemma 4 12B", "llama": "Gemma 4 E4B"}
-                model_yedek_bilgisi = (
-                    adlar[istenen_model] + " kurulu değil; " + adlar[secilecek]
-                    + " kullanılıyor.")
-                job["ilerleme"] = {"asama": "model_secimi",
-                                   "calisan": model_yedek_bilgisi, "oran": 0.04}
-            llm.model_ayarla(secilecek)
+            profiles = {item["id"]: item for item in llm.model_profilleri()}
+            if llm_secimi not in profiles:
+                raise RuntimeError("Seçilen LLM modeli bu Pod'da tanımlı değil.")
+            if not pod_setup.workflow_ready(llm_secimi):
+                raise RuntimeError("Seçilen LLM henüz indirilmedi. Kurulum ekranından bu modeli hazırlayın.")
+            llm.model_ayarla(llm_secimi)
             llm.ayarlarini_uygula(ayar)
         canli = llm.durum()["canli"]
         try:
@@ -1270,13 +1262,11 @@ def _llm_kuyruk_isini_calistir(job):
             canli = False
         if canli:
             job["ilerleme"] = {"asama": "hazirlik",
-                               "calisan": model_yedek_bilgisi or "Model hazır",
+                               "calisan": "Model hazır",
                                "oran": 0.1}
         else:
             job["ilerleme"] = {"asama": "yukleme",
-                               "calisan": ((model_yedek_bilgisi + " · ")
-                                           if model_yedek_bilgisi else "")
-                                          + "Model yükleniyor", "oran": 0.2}
+                               "calisan": "Model yükleniyor", "oran": 0.2}
         if tur == "llm_preload":
             _aktif_llm["durum"] = "Model yükleniyor"
             sonuc = llm.hazirla(gpu_hazirla=gpu_hazirla)
@@ -1678,7 +1668,15 @@ def _isi_iptal_et(job):
     if prompt_id:
         _comfy_isini_kes(prompt_id)
     with _llm_is_gecis_kilit:
-        if _aktif_llm.get("is_id") == job["is_id"]:
+        llm_is_active = _aktif_llm.get("is_id") == job["is_id"]
+        llm_faz = _aktif_llm.get("durum")
+    if llm_is_active:
+        # Generation requests observe this event while reading the response;
+        # keep the loaded model alive. Model preload has no request to interrupt,
+        # so stop its server process to release the GPU and RAM.
+        if not llm.iptal_istegi() and (
+                job.get("tur") == "llm_preload"
+                or llm_faz in ("Hazırlanıyor", "Model yükleniyor")):
             llm.durdur()
     return True
 
@@ -2902,7 +2900,8 @@ def _isi_calistir(job):
                          MODEL_MOODY_ANIMA, MODEL_FLUX3, MODEL_KREA2,
                          MODEL_ILLUSTRIOUS):
             model = MODEL_FLUX2
-        workflow = (pod_setup.workflow(model) if RUNPOD_MODE else {})
+        model_instance = req.get("model_instance") or model
+        workflow = (pod_setup.workflow(model_instance) if RUNPOD_MODE else {})
         default_sampler = workflow.get("sampler") or (
             "res_multistep" if model == MODEL_Z_IMAGE else "euler")
         default_steps = workflow.get("steps") or (
@@ -2931,6 +2930,14 @@ def _isi_calistir(job):
             workflow_key = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
                             MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
                             MODEL_ILLUSTRIOUS: "illustrious"}[model]
+            if model in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_FLUX3, MODEL_KREA2):
+                p["model_files"] = {
+                    "diffusion": workflow.get("diffusion_file"),
+                    "text_encoder": workflow.get("text_encoder_file"),
+                    "vae": workflow.get("vae_file"),
+                }
+            elif model == MODEL_ILLUSTRIOUS:
+                p["model_files"] = {"checkpoint": workflow.get("checkpoint_file")}
             p["loras"] = pod_setup.ensure_loras(
                 workflow_key, req.get("loras") if "loras" in req else None,
                 job=job)
@@ -3399,6 +3406,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     result = pod_setup.configure_lora(req.get("id"), req)
                 elif action == "lora_sil":
                     result = pod_setup.delete_lora(req.get("id"))
+                elif action == "model_ekle":
+                    result = pod_setup.create_model_instance(req)
+                elif action == "model_ad":
+                    result = pod_setup.rename_model_instance(req.get("id"), req.get("name"))
+                elif action == "model_sil":
+                    result = pod_setup.delete_model_instance(req.get("id"))
                 else:
                     raise ValueError("Bilinmeyen sistem ayarı işlemi.")
             except ValueError as exc:
@@ -3499,8 +3512,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         "var": os.path.isfile(os.path.join(models_dir, sub, fn))}
             try:
                 info["llm"] = llm.durum(detayli=True)
+                info["llm_models"] = llm.model_profilleri()
             except Exception:
                 info["llm"] = {"canli": False}
+                info["llm_models"] = []
+            if RUNPOD_MODE:
+                try:
+                    info["model_instances"] = pod_setup.model_options()
+                except Exception:
+                    info["model_instances"] = []
             try:
                 info["uretim_suruyor"] = _aktif.get("prompt_id") is not None
                 info["kuyruk_bekleyen"] = len(_kuyruk)
@@ -4091,12 +4111,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             if self._kasa_gerekli(kullanici) is None:
                 return
+            req = self._json_oku()
             with _isler_kilit:
-                job = next((j for j in _isler.values()
-                            if j["sahip"] == kullanici
-                            and j["durum"] == "calisiyor"
-                            and j["prompt_id"] == _aktif.get("prompt_id")
-                            and j["prompt_id"] is not None), None)
+                job = _isler.get(req.get("is_id")) if req.get("is_id") else None
+                if job is not None and job.get("sahip") != kullanici:
+                    job = None
+                if job is None:
+                    active_ids = {_aktif_llm.get("is_id")}
+                    active_prompt = _aktif.get("prompt_id")
+                    if active_prompt is not None:
+                        active_ids.update(j["is_id"] for j in _isler.values()
+                                          if j.get("prompt_id") == active_prompt)
+                    job = next((j for j in reversed(list(_isler.values()))
+                                if j.get("sahip") == kullanici
+                                and j.get("durum") == "calisiyor"
+                                and j.get("is_id") in active_ids), None)
             durduruldu = job is not None and _isi_iptal_et(job)
             self._send(200, json.dumps({"durduruldu": durduruldu,
                                         "kuyruk": job is not None}))
@@ -4708,6 +4737,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if "__hata__" in req:
                 self._send(400, json.dumps({"hata": req["__hata__"]}))
                 return
+            if req.get("llm_model") is not None and req.get("llm_model") not in {
+                    item["id"] for item in llm.model_profilleri()}:
+                self._send(400, '{"hata":"Seçilen LLM modeli bulunamadı."}')
+                return
             profile = req.get("model_prompt_profile", "auto")
             if profile not in ("auto", "general", "z_image", "flux3", "krea2", "minimaxh3"):
                 self._send(400, '{"hata":"gecersiz prompt profili"}')
@@ -4741,6 +4774,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             req = self._json_oku()
             if "__hata__" in req:
                 self._send(400, json.dumps({"hata": req["__hata__"]}))
+                return
+            if req.get("llm_model") is not None and req.get("llm_model") not in {
+                    item["id"] for item in llm.model_profilleri()}:
+                self._send(400, '{"hata":"Seçilen LLM modeli bulunamadı."}')
                 return
             ham = req.get("mesajlar") or []
             if not isinstance(ham, list) or not ham:

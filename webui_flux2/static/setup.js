@@ -87,6 +87,67 @@ function switchView(id) {
     button.classList.toggle('active',button.dataset.view===id));
   if(id==='settingsView') loadSystemSettings();
 }
+function drawVariantFiles(data) {
+  const root=$('modelVariantFiles'); if(!root) return;
+  const family=$('modelFamily').value;
+  const instance=(data.model_instances||[]).find(item=>item.id===family);
+  root.replaceChildren();
+  if(!instance) return;
+  for(const file of instance.files||[]){
+    const label=document.createElement('label'); label.className='model-variant-file';
+    const name=document.createElement('span'); name.textContent=file.name;
+    const input=document.createElement('input'); input.type='url';
+    input.value=file.default_link||file.link||''; input.dataset.file=file.name;
+    input.dataset.defaultLink=file.default_link||file.link||'';
+    input.required=file.name===instance.primary_file;
+    input.setAttribute('aria-label',file.name+' model bağlantısı');
+    label.append(name,input); root.append(label);
+  }
+}
+function drawModelInstances(data) {
+  const families=data.model_families||[], instances=data.model_instances||[];
+  const familySelect=$('modelFamily'), previous=familySelect.value;
+  familySelect.replaceChildren();
+  for(const family of families){
+    const option=document.createElement('option'); option.value=family.id;
+    option.textContent=family.name; familySelect.append(option);
+  }
+  if(families.some(item=>item.id===previous)) familySelect.value=previous;
+  familySelect.onchange=()=>drawVariantFiles(data);
+  drawVariantFiles(data);
+  const root=$('modelInstances'); root.replaceChildren();
+  for(const instance of instances){
+    const row=document.createElement('article'); row.className='model-instance-row';
+    const type=document.createElement('span'); type.className='muted';
+    type.textContent=(families.find(item=>item.id===instance.family)?.name||instance.family)
+      +' · '+(instance.ready?'Dosya hazır':'Henüz indirilmedi');
+    const name=document.createElement('input'); name.value=instance.name;
+    name.maxLength=80; name.setAttribute('aria-label','Model adı: '+instance.name);
+    const actions=document.createElement('div'); actions.className='actions';
+    const save=document.createElement('button'); save.type='button'; save.className='quiet'; save.textContent='Adı kaydet';
+    save.onclick=async()=>{
+      try{
+        const result=await api('/api/system-settings',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({islem:'model_ad',id:instance.id,name:name.value.trim()})});
+        drawSystemSettings(result); $('settingsStatus').textContent='Model adı kaydedildi.';
+      }catch(error){showError(error.message);}
+    };
+    actions.append(save);
+    if(!instance.builtin){
+      const remove=document.createElement('button'); remove.type='button'; remove.className='quiet'; remove.textContent='Model kaydını sil';
+      remove.onclick=async()=>{
+        if(!window.confirm('Bu model kaydını ve yalnızca ona ait indirilen dosyaları silmek istiyor musun?')) return;
+        try{
+          const result=await api('/api/system-settings',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({islem:'model_sil',id:instance.id})});
+          drawSystemSettings(result); lastStatus=await api('/api/pod-kurulum'); draw(lastStatus);
+        }catch(error){showError(error.message);}
+      };
+      actions.append(remove);
+    }
+    row.append(type,name,actions); root.append(row);
+  }
+}
 function drawSystemSettings(data) {
   systemSettingsData=data;
   const settings=data.ayarlar||{}, groups=data.gruplar||[];
@@ -111,9 +172,6 @@ function drawSystemSettings(data) {
     down.onclick=()=>{if(row.nextElementSibling) list.insertBefore(row.nextElementSibling,row);};
     controls.append(up,down); row.append(name,controls); list.append(row);
   }
-  const llm=$('llmDefaults'); llm.replaceChildren();
-  const models=[['llama','Gemma 4 E4B'],['llm_12b','Gemma 4 12B'],['llm_26b','Gemma 4 26B A4B']];
-  const modelsPresent=new Set(groups.filter(group=>group.id==='llama'||group.id==='llm_12b'||group.id==='llm_26b').map(group=>group.id));
   const imageGroups={z_image:'zimage',flux2:'flux',flux3:'flux3',krea2:'krea2',illustrious:'illustrious'};
   const availableGroups=new Set(groups.map(group=>group.id));
   const images=[['z_image','Z-Image · Moody Pro'],['flux2','Flux 2 Klein'],['flux3','Flux 3 Klein'],['krea2','Krea 2'],['illustrious','Illustrious']]
@@ -123,16 +181,7 @@ function drawSystemSettings(data) {
     option.disabled=!availableImageModels.has(option.value);
   if($('loraModel').selectedOptions[0]?.disabled)
     $('loraModel').value=images[0]?.[0]||'';
-  const makeSelect=(caption,key,value)=>{
-    const row=document.createElement('label'); row.className='llm-default-row';
-    const name=document.createElement('span'); name.textContent=caption;
-    const select=document.createElement('select'); select.dataset.key=key;
-    for(const [id,label] of models){if(!modelsPresent.has(id)) continue; const option=document.createElement('option');option.value=id;option.textContent=label;select.append(option);}
-    if(Array.from(select.options).some(option=>option.value===value)) select.value=value;
-    row.append(name,select); llm.append(row);
-  };
-  for(const [key,label] of images) makeSelect(label,key,(settings.llm_defaults?.image||{})[key]||'llama');
-  makeSelect('Yalnızca sohbet','chat',settings.llm_defaults?.chat||'llm_26b');
+  drawModelInstances(data);
   const links=$('modelLinks'); links.replaceChildren();
   for(const group of groups){
     for(const file of group.files||[]){
@@ -183,7 +232,10 @@ async function saveModelLink(group,file,link,restore) {
   try {
     const result=await api('/api/system-settings',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({islem:restore?'varsayilan':'baglanti',grup:group,dosya:file,baglanti:link})});
-    drawSystemSettings(result); $('settingsStatus').textContent='Bağlantı kaydedildi; model dosyası yeniden indirilecek.';
+    drawSystemSettings(result);
+    $('settingsStatus').textContent=result.restarted_groups?.length
+      ? 'Kurulu model dosyası yenileniyor; indirme kuyruğa alındı.'
+      : 'Bağlantı kaydedildi; model henüz kurulu olmadığı için indirme başlamadı.';
     lastStatus=await api('/api/pod-kurulum'); draw(lastStatus);
   } catch(error) { showError(error.message); }
 }
@@ -250,15 +302,27 @@ $('saveSystemSettings').addEventListener('click',async()=>{
     drawSystemSettings(data); $('settingsStatus').textContent='Genel ayarlar kaydedildi.';
   } catch(error) { $('settingsStatus').textContent=error.message; }
 });
-$('saveLlmDefaults').addEventListener('click',async()=>{
-  $('llmDefaultsStatus').textContent='Kaydediliyor…';
-  const image={}; for(const select of $('llmDefaults').querySelectorAll('select[data-key]')) if(select.dataset.key!=='chat') image[select.dataset.key]=select.value;
-  const chat=$('llmDefaults').querySelector('select[data-key="chat"]')?.value||'llm_26b';
-  try {
+$('modelForm').addEventListener('submit',async event=>{
+  event.preventDefault();
+  const status=$('modelFormStatus'), family=$('modelFamily').value;
+  const base=(systemSettingsData?.model_instances||[]).find(item=>item.id===family);
+  const links={};
+  for(const input of $('modelVariantFiles').querySelectorAll('input[data-file]')){
+    const link=input.value.trim();
+    if(link!==input.dataset.defaultLink) links[input.dataset.file]=link;
+  }
+  if(!base || !links[base.primary_file]){
+    status.textContent='Ana model dosyası için farklı bir indirme bağlantısı gir.';
+    return;
+  }
+  status.textContent='Model kaydı ekleniyor…';
+  try{
     const data=await api('/api/system-settings',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({islem:'kaydet',llm_defaults:{image,chat}})});
-    drawSystemSettings(data); $('llmDefaultsStatus').textContent='Model eşleşmeleri kaydedildi.';
-  } catch(error) { $('llmDefaultsStatus').textContent=error.message; }
+      body:JSON.stringify({islem:'model_ekle',family,name:$('modelName').value.trim(),links})});
+    drawSystemSettings(data); $('modelName').value='';
+    status.textContent='Model kaydedildi. İndirmeyi İndirmeler bölümünden başlatabilirsin.';
+    lastStatus=await api('/api/pod-kurulum'); draw(lastStatus);
+  }catch(error){status.textContent=error.message;}
 });
 $('loraForm').addEventListener('submit',async event=>{
   event.preventDefault(); $('loraFormStatus').textContent='LoRA kaydediliyor…';
@@ -307,6 +371,23 @@ $('updateApp').addEventListener('click',async()=>{
     status.textContent='Uygulamanın açılması bekleniyor; sayfayı biraz sonra yenileyin.';
   }catch(error){ status.textContent=error.message; }
   finally{ button.disabled=false; }
+});
+$('restartApp').addEventListener('click',async()=>{
+  const button=$('restartApp'), status=$('restartAppStatus');
+  if(!window.confirm('Uygulama servisleri yeniden başlatılsın mı? İndirilen model dosyaları korunur.')) return;
+  button.disabled=true; status.textContent='Güvenli kapanış ve yeniden başlatma bekleniyor…';
+  try{
+    await api('/api/app-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    for(let i=0;i<120;i++){
+      await new Promise(resolve=>setTimeout(resolve,2000));
+      try{
+        const state=await api('/api/setup-state');
+        if(state.hazir){status.textContent='Uygulama yeniden başladı; indirilen modeller korundu.';await refresh();return;}
+      }catch(_){}
+    }
+    throw new Error('Uygulama 4 dakika içinde yeniden yanıt vermedi.');
+  }catch(error){status.textContent=error.message;}
+  finally{button.disabled=false;}
 });
 $('loadLogs').addEventListener('click',loadLogs);
 $('logSource').addEventListener('change',loadLogs);

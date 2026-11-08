@@ -15,6 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 import fcntl
@@ -60,8 +61,8 @@ _system_settings_lock = threading.RLock()
 _SYSTEM_SETTINGS_DEFAULT = {
     "schema": 1,
     "auto_download": False,
-    "default_download_order": ["zimage", "llama", "llm_12b", "llm_26b"],
-    "llm_defaults": _CATALOG_DATA.get("llm_defaults") or {},
+    "default_download_order": ["zimage", "llm_26b"],
+    "model_instances": [],
     "link_overrides": {},
     "loras": [{"id": "anime-desire-illustrious",
                "name": "Anime Desire · Illustrious",
@@ -245,11 +246,10 @@ def _system_settings_read():
     order = saved.get("default_download_order")
     if isinstance(order, list):
         settings["default_download_order"] = [
-            group for group in order
-            if group in CATALOG and CATALOG[group].get("enabled", True)]
-    defaults = saved.get("llm_defaults")
-    if isinstance(defaults, dict):
-        settings["llm_defaults"] = defaults
+            group for group in order if isinstance(group, str)]
+    instances = saved.get("model_instances")
+    if isinstance(instances, list):
+        settings["model_instances"] = instances
     overrides = saved.get("link_overrides")
     if isinstance(overrides, dict):
         settings["link_overrides"] = overrides
@@ -373,6 +373,221 @@ def _apply_saved_links(settings):
     _validate_catalog()
 
 
+def _default_model_instances():
+    instances = []
+    for family, workflow in (_CATALOG_DATA.get("workflows") or {}).items():
+        group_id = workflow.get("group")
+        group = CATALOG.get(group_id)
+        if not group or not group.get("enabled", True):
+            continue
+        if group.get("engine") not in ("comfy", "llama"):
+            continue
+        instances.append({
+            "id": family, "family": family, "name": group["label"],
+            "group": group_id, "workflow": copy.deepcopy(workflow),
+            "files": copy.deepcopy(group["files"]), "builtin": True,
+        })
+    return instances
+
+
+def _model_instances_apply(settings):
+    """Rebuild editable model variants from the checksummed universal settings."""
+    saved = settings.get("model_instances") or []
+    saved_by_id = {item.get("id"): item for item in saved
+                   if isinstance(item, dict) and isinstance(item.get("id"), str)}
+    records = _default_model_instances()
+    for record in records:
+        stored = saved_by_id.get(record["id"])
+        if stored and isinstance(stored.get("name"), str):
+            record["name"] = stored["name"][:80].strip() or record["name"]
+        group = CATALOG[record["group"]]
+        group["label"] = record["name"]
+        group["instance_id"] = record["id"]
+        group["family"] = record["family"]
+        WORKFLOWS[record["id"]] = copy.deepcopy(record["workflow"])
+    known = {record["id"] for record in records}
+    for stored in saved:
+        if not isinstance(stored, dict):
+            continue
+        identifier = stored.get("id")
+        group_id = stored.get("group")
+        family = stored.get("family")
+        if (identifier in known or not isinstance(identifier, str)
+                or not re.fullmatch(r"[a-z][a-z0-9_]{2,47}", identifier)
+                or family not in WORKFLOWS or not isinstance(group_id, str)
+                or not re.fullmatch(r"variant_[a-f0-9]{10}", group_id)):
+            continue
+        workflow = stored.get("workflow")
+        files = stored.get("files")
+        name = str(stored.get("name") or "")[:80].strip()
+        if not name or not isinstance(workflow, dict) or not isinstance(files, list):
+            continue
+        base_group = CATALOG.get((WORKFLOWS.get(family) or {}).get("group"))
+        if not base_group or not isinstance(workflow.get("group"), str):
+            continue
+        CATALOG[group_id] = {"label": name, "engine": base_group["engine"],
+                             "files": copy.deepcopy(files), "instance_id": identifier,
+                             "family": family, "variant": True}
+        workflow = copy.deepcopy(workflow)
+        workflow["group"] = group_id
+        WORKFLOWS[identifier] = workflow
+        records.append({"id": identifier, "family": family, "name": name,
+                        "group": group_id, "workflow": workflow,
+                        "files": copy.deepcopy(files), "builtin": False})
+        known.add(identifier)
+    settings["model_instances"] = records
+    _validate_catalog()
+
+
+def model_options():
+    settings = _system_settings_read()
+    records = settings.get("model_instances") or _default_model_instances()
+    result = []
+    for record in records:
+        group = CATALOG.get(record.get("group")) or {}
+        workflow = WORKFLOWS.get(record["id"]) or {}
+        primary_name = next((workflow.get(key) for key in
+                             ("diffusion_file", "checkpoint_file", "unet_file", "model_file")
+                             if workflow.get(key)), None)
+        result.append({"id": record["id"], "family": record["family"],
+                       "name": record["name"], "group": record["group"],
+                       "engine": group.get("engine"),
+                       "ready": workflow_ready(record["id"]),
+                       "builtin": bool(record.get("builtin")),
+                       "primary_file": primary_name,
+                       "files": [{"name": file["name"], "dir": file["dir"],
+                                  "link": _file_link(file),
+                                  "default_link": _file_link(
+                                      file.get("_default_source") or file)}
+                                 for file in group.get("files", [])]})
+    return result
+
+
+def model_instance(identifier):
+    if not isinstance(identifier, str):
+        return None
+    for record in _system_settings_read().get("model_instances", []):
+        if record.get("id") == identifier:
+            return copy.deepcopy(record)
+    return None
+
+
+def create_model_instance(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Model bilgileri geçersiz.")
+    family = payload.get("family")
+    base_workflow = copy.deepcopy(_CATALOG_DATA.get("workflows", {}).get(family) or {})
+    base_group_id = base_workflow.get("group")
+    base_group = copy.deepcopy(_CATALOG_DATA.get("groups", {}).get(base_group_id) or {})
+    if (not base_workflow or not base_group or base_group.get("engine") not in ("comfy", "llama")
+            or not base_group.get("enabled", True)
+            or not CATALOG.get(base_group_id, {}).get("enabled", True)):
+        raise ValueError("Bu model türü için yeni kayıt oluşturulamıyor.")
+    name = str(payload.get("name") or "").strip()
+    if not name or len(name) > 80:
+        raise ValueError("Model adı 1-80 karakter olmalı.")
+    links = payload.get("links") or {}
+    if not isinstance(links, dict) or len(links) > 12:
+        raise ValueError("Model dosyası bağlantıları geçersiz.")
+    primary = next((key for key in ("diffusion_file", "checkpoint_file",
+                                    "unet_file", "model_file")
+                    if base_workflow.get(key)), None)
+    primary_file = base_workflow.get(primary) if primary else None
+    primary_link = next((_file_link(file) for file in base_group.get("files", [])
+                         if file.get("name") == primary_file), None)
+    if not isinstance(links.get(primary_file), str) or not links[primary_file].strip():
+        raise ValueError("Yeni model için ana dosyanın bağlantısını gir.")
+    if links[primary_file].strip() == primary_link:
+        raise ValueError("Yeni model kaydında ana dosya bağlantısı farklı olmalı.")
+    suffix = uuid.uuid4().hex[:10]
+    identifier = family + "_" + suffix
+    group_id = "variant_" + suffix
+    group = copy.deepcopy(base_group)
+    workflow = copy.deepcopy(base_workflow)
+    group["label"] = name
+    group["instance_id"] = identifier
+    group["family"] = family
+    group["variant"] = True
+    rewritten = []
+    for file in group.get("files", []):
+        old_name = file["name"]
+        file["_default_source"] = {
+            key: value for key, value in file.items()
+            if key in ("source", "repo", "revision", "path", "url",
+                       "version", "host", "size", "sha256")
+        }
+        requested_link = links.get(old_name)
+        is_primary = bool(primary and workflow.get(primary) == old_name)
+        if requested_link or is_primary:
+            path = Path(old_name)
+            new_name = "%s__%s%s" % (path.stem, suffix, path.suffix)
+            file["name"] = new_name
+            for key, value in list(workflow.items()):
+                if value == old_name:
+                    workflow[key] = new_name
+            if requested_link:
+                source, metadata = _parse_model_link(requested_link)
+                for field in ("source", "repo", "revision", "path", "url",
+                              "version", "host", "size", "sha256"):
+                    file.pop(field, None)
+                file.update(source, **metadata)
+        rewritten.append(file)
+    group["files"] = rewritten
+    workflow["group"] = group_id
+    record = {"id": identifier, "family": family, "name": name,
+              "group": group_id, "workflow": workflow,
+              "files": copy.deepcopy(rewritten), "builtin": False}
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        settings["model_instances"] = settings.get("model_instances") or _default_model_instances()
+        CATALOG[group_id] = group
+        WORKFLOWS[identifier] = workflow
+        settings["model_instances"].append(record)
+        _validate_catalog()
+        _system_settings_write(settings)
+    return system_settings()
+
+
+def rename_model_instance(identifier, name):
+    name = str(name or "").strip()
+    if not name or len(name) > 80:
+        raise ValueError("Model adı 1-80 karakter olmalı.")
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        records = settings.get("model_instances") or _default_model_instances()
+        record = next((item for item in records if item.get("id") == identifier), None)
+        if record is None:
+            raise ValueError("Model bulunamadı.")
+        record["name"] = name
+        record["files"] = copy.deepcopy(CATALOG[record["group"]]["files"])
+        record["workflow"] = copy.deepcopy(WORKFLOWS[identifier])
+        CATALOG[record["group"]]["label"] = name
+        _system_settings_write(settings)
+    return system_settings()
+
+
+def delete_model_instance(identifier):
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        records = settings.get("model_instances") or _default_model_instances()
+        record = next((item for item in records if item.get("id") == identifier), None)
+        if record is None or record.get("builtin"):
+            raise ValueError("Varsayılan model kaydı silinemez.")
+        group = record["group"]
+        if _active == group or group in _queue:
+            raise RuntimeError("Model indirilirken kaydı silinemez.")
+        has_group_files = any((MODELS / file["dir"] / file["name"]).exists()
+                              for file in CATALOG.get(group, {}).get("files", []))
+        if has_group_files or _state.get(group, ("idle",))[0] != "idle":
+            remove(group)
+        records = [item for item in records if item.get("id") != identifier]
+        settings["model_instances"] = records
+        CATALOG.pop(group, None)
+        WORKFLOWS.pop(identifier, None)
+        _system_settings_write(settings)
+    return system_settings()
+
+
 def system_settings():
     """Return universal configuration without account-specific settings."""
     with _system_settings_lock:
@@ -386,7 +601,8 @@ def system_settings():
                          for source in (_CATALOG_DATA.get("groups", {}).get(group, {})
                                         .get("files", []))}
             for file in item.get("files", []):
-                original = originals.get(file["name"], file)
+                original = (originals.get(file["name"])
+                            or file.get("_default_source") or file)
                 files.append({
                     "name": file["name"], "dir": file["dir"],
                     "size": file.get("size"), "optional": bool(file.get("optional")),
@@ -396,19 +612,15 @@ def system_settings():
                 })
             groups.append({"id": group, "label": item["label"], "files": files})
         return {"ayarlar": settings, "gruplar": groups,
-                "lora_durum": lora_status()}
-
-
-def default_llm_for(image_model=None, chat=False):
-    settings = _system_settings_read()
-    defaults = settings.get("llm_defaults") or _CATALOG_DATA.get("llm_defaults") or {}
-    selected = defaults.get("chat", "llm_26b") if chat else (
-        (defaults.get("image") or {}).get(image_model, "llama"))
-    workflow = WORKFLOWS.get(selected) or {}
-    group = workflow.get("group")
-    if group not in CATALOG or not CATALOG[group].get("enabled", True):
-        return "llama"
-    return selected
+                "model_instances": model_options(),
+                "model_families": [
+                    {"id": family, "name": (CATALOG.get(workflow.get("group")) or {}).get("label", family),
+                     "engine": (CATALOG.get(workflow.get("group")) or {}).get("engine")}
+                    for family, workflow in _CATALOG_DATA.get("workflows", {}).items()
+                    if workflow.get("group") in CATALOG
+                    and CATALOG[workflow["group"]].get("enabled", True)
+                    and CATALOG[workflow["group"]].get("engine") in ("comfy", "llama")
+                ], "lora_durum": lora_status()}
 
 
 def _parse_hf_link(link):
@@ -443,27 +655,6 @@ def update_system_settings(payload):
                            for group in order) or len(set(order)) != len(order)):
                 raise ValueError("Varsayılan indirme sırası geçersiz.")
             settings["default_download_order"] = order
-        if "llm_defaults" in payload:
-            defaults = payload["llm_defaults"]
-            if not isinstance(defaults, dict):
-                raise ValueError("Model eşleşmeleri sözlük olmalı.")
-            allowed = {name for name, workflow in WORKFLOWS.items()
-                       if workflow.get("group") in CATALOG
-                       and CATALOG[workflow["group"]].get("engine") == "llama"
-                       and CATALOG[workflow["group"]].get("enabled", True)}
-            image_defaults = defaults.get("image", {})
-            if not isinstance(image_defaults, dict):
-                raise ValueError("Görsel model eşleşmeleri geçersiz.")
-            merged = json.loads(json.dumps(settings.get("llm_defaults") or {}))
-            for key, value in image_defaults.items():
-                if key not in WORKFLOWS or value not in allowed:
-                    raise ValueError("Görsel model eşleşmesi bilinmiyor.")
-                merged.setdefault("image", {})[key] = value
-            chat = defaults.get("chat", merged.get("chat"))
-            if chat not in allowed:
-                raise ValueError("Sohbet model eşleşmesi bilinmiyor.")
-            merged["chat"] = chat
-            settings["llm_defaults"] = merged
         _system_settings_write(settings)
         return system_settings()
 
@@ -483,6 +674,10 @@ def update_model_link(group, name, link, restore=False):
             raise RuntimeError("İndirme kuyruğu çalışırken bağlantı değiştirilemez.")
         settings = _system_settings_read()
         overrides = settings.setdefault("link_overrides", {})
+        target = MODELS / file["dir"] / file["name"]
+        installed_groups = ([candidate for candidate in affected_groups
+                             if _group_files_complete(candidate)]
+                            if _model_verified(target, file) else [])
         if restore:
             for candidate, shared in affected:
                 overrides.pop(candidate + "/" + name, None)
@@ -493,8 +688,9 @@ def update_model_link(group, name, link, restore=False):
                                        if entry.get("group") == candidate), None)
                     source_file = (saved_lora or {}).get("source_file") or {}
                     original_files = [source_file] if source_file else []
-                original = next((item for item in original_files
-                                 if item.get("name") == name), None)
+                original = (next((item for item in original_files
+                                  if item.get("name") == name), None)
+                            or shared.get("_default_source"))
                 if not original:
                     raise ValueError("Varsayılan LoRA bağlantısı bulunamadı.")
                 for field in ("source", "repo", "revision", "path", "url",
@@ -515,15 +711,23 @@ def update_model_link(group, name, link, restore=False):
                         shared[field] = metadata[field]
                     else:
                         shared.pop(field, None)
-        target = MODELS / file["dir"] / file["name"]
-        target.unlink(missing_ok=True)
-        # A partial transfer belongs to the previous URL and must not be resumed
-        # against a different source.
+        if installed_groups:
+            target.unlink(missing_ok=True)
+            _verification_file(target).unlink(missing_ok=True)
+        # A partial transfer belongs to the previous URL and must not be resumed.
         target.with_suffix(".part").unlink(missing_ok=True)
-        _verification_file(target).unlink(missing_ok=True)
         _validate_catalog()
         _system_settings_write(settings)
-        return system_settings()
+    for candidate in installed_groups:
+        try:
+            start(candidate)
+        except RuntimeError:
+            # A shared installed dependency can already be queued by another
+            # affected group; the first queued job will restore that dependency.
+            pass
+    result = system_settings()
+    result["restarted_groups"] = installed_groups
+    return result
 
 
 def _hf_resolve_metadata(source):
@@ -862,7 +1066,12 @@ def prepare_data(data_root, accounts):
         accounts.ilk_admin(os.environ.get("WEBUI_BOOTSTRAP_USER", "user"), password)
         checkpoint()
     settings = _system_settings_read()
+    _model_instances_apply(settings)
     _register_lora_groups(settings)
+    settings["default_download_order"] = [
+        group for group in settings.get("default_download_order", [])
+        if group in CATALOG and CATALOG[group].get("enabled", True)]
+    _system_settings_write(settings)
     _apply_saved_links(settings)
     _ready = True
     if (settings.get("auto_download")
@@ -988,19 +1197,6 @@ def workflow_enabled(name):
 def workflow_ready(name):
     group = WORKFLOWS.get(name, {}).get("group")
     return workflow_enabled(name) and _engine_ready(group)
-
-
-LLM_PROFILE_SIZE_ORDER = ("llm_26b", "llm_12b", "llama")
-
-
-def llm_profile_fallback(preferred, ready_check=None):
-    """Choose the requested LLM or the next smaller ready profile."""
-    if preferred not in LLM_PROFILE_SIZE_ORDER:
-        raise ValueError("Bilinmeyen sohbet modeli.")
-    ready = ready_check or workflow_ready
-    start = LLM_PROFILE_SIZE_ORDER.index(preferred)
-    return next((name for name in LLM_PROFILE_SIZE_ORDER[start:]
-                 if ready(name)), None)
 
 
 def _bagimlilik_sirasi(group, gorulen=None):

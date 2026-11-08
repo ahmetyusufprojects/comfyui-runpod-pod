@@ -58,6 +58,7 @@
           <div class="section-title"><div><p class="eyebrow">UYGULAMA SÜRÜMÜ</p><h2>Uygulamayı güncelle</h2></div></div>
           <p class="muted">Başarılı son sürüm indirilir. İşler tamamlanmış olmalıdır. Açık kasalar mühürlenir ve uygulama kısa süreliğine yeniden açılır; indirilen modeller korunur. Temel imaj değişiklikleri yeni Pod gerektirir.</p>
           <div class="actions"><button id="updateApp" type="button">Güncellemeyi başlat</button><span id="updateAppStatus" class="muted" role="status"></span></div>
+          <div class="actions restart-actions"><button id="restartApp" class="quiet" type="button">Uygulamayı yeniden başlat</button><span id="restartAppStatus" class="muted" role="status">İndirilen modeller korunur.</span></div>
         </section>
         <section class="panel settings-card">
           <div class="section-title"><div><p class="eyebrow">YENİ POD BAŞLANGICI</p><h2>Otomatik indirme ve sıra</h2></div></div>
@@ -67,14 +68,19 @@
           <div class="actions"><button id="saveSystemSettings" type="button">Genel ayarları kaydet</button><span id="settingsStatus" class="muted" role="status"></span></div>
         </section>
         <section class="panel settings-card">
-          <div class="section-title"><div><p class="eyebrow">MODEL SEÇİMİ</p><h2>Varsayılan sohbet modeli</h2></div></div>
-          <p class="muted">Her görsel modeliyle hangi sohbet modelinin birlikte kullanılacağını belirle. Bellek yetmediğinde WebUI uygun şekilde geçiş yapar.</p>
-          <div id="llmDefaults" class="llm-defaults"></div>
-          <div class="actions"><button id="saveLlmDefaults" type="button">Model eşleşmelerini kaydet</button><span id="llmDefaultsStatus" class="muted" role="status"></span></div>
+          <div class="section-title"><div><p class="eyebrow">MODEL LİSTESİ</p><h2>Model ekle veya adını değiştir</h2></div></div>
+          <p class="muted">Var olan bir model türünden yeni kayıt oluştur. Her kaydın adı ve dosya bağlantıları ayrıdır; indirme otomatik başlamaz.</p>
+          <div id="modelInstances" class="model-instances"></div>
+          <form id="modelForm" class="model-form">
+            <label>Model türü<select id="modelFamily"></select></label>
+            <label>Görünen ad<input id="modelName" maxlength="80" required placeholder="Örn. Krea · farklı sürüm"></label>
+            <div id="modelVariantFiles" class="model-variant-files"></div>
+            <button type="submit">Model kaydı ekle</button><span id="modelFormStatus" class="muted" role="status"></span>
+          </form>
         </section>
         <section class="panel settings-card">
           <div class="section-title"><div><p class="eyebrow">DOSYA BAĞLANTILARI</p><h2>Model indirme bağlantıları</h2></div></div>
-          <p class="muted">Alternatif ağırlık dosyalarını denemek için Hugging Face veya Civitai bağlantısını değiştir. Hedef klasör ve workflow aynı kalır. Kaydetmek geçici disk üzerindeki mevcut modeli siler; yeni sürüm sonraki indirmede alınır.</p>
+          <p class="muted">Alternatif dosya bağlantısı kaydedildiğinde kurulu dosya yenilenir. Dosya henüz kurulu değilse yalnızca bağlantı güncellenir.</p>
           <div id="modelLinks" class="model-links"></div>
         </section>
         <section class="panel settings-card">

@@ -41,10 +41,8 @@ model_selector = re.search(
     pathlib.Path("/opt/webui_flux2/index.html").read_text(encoding="utf-8"),
     re.DOTALL,
 )
-assert model_selector and re.search(
-    r'<option value="flux3" disabled>Flux 3 Klein · şimdilik kapalı</option>',
-    model_selector.group(1),
-)
+assert model_selector and not re.search(
+    r'<option[^>]*value="flux3"', model_selector.group(1))
 saved_ready = pod_setup._ready
 pod_setup._ready = True
 try:
@@ -478,12 +476,29 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         pod_setup.update_system_settings({
             "auto_download": True,
             "default_download_order": ["zimage"],
-            "llm_defaults": {"image": {"flux3": "llm_12b"}, "chat": "llm_26b"},
         })
         saved = pod_setup._system_settings_read()
         assert saved["auto_download"] is True
         assert saved["default_download_order"] == ["zimage"]
-        assert saved["llm_defaults"]["image"]["flux3"] == "llm_12b"
+        assert saved["model_instances"] == []
+        assert "llm_defaults" not in saved
+        assert pod_setup.model_options()
+        primary_file = pod_setup.WORKFLOWS["z_image"]["diffusion_file"]
+        added = pod_setup.create_model_instance({
+            "family": "z_image", "name": "Smoke · alternatif",
+            "links": {primary_file:
+                "https://huggingface.co/fixture/replacement/resolve/main/weights.safetensors"},
+        })
+        variant = next(item for item in added["model_instances"]
+                       if item["name"] == "Smoke · alternatif")
+        assert variant["family"] == "z_image" and not variant["ready"]
+        assert variant["id"] != "z_image" and variant["group"].startswith("variant_")
+        renamed = pod_setup.rename_model_instance(variant["id"], "Smoke · yeniden adlandırıldı")
+        assert any(item["id"] == variant["id"] and
+                   item["name"] == "Smoke · yeniden adlandırıldı"
+                   for item in renamed["model_instances"])
+        deleted = pod_setup.delete_model_instance(variant["id"])
+        assert all(item["id"] != variant["id"] for item in deleted["model_instances"])
         model_file = pod_setup.CATALOG["zimage"]["files"][0]
         pod_setup._parse_model_link = lambda value: (
             {"source": "hf", "repo": "fixture/replacement", "revision": "deadbeef",
@@ -509,7 +524,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         # catalog entry, even when the link changed after startup.
         import hashlib
         import llm
-        workflow = pod_setup.WORKFLOWS["llama"]
+        workflow = pod_setup.WORKFLOWS["llm_26b"]
         replacement = next(f for f in pod_setup.CATALOG[workflow["group"]]["files"]
                            if f["name"] == workflow["model_file"])
         before = dict(replacement)
@@ -522,9 +537,9 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
             with patch.dict(os.environ, {"COMFYUI_ROOT": str(scratch / "llm-test")}), \
                     patch.object(pod_setup, "_ready", True), \
                     patch.object(llm, "MULTIMODAL_ENABLED", False):
-                llm.model_ayarla("llama")
+                llm.model_ayarla("llm_26b")
                 llm.model_dogrula()
-                assert llm._RUNPOD_PROFILES["llama"]["model_size"] == model_path.stat().st_size
+                assert llm._RUNPOD_PROFILES["llm_26b"]["model_size"] == model_path.stat().st_size
         finally:
             replacement.clear()
             replacement.update(before)
@@ -594,7 +609,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
                           side_effect=lambda group: started_on_boot.append(group)):
             pod_setup.prepare_data(pod_setup.ROOT / "auto-download-user-data",
                                    InstalledSyntheticAccount())
-        assert started_on_boot == ["zimage", "llama", "llm_12b", "llm_26b"], started_on_boot
+        assert started_on_boot == ["zimage", "llm_26b"], started_on_boot
     finally:
         if pod_setup._data_lock is not None and pod_setup._data_lock is not saved_data_lock:
             pod_setup._data_lock.close()

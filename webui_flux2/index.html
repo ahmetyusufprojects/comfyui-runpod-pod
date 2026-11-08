@@ -143,10 +143,8 @@
 <div id="runpodModelWrap" class="satir" hidden>
   <div><label for="runpodImageModel">Görsel üretim modeli</label>
     <select id="runpodImageModel">
-      <option value="auto">Otomatik · önerilen</option>
       <option value="z_image">Z-Image · Moody Pro v13.2</option>
       <option value="flux2">Flux 2 Klein</option>
-      <option value="flux3" disabled>Flux 3 Klein · şimdilik kapalı</option>
       <option value="krea2">Krea 2 · Moody v7SE</option>
       <option value="illustrious">Illustrious XL</option>
     </select>
@@ -214,11 +212,12 @@
 </div>
 <div id="uretimDestekPanel" class="uretim-destek-panel" hidden>
   <label class="uretim-destek-etiket"><input id="continuousGeneration" type="checkbox"> Durdurulana kadar kesintisiz üret</label>
-  <span class="kucuk">Her görsel tamamlanınca yeni bir iş başlar. Seed rastgele (-1) kullanılır; prompt desteği veya çeviri yalnızca ilk işte çalışır.</span>
   <label class="uretim-destek-etiket"><input id="uretimPromptDestek" type="checkbox"> Promptu üretmeden önce Prompt Stüdyosu ile iyileştir</label>
-  <span class="kucuk">Referans varsa yalnızca istenen fotoğraf düzenlemelerini yazar; yoksa fikir promptu oluşturur. Kullanıcı metni kutuda korunur, AI promptu yalnızca üretimde kullanılır.</span>
+  <label class="uretim-llm-secim"><span>LLM modeli</span><select id="uretimLlmModel"><option value="llm_26b">Gemma 4 26B A4B</option></select></label>
+  <label class="uretim-destek-etiket uretim-prompt-tekrari" id="uretimPromptDestekTekrarWrap" hidden>
+    <input id="uretimPromptDestekTekrar" type="checkbox"> Her görsel için promptu yeniden iyileştir
+  </label>
   <label class="uretim-destek-etiket"><input id="uretimPromptCeviri" type="checkbox"> Türkçe promptu görsel üretimi için İngilizceye çevir</label>
-  <span class="kucuk">Yerel OPUS-MT modeli en fazla 24.000 karakter ve 8.192 alt token işler. Türkçe metin kutusu korunur; yalnızca İngilizce çeviri görsel modeline gönderilir. Prompt Stüdyosu seçeneğiyle aynı anda kullanılamaz.</span>
   <div class="kucuk" id="uretimPromptCeviriBilgi" role="status" aria-live="polite"></div>
 </div>
 <details id="uretimNegatifPanel" class="uretim-negatif">
@@ -424,9 +423,9 @@
     <section class="ayar-kart" id="settingLLM">
       <div class="ayar-kart-baslik"><span class="ayar-ikon yapayzeka" aria-hidden="true">✳</span><div><h3>Yapay zekâ bağlamı</h3><p>Bağlam büyüdükçe uzun konuşmalar daha iyi takip edilir; bellek kullanımı da artar.</p></div></div>
       <div id="runpodLlmSettings" class="ayar-alan" hidden>
-        <label for="llmModel">Kullanılacak sohbet modeli</label>
-        <p class="ayar-aciklama">Otomatik seçim, görsel modeline göre önerilen Gemma sürümünü; yalnız sohbet için 26B modelini seçer. El ile seçilen model kurulu olmalıdır.</p>
-        <select id="llmModel"><option value="auto">Otomatik · önerilen eşleşme</option><option value="llama">Gemma 4 E4B</option><option value="llm_12b">Gemma 4 12B</option><option value="llm_26b">Gemma 4 26B A4B</option></select>
+        <label for="llmModel">Kullanılacak LLM modeli</label>
+        <p class="ayar-aciklama">Bu tercih varsayılan sohbet modelidir. Sohbet, Prompt Stüdyosu ve üretim öncesi yardımda modeli ayrıca seçebilirsin.</p>
+        <select id="llmModel"><option value="llm_26b">Gemma 4 26B A4B</option></select>
           <div class="ayar-form-grid uc">
           <div class="ayar-alan"><label for="llmGpuLayers">GPU’da çalışacak katman</label><select id="llmGpuLayers"><option value="all">Tümü · hızlı</option><option value="48">48 · GPU/CPU dengeli</option><option value="32">32 · daha az VRAM</option><option value="16">16 · daha az VRAM</option><option value="0">0 · CPU ağırlıklı</option></select><span class="ayar-yardim">GPU’ya sığmayan katmanlar CPU’da çalışır; varsayılan tüm katmanları GPU’ya alır.</span></div>
           <div class="ayar-alan"><label for="llmThreads">CPU iş parçacığı</label><input id="llmThreads" type="number" min="1" max="64" step="1" value="8"></div>
@@ -540,6 +539,7 @@
         aria-expanded="false" aria-controls="sohbetYanKenar">☰ Sohbetler</button>
     </div>
       <div class="sohbet-ust-baslik"><strong>Sohbet stüdyosu</strong><small>Metin ve görselle çalış</small></div>
+    <label class="sohbet-model-secim"><span>LLM</span><select id="sohbetLlmModel" aria-label="Sohbet modeli"><option value="llm_26b">Gemma 4 26B A4B</option></select></label>
     <button id="sohbetBaglam" class="sohbet-baglam" type="button" hidden
       aria-label="Bağlam kullanımı ayrıntısı" title="Bağlam kullanımı">
       <svg viewBox="0 0 36 36" aria-hidden="true">
@@ -653,12 +653,15 @@
 <div id="psAyarPanel" class="ps-ayar-panel" hidden>
 <div class="satir">
 <div><label>Yaratıcılık (0.2-1.2)</label><input id="psYaraticilik" type="number" value="0.7" min="0.2" max="1.2" step="0.1"></div>
-<div><label>Uzunluk</label><select id="psUzunluk"><option value="kisa">Kısa</option><option value="orta" selected>Orta</option><option value="uzun">Uzun</option></select></div>
+<div><label for="psTekrarSayisi">Prompt sayısı</label><input id="psTekrarSayisi" type="number" min="1" max="10" step="1" value="1"></div>
 <div><label>Çıktı dili</label><select id="psDil"><option value="en" selected>İngilizce</option><option value="tr">Türkçe</option></select></div>
+<div><label for="psLlmModel">LLM</label><select id="psLlmModel"><option value="llm_26b">Gemma 4 26B A4B</option></select></div>
 </div>
+<div class="kucuk">Birden fazla prompt seçersen sırayla kuyruğa eklenir; her biri farklı bir alternatif üretir.</div>
 <label class="ayar-toggle ps-bbox-toggle" id="psFlux3BboxWrap" hidden><input id="psFlux3BboxMode" type="checkbox"><span><b>Flux bbox yerleşim tablosu</b><small>Global açıklamanın ardından öğeleri ve kutularını tek satırlık JSON dizisi olarak ekler. Uygulamanın dış JSON alanları değişmez.</small></span></label>
 </div>
 <div class="kucuk" id="psDurum">Model hazır değilse ilk istekte yüklenir.</div>
+<div id="psBatchResults" class="ps-batch-results" aria-live="polite"></div>
 <div class="kucuk" id="psCanli"></div>
 <div class="ps-cikti-kart"><label>Prompt (İngilizce)</label><textarea id="psPozitif" readonly></textarea>
   <div class="satir ps-cikti-eylem"><div><button id="psHizliUret" class="kucukbtn" disabled>Hızlı üret</button></div><div><button id="psUygula" class="hayalet kucukbtn" disabled>Prompt kutusuna ekle</button></div><div><button id="psKopyala" class="hayalet kucukbtn" disabled>Kopyala</button></div><div><button id="psKaydet" class="hayalet kucukbtn" disabled>Kaydet</button></div></div>
