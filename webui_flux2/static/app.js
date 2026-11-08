@@ -108,6 +108,7 @@ let otomatikSonModel = null;
 function uretimModGuncelle(){
   const modelSelector=$('runpodImageModel');
   if(RUNPOD_WEBUI && modelSelector && modelSelector.value==='flux3') modelSelector.value='auto';
+  const runpodModel=runpodModelSecili();
   const model = otomatikModel();
   const modelDegisti = !!otomatikSonModel && otomatikSonModel !== model;
   if(modelDegisti){
