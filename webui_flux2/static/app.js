@@ -89,7 +89,8 @@ async function runpodLoraYukle(){
 }
 function runpodModelSecili(){
   const secim = $('runpodImageModel');
-  if(!RUNPOD_WEBUI || !secim || secim.value === 'auto') return null;
+  if(!RUNPOD_WEBUI || !secim || secim.value === 'auto' ||
+      secim.selectedOptions[0]?.disabled) return null;
   return secim.value;
 }
 function otomatikModel(){
@@ -2807,7 +2808,8 @@ function formUygulaKayitli(f){
   const koy = (id, v) => { if(v !== undefined && v !== null && $(id)) $(id).value = v; };
   koy('prompt', f.prompt); koy('negatif', f.negatif);
   if($('runpodImageModel') && typeof f.image_model === 'string' &&
-      Array.from($('runpodImageModel').options).some(option => option.value === f.image_model))
+      Array.from($('runpodImageModel').options).some(option =>
+        option.value === f.image_model && !option.disabled))
     $('runpodImageModel').value = f.image_model;
   if($('flux3BboxMode') && typeof f.flux3_bbox_mode === 'boolean')
     $('flux3BboxMode').checked = f.flux3_bbox_mode;

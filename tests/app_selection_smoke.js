@@ -25,13 +25,12 @@ assert.equal(animaSelected({runpod: false, checked: true}), true,
 assert.equal(animaSelected({runpod: false, checked: true, video: true}), false);
 assert.equal(animaSelected({runpod: false, checked: true, references: 1}), false);
 
-assert.doesNotMatch(source,
-  /value\s*===\s*['"]flux3['"]\)\s*modelSelector\.value\s*=\s*['"]auto['"]/,
-  'RunPod must preserve an explicit Flux 3 model choice');
+assert.match(source, /secim\.selectedOptions\[0\]\?\.disabled/,
+  'temporarily disabled models must not be selected from saved preferences');
 assert.match(source, /flux3:\s*\{steps:\s*16,\s*sampler:\s*'euler'\}/,
   'Flux 3 remains on its 16-step distilled profile');
 const mainHtml = fs.readFileSync('webui_flux2/index.html', 'utf8');
 const flux3Option = mainHtml.match(/<option value="flux3"[^>]*>[^<]*<\/option>/);
-assert.ok(flux3Option && !/\bdisabled\b/.test(flux3Option[0]),
-  'Flux 3 is available in RunPod image settings');
-console.log('RunPod model selection keeps Flux 3 and ignores retired Anima preferences');
+assert.ok(flux3Option && /\bdisabled\b/.test(flux3Option[0]),
+  'Flux 3 remains unavailable until HF access is resolved');
+console.log('RunPod model selection defers Flux 3 and ignores retired Anima preferences');

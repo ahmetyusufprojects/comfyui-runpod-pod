@@ -16,26 +16,26 @@ from unittest.mock import patch
 sys.path.insert(0, "/opt/webui_flux2")
 import pod_setup
 
-assert pod_setup.workflow_enabled("flux3")
+assert not pod_setup.workflow_enabled("flux3")
 assert not pod_setup.workflow_ready("flux3")
-assert "flux3" in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
+assert "flux3" not in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
 model_selector = re.search(
     r'<select id="runpodImageModel">(.*?)</select>',
     pathlib.Path("/opt/webui_flux2/index.html").read_text(encoding="utf-8"),
     re.DOTALL,
 )
 assert model_selector and re.search(
-    r'<option value="flux3">Flux 3 Klein · 16 adım</option>',
+    r'<option value="flux3" disabled>Flux 3 Klein · şimdilik kapalı</option>',
     model_selector.group(1),
 )
 saved_ready = pod_setup._ready
-pod_setup._ready = False
+pod_setup._ready = True
 try:
     pod_setup.start("flux3")
-except RuntimeError as exc:
-    assert "hazırlığı tamamlanmadı" in str(exc)
+except ValueError as exc:
+    assert "kapalı" in str(exc)
 else:
-    raise AssertionError("Flux 3 should wait for the ordinary ComfyUI setup path")
+    raise AssertionError("Flux 3 must remain disabled until HF access is resolved")
 finally:
     pod_setup._ready = saved_ready
 
