@@ -511,8 +511,9 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
                 },
                 "exclude_files": [mtp_file],
             })
-        qwen_record = next(item for item in qwen["model_instances"]
+        qwen_option = next(item for item in qwen["model_instances"]
                            if item["name"] == "Qwen · görüntülü")
+        qwen_record = pod_setup.model_instance(qwen_option["id"])
         assert "mtp_file" not in qwen_record["workflow"]
         assert qwen_record["workflow"]["mmproj_file"] != mmproj_file
         assert mtp_file not in {item["name"] for item in qwen_record["files"]}
@@ -522,8 +523,9 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
                 "links": {main_file: "https://huggingface.co/fixture/text/resolve/main/model.gguf"},
                 "exclude_files": [mmproj_file, mtp_file],
             })
-        text_only_record = next(item for item in text_only["model_instances"]
+        text_only_option = next(item for item in text_only["model_instances"]
                                 if item["name"] == "Yalnız metin")
+        text_only_record = pod_setup.model_instance(text_only_option["id"])
         assert "mmproj_file" not in text_only_record["workflow"]
         assert "mtp_file" not in text_only_record["workflow"]
         assert len(text_only_record["files"]) == 1
