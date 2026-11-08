@@ -59,7 +59,7 @@ jobs:
           env = dict(os.environ, WEBUI_BOOTSTRAP_PASSWORD=secrets.token_urlsafe(32),
                      POD_FLEX_PREFIX="gallery-check")
           subprocess.run(["docker", "run", "-d", "--name", "gallery-check",
-                          "--tmpfs", "/workspace", "-e", "WEBUI_BOOTSTRAP_PASSWORD",
+                          "--tmpfs", "/workspace", "--tmpfs", "/opt/runtime", "-e", "WEBUI_BOOTSTRAP_PASSWORD",
                           "-e", "POD_FLEX_PREFIX=gallery-check",
                           "-p", "127.0.0.1:8189:8189", "-p", "127.0.0.1:8192:8192", "webui-gallery"],
                          check=True, env=env, stdout=subprocess.DEVNULL)

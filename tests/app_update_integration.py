@@ -23,6 +23,7 @@ with tarfile.open(fileobj=archive, mode='w:gz') as tar:
     tar.add(web, arcname='repo/webui_flux2', filter=lambda m: None if '__pycache__' in m.name else m)
     tar.add('/opt/pod/models.json', arcname='repo/docker/models.json')
     tar.add('/opt/pod/base.Dockerfile', arcname='repo/docker/Dockerfile.gallery')
+    tar.add('/opt/pod/supervisor.py', arcname='repo/docker/supervisor.py')
 app_update._fetch = lambda url, limit: (json.dumps({'workflow_runs': [{'head_sha': 'a' * 40}]}).encode()
                                        if 'api.github.com' in url else archive.getvalue())
 assert app_update.prepare() == 'a' * 40

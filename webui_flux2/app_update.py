@@ -40,12 +40,13 @@ def prepare():
             if len(parts) < 2 or not member.isfile():
                 continue
             name = '/'.join(parts[1:])
-            if name == 'docker/Dockerfile.gallery' or name == 'docker/models.json' or name.startswith('webui_flux2/'):
+            if name in ('docker/Dockerfile.gallery', 'docker/models.json', 'docker/supervisor.py') or name.startswith('webui_flux2/'):
                 if '..' in parts or member.size > 4 * 1024 * 1024:
                     raise RuntimeError('Güncelleme paketinde geçersiz dosya var.')
                 members[name] = tar.extractfile(member).read()
     baseline = Path('/opt/pod/base.Dockerfile').read_bytes()
-    if members.get('docker/Dockerfile.gallery') != baseline:
+    if (members.get('docker/Dockerfile.gallery') != baseline or
+            members.get('docker/supervisor.py') != Path('/opt/pod/supervisor.py').read_bytes()):
         raise RuntimeError('Bu sürüm temel imaj değişikliği içeriyor; yeni Pod açılması gerekiyor.')
     required = ['arsiv.py', 'auth.py', 'comfy_client.py', 'flex_store.py', 'image_graphs.py',
                 'image_utils.py', 'kasa.py', 'llm.py', 'pod_setup.py', 'app_update.py',
