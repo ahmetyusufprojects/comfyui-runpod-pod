@@ -4056,7 +4056,7 @@ uretimGecmisGenisliginiAyarla();
 
 function uretimArayuzunuKur(){
   const advanced = $('uretimAyarIcerik');
-  ['kartRef','videoKart','kartCoz','kartOrn','uretimDestekPanel'].forEach(id => {
+  ['runpodModelWrap','kartRef','videoKart','kartCoz','kartOrn','uretimDestekPanel'].forEach(id => {
     const el = $(id); if(el) advanced.appendChild(el);
   });
   $('uretimDestekPanel').hidden = false;
