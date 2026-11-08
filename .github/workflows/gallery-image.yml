@@ -24,12 +24,12 @@ jobs:
       - name: Check Python and setup UI syntax
         run: |
           set -eu
-          python3 -m py_compile webui_flux2/*.py
+          python3 -m py_compile webui_flux2/*.py pod-launch.py
           node --check webui_flux2/static/app.js
           node --check webui_flux2/static/setup.js
           node tests/app_selection_smoke.js
           python3 - <<'PY'
-          import json
+          import json, runpy
           from pathlib import Path
           catalog = json.loads(Path('docker/models.json').read_text())
           assert catalog['schema'] == 2
@@ -44,6 +44,11 @@ jobs:
           assert catalog['llm_default'] == 'llm_26b'
           assert 'llama' not in catalog['workflows']
           assert 'llm_12b' not in catalog['workflows']
+          assert runpy.run_path('pod-launch.py')['current_image']() == \
+              'ghcr.io/ahmetyusufprojects/comfyui-runpod-pod:latest'
+          publish = Path('.github/workflows/gallery-image.yml').read_text()
+          assert 'current_image="${repository}:latest"' in publish
+          assert 'versioned_image="${repository}:gallery-${GITHUB_SHA}"' in publish
           print('model catalog checks passed')
           PY
       - name: Build Linux image
@@ -104,7 +109,11 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:gallery-${GITHUB_SHA}"
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          versioned_image="${repository}:gallery-${GITHUB_SHA}"
+          current_image="${repository}:latest"
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker tag webui-gallery "$image"
-          docker push "$image"
+          docker tag webui-gallery "$versioned_image"
+          docker tag webui-gallery "$current_image"
+          docker push "$versioned_image"
+          docker push "$current_image"

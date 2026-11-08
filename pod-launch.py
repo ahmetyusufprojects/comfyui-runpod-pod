@@ -44,12 +44,9 @@ def cli_json(args):
 
 
 def current_image():
-    runs = cli_json(["gh", "run", "list", "--repo", REPO, "--branch", "runpod/gallery-first",
-                     "--status", "success", "--limit", "10", "--json", "headSha,workflowName"])
-    run = next((item for item in runs if item["workflowName"] == "RunPod gallery image"), None)
-    if run is None:
-        raise RuntimeError("Başarılı WebUI imajı bulunamadı.")
-    return f"ghcr.io/{REPO}:gallery-{run['headSha']}"
+    # The registry's latest tag advances only after the tested GitHub build
+    # succeeds. SHA-tagged images remain available for rollback.
+    return f"ghcr.io/{REPO}:latest"
 
 
 def runpod_key():
