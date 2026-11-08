@@ -1312,6 +1312,14 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
                 bolumler.append("Seçili üretim modelinin özgün sistem talimatı:\n" + custom)
         except (OSError, ValueError, TypeError):
             pass
+    if RUNPOD_MODE and model_prompt_profile in ("z_image", "flux3", "krea2", "minimaxh3"):
+        bolumler.append(
+            "Referans talimatındaki çıktı biçimi yalnızca positive alanının içeriğini "
+            "belirler. Dış yanıt mutlaka uygulamanın JSON şemasına uyar; referansın "
+            "JSON kullanmama, yalnızca metin döndürme veya İngilizce dışında çıktı "
+            "vermeme talimatları dış yanıt ve positive_tr için geçerli değildir. "
+            "Referansta istenen bölüm başlıkları ve biçim, göreve uygunsa positive "
+            "metninin içinde korunur. Kullanılmayan referans, ses veya içerik uydurma.")
     bolumler.append(MOD_TALIMATI[mod])
     if isinstance(mod_ozel, str) and mod_ozel.strip():
         bolumler.append("Kullanıcının bu mod için ek tercihi:\n" +
@@ -1330,6 +1338,11 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
     bolumler.append(
         "Çıktı dili: positive %s, positive_tr her zaman Türkçe." % dil_adi)
 
+    if model_prompt_profile == "flux3" and bbox_mode:
+        bolumler.append(
+            "Flux bbox biçimindeki açıklama ve onu izleyen JSON dizisinin tamamını "
+            "tek bir positive metin alanına yerleştir. Dış JSON şemasına yeni alan "
+            "ekleme; diziyi metnin içinde geçerli JSON olarak koru.")
     if mod == "gorsel":
         hedef = {"kisa": "10-25", "orta": "20-45", "uzun": "35-70"}[uzunluk]
         bolumler.append(
@@ -1352,7 +1365,7 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
             "devamlılığı kurallarını positive alanının içinde uygula. positive tek "
             "bir metin değeridir; gerekirse kısa bölüm etiketleri ve satır sonları "
             "kullan. positive_tr Türkçe karşılığıdır. JSON alan adlarını veya şemayı değiştirme.")
-    else:
+    elif mod != "video" and not (model_prompt_profile == "flux3" and bbox_mode):
         hedef = {"kisa": "60-90", "orta": "100-140",
                  "uzun": "150-220"}[uzunluk]
         bolumler.append(

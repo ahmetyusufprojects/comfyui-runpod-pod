@@ -3076,10 +3076,11 @@ function psOtomatikMod(){
   return n === 2 ? 'birlestir' : (n === 1 ? 'gorsel' : 'fikir');
 }
 function psModGuncelle(){
-  const m = psOtomatikMod();
+  let m = psOtomatikMod();
+  if(RUNPOD_WEBUI && videoMu() && m !== 'ceviri') m = 'video';
   const bilgi = $('psModBilgi');
   if(bilgi){
-    bilgi.textContent = m === 'birlestir' ? 'İki referans · birleştirme promptu üretilir' :
+    bilgi.textContent = m === 'video' ? 'Video modeli için prompt üretilir' : m === 'birlestir' ? 'İki referans · birleştirme promptu üretilir' :
       (m === 'gorsel' ? 'Bir referans · düzenleme promptu üretilir' :
         'Referans yok · fikirden prompt üretilir');
   }
@@ -3408,23 +3409,32 @@ async function llmIsleriniBagla(){
 }
 $('psUret').onclick = async () => {
   if(psSuruyor) return;
-  const m = psOtomatikMod();
+  let m = psOtomatikMod();
+  if(RUNPOD_WEBUI && videoMu() && m !== 'ceviri') m = 'video';
   if((m === 'gorsel') && !psB64_1){ $('psDurum').textContent = 'HATA: 1. görseli seç.'; return; }
   if((m === 'gorsel') && !$('psMetin').value.trim()){ $('psDurum').textContent = 'HATA: görselde ne değişiklik yapmak istediğinizi yazın.'; return; }
   if((m === 'birlestir') && (!psB64_1 || !psB64_2)){ $('psDurum').textContent = 'HATA: iki görseli de seç.'; return; }
   if((m === 'fikir' || m === 'ceviri') && !$('psMetin').value.trim()){ $('psDurum').textContent = 'HATA: metin yaz.'; return; }
+  if(m === 'video' && !$('psMetin').value.trim()){ $('psDurum').textContent = 'HATA: video isteğini yaz.'; return; }
    psSuruyor = true; $('psUret').disabled = true; $('psDurdur').disabled = true;
    psCanliCiz(null);
    $('psDurum').textContent = 'LLM kuyruğuna ekleniyor...';
   const gorseller = [];
   if(psB64_1) gorseller.push({mime: psMime1 || 'image/jpeg', veri: psB64_1});
   if(psB64_2) gorseller.push({mime: psMime2 || 'image/jpeg', veri: psB64_2});
+  let profile = null;
+  if(RUNPOD_WEBUI && m !== 'ceviri'){
+    const selected = runpodModelSecili();
+    profile = m === 'video' ? 'minimaxh3' :
+      ((gorseller.length && (!selected || selected === 'krea2' || selected === 'illustrious')) ? null : (selected || 'z_image'));
+  }
   try{
     const r = await fetch('/api/prompt-uret', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({mod: m, metin: $('psMetin').value, dil: $('psDil').value,
         yaraticilik: +$('psYaraticilik').value, uzunluk: $('psUzunluk').value,
-        gorseller})});
+        gorseller, model_prompt_profile: profile,
+        bbox_mode: profile === 'flux3' && !!$('flux3BboxMode')?.checked})});
     const j = await r.json().catch(() => ({}));
      if(r.ok && j.is_id){
        psAktifIs = j.is_id;
