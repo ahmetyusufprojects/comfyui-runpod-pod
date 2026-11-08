@@ -6,6 +6,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import threading
@@ -14,6 +15,25 @@ from unittest.mock import patch
 
 sys.path.insert(0, "/opt/webui_flux2")
 import pod_setup
+
+assert not pod_setup.workflow_enabled("flux3")
+assert not pod_setup.workflow_ready("flux3")
+assert "flux3" not in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
+model_selector = re.search(
+    r'<select id="runpodImageModel">(.*?)</select>',
+    pathlib.Path("/opt/webui_flux2/index.html").read_text(encoding="utf-8"),
+    re.DOTALL,
+)
+assert model_selector and re.search(
+    r'<option value="flux3" disabled>Flux 3 Klein · geçici olarak devre dışı</option>',
+    model_selector.group(1),
+)
+try:
+    pod_setup.start("flux3")
+except ValueError:
+    pass
+else:
+    raise AssertionError("Temporarily disabled Flux 3 group was accepted for install")
 
 
 with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:

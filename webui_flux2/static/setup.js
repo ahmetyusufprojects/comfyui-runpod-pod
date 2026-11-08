@@ -114,7 +114,10 @@ function drawSystemSettings(data) {
   const llm=$('llmDefaults'); llm.replaceChildren();
   const models=[['llama','Gemma 4 E4B'],['llm_12b','Gemma 4 12B'],['llm_26b','Gemma 4 26B A4B']];
   const modelsPresent=new Set(groups.filter(group=>group.id==='llama'||group.id==='llm_12b'||group.id==='llm_26b').map(group=>group.id));
-  const images=[['z_image','Z-Image · Moody Pro'],['flux2','Flux 2 Klein'],['flux3','Flux 3 Klein'],['krea2','Krea 2'],['illustrious','Illustrious']];
+  const imageGroups={z_image:'zimage',flux2:'flux',flux3:'flux3',krea2:'krea2',illustrious:'illustrious'};
+  const availableGroups=new Set(groups.map(group=>group.id));
+  const images=[['z_image','Z-Image · Moody Pro'],['flux2','Flux 2 Klein'],['flux3','Flux 3 Klein'],['krea2','Krea 2'],['illustrious','Illustrious']]
+    .filter(([id])=>availableGroups.has(imageGroups[id]));
   const makeSelect=(caption,key,value)=>{
     const row=document.createElement('label'); row.className='llm-default-row';
     const name=document.createElement('span'); name.textContent=caption;

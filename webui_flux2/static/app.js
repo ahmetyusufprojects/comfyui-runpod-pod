@@ -106,6 +106,8 @@ function otomatikModel(){
 function otomatikWorkflow(){ return videoMu() ? 'video' : (refSayisi() >= 2 ? 'cift' : 'tek'); }
 let otomatikSonModel = null;
 function uretimModGuncelle(){
+  const modelSelector=$('runpodImageModel');
+  if(RUNPOD_WEBUI && modelSelector && modelSelector.value==='flux3') modelSelector.value='auto';
   const model = otomatikModel();
   const modelDegisti = !!otomatikSonModel && otomatikSonModel !== model;
   if(modelDegisti){
@@ -767,7 +769,7 @@ if(wfEl) wfEl.onchange = e => {
   $('uretimVideoMod').classList.toggle('aktif', video);
   $('wfAciklama').textContent = video ?
     'Referans fotoğraftan sessiz video üretir (en az 1 referans). Ölçü en uzun kenara göre alınır.' :
-    (RUNPOD_WEBUI ? 'Modeli aşağıdan seçebilirsin. Referanslı düzenlemede Flux 2 veya Flux 3 kullan.' :
+    (RUNPOD_WEBUI ? 'Modeli aşağıdan seçebilirsin. Referanslı düzenlemede Flux 2 kullan.' :
      'Model otomatik seçilir: referans varsa Flux2 Klein düzenleme; yoksa Z-Image Turbo veya Anima modeli.');
   uretimIcGorunum();
   uretimModGuncelle();

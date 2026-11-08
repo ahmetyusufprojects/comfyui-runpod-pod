@@ -959,10 +959,14 @@ def workflow(name):
     return dict(WORKFLOWS.get(name) or {})
 
 
+def workflow_enabled(name):
+    group = WORKFLOWS.get(name, {}).get("group")
+    return bool(group in CATALOG and CATALOG[group].get("enabled", True))
+
+
 def workflow_ready(name):
     group = WORKFLOWS.get(name, {}).get("group")
-    return bool(group in CATALOG and CATALOG[group].get("enabled", True)
-                and _engine_ready(group))
+    return workflow_enabled(name) and _engine_ready(group)
 
 
 def _bagimlilik_sirasi(group, gorulen=None):

@@ -1048,13 +1048,15 @@ def _is_dogrula(req):
                      MODEL_ILLUSTRIOUS):
         return {"hata": "Görsel modeli tanınmadı."}
     if model in (MODEL_KREA2, MODEL_ILLUSTRIOUS) and n_ref:
-        return {"hata": "Seçilen model şu anda yalnızca sıfırdan görsel üretir. Referansla Flux 2 veya Flux 3 kullan."}
+        return {"hata": "Seçilen model şu anda yalnızca sıfırdan görsel üretir. Referansla Flux 2 kullan."}
     if req.get("flux3_bbox_mode") and model != MODEL_FLUX3:
         return {"hata": "Kutu yerleşimi yalnızca Flux 3 Klein ile kullanılabilir."}
     runpod_workflow = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
                        MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
                        MODEL_ILLUSTRIOUS: "illustrious"}.get(model)
     if RUNPOD_MODE and runpod_workflow:
+        if not pod_setup.workflow_enabled(runpod_workflow):
+            return {"hata": "Bu görsel modeli şu anda geçici olarak devre dışı."}
         if not pod_setup.workflow_ready(runpod_workflow):
             return {"hata": "Bu görsel modeli henüz hazır değil. 8192 portundaki Kurulum panelinden modeli indir."}
     return None
