@@ -384,7 +384,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     legacy_settings = scratch / "global-volume" / "system-settings.json"
     legacy_settings.parent.mkdir()
     old_settings = copy.deepcopy(pod_setup._SYSTEM_SETTINGS_DEFAULT)
-    assert old_settings["auto_download"] is True
+    assert old_settings["auto_download"] is False
     old_settings["auto_download"] = False
     legacy_settings.write_text(json.dumps(old_settings), encoding="utf-8")
     pod_setup._system_settings_path = legacy_settings

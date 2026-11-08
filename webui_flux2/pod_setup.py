@@ -53,7 +53,7 @@ _system_settings_path = None
 _system_settings_lock = threading.RLock()
 _SYSTEM_SETTINGS_DEFAULT = {
     "schema": 1,
-    "auto_download": True,
+    "auto_download": False,
     "default_download_order": ["zimage", "llama", "llm_12b", "llm_26b"],
     "llm_defaults": _CATALOG_DATA.get("llm_defaults") or {},
     "link_overrides": {},
