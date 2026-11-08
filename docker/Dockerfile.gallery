@@ -17,12 +17,15 @@ ENV WEBUI_RUNPOD=1 PYTHONUNBUFFERED=1 \
     LLAMA_SERVER_PATH=/opt/runtime/bin/llama-server \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/flex_store.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/server.py webui_flux2/video_r2v_api.json /opt/webui_flux2/
+COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/flex_store.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/app_update.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/server.py webui_flux2/video_r2v_api.json /opt/webui_flux2/
 COPY webui_flux2/static/app.css webui_flux2/static/app.js /opt/webui_flux2/static/
 COPY webui_flux2/setup.html /opt/webui_flux2/
 COPY webui_flux2/static/setup.css webui_flux2/static/setup.js /opt/webui_flux2/static/
 COPY webui_flux2/model_prompts/ /opt/webui_flux2/model_prompts/
 COPY docker/models.json /opt/pod/models.json
+COPY docker/Dockerfile.gallery /opt/pod/base.Dockerfile
+COPY docker/supervisor.py /opt/pod/supervisor.py
+ENV WEBUI_UPDATE_SUPERVISOR=1
 WORKDIR /opt/webui_flux2
 EXPOSE 8189 8192
-ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/opt/webui-venv/bin/python", "server.py"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/opt/webui-venv/bin/python", "/opt/pod/supervisor.py"]

@@ -60,6 +60,38 @@ _setup_httpd = None
 _startup_error = None
 if RUNPOD_MODE:
     import pod_setup
+    import app_update
+
+_app_update_lock = threading.Lock()
+_app_update_state = {"status": "idle"}
+
+def _app_update_worker():
+    global _app_update_state
+    try:
+        commit = app_update.prepare()
+        with _isler_kilit, pod_setup._lock:
+            if (_kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu
+                    or pod_setup._active or pod_setup._queue):
+                raise RuntimeError("Önce üretim ve indirme işlerinin tamamlanmasını bekleyin.")
+            _kapatma_istegi.set()
+        _app_update_state = {"status": "restarting", "commit": commit}
+        duzgun_kapat()
+        process = pod_setup._comfy_process
+        if process is not None and process.poll() is None:
+            (app_update.ROOT / 'restart-comfy').write_text('1', encoding='ascii')
+            process.terminate()
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        (app_update.ROOT / 'apply.json').write_text(json.dumps({"commit": commit}), encoding='utf-8')
+        os.kill(os.getpid(), signal.SIGTERM)
+    except Exception as exc:
+        _kapatma_istegi.clear()
+        _app_update_state = {"status": "error", "message": str(exc)[:200]}
+    finally:
+        _app_update_lock.release()
 
 
 def _system_event(message):
@@ -3225,6 +3257,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self._admin_gerekli() is not None:
                 self._send(200, json.dumps(pod_setup.status(), ensure_ascii=False))
             return
+        if parsed.path == "/api/app-update":
+            if self._admin_gerekli() is None:
+                return
+            state = dict(_app_update_state)
+            if state.get('status') == 'idle':
+                try:
+                    state = json.loads((app_update.ROOT / 'result.json').read_text(encoding='utf-8'))
+                except (OSError, ValueError):
+                    pass
+            self._send(200, json.dumps(state, ensure_ascii=False))
+            return
         if parsed.path == "/api/system-settings":
             if self._admin_gerekli() is None:
                 return
@@ -3255,6 +3298,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(404, '{"hata":"bulunamadi"}')
 
     def _setup_post(self, parsed):
+        global _app_update_state
         if not self._origin_kontrol():
             return
         if not pod_setup.is_ready():
@@ -3279,8 +3323,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _auth_store.cikis(self._cerez_token())
             self._send(200, '{"cikis":true}', ek_baslik=self._cerez_sil())
             return
+        if parsed.path == "/api/app-update":
+            if self._admin_gerekli() is None:
+                return
+            if os.environ.get('WEBUI_UPDATE_SUPERVISOR') != '1':
+                self._send(409, '{"hata":"Bu imaj güncelleme başlatıcısını içermiyor; yeni Pod açın."}')
+                return
+            if not _app_update_lock.acquire(blocking=False):
+                self._send(409, '{"hata":"Güncelleme zaten sürüyor."}')
+                return
+            _app_update_state = {"status": "preparing"}
+            threading.Thread(target=_app_update_worker, daemon=True).start()
+            self._send(202, '{"status":"preparing"}')
+            return
         if parsed.path == "/api/pod-kurulum":
             if self._admin_gerekli() is None:
+                return
+            if _kapatma_istegi.is_set():
+                self._send(409, '{"hata":"Güncelleme için uygulama kapanıyor."}')
                 return
             req = self._json_oku()
             try:
@@ -4732,6 +4792,13 @@ if __name__ == "__main__":
             pod_setup.prepare_data(DATA_ROOT, _auth_store)
             kasa.kalici_kopya = pod_setup.checkpoint
             _auth_store.kalici_kopya = pod_setup.checkpoint
+            comfy_restart = app_update.ROOT / 'restart-comfy'
+            if comfy_restart.is_file():
+                try:
+                    pod_setup._launch_comfy()
+                    comfy_restart.unlink()
+                except Exception as exc:
+                    _system_event('ComfyUI yeniden başlatılamadı: ' + type(exc).__name__)
         except Exception as exc:
             _startup_error = type(exc).__name__
             detail = " ".join(str(exc).split())

@@ -7,6 +7,7 @@ on:
       - '.github/workflows/gallery-image.yml'
       - 'docker/Dockerfile.gallery'
       - 'docker/models.json'
+      - 'docker/supervisor.py'
       - 'tests/**'
       - 'webui_flux2/**'
 
@@ -80,6 +81,11 @@ jobs:
           set -eu
           docker cp tests/pod_setup_smoke.py gallery-check:/tmp/pod_setup_smoke.py
           docker exec gallery-check /opt/webui-venv/bin/python /tmp/pod_setup_smoke.py
+      - name: Verify application update and rollback
+        run: |
+          set -eu
+          docker cp tests/app_update_integration.py gallery-check:/tmp/app_update_integration.py
+          docker exec gallery-check /opt/webui-venv/bin/python /tmp/app_update_integration.py
       - name: Publish the tested image
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

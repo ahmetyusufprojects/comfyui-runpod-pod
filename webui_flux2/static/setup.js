@@ -285,6 +285,29 @@ $('logout').addEventListener('click',async()=>{
   currentUser=null; lastStatus=null; $('loginError').textContent=''; loginView(null);
 });
 $('refresh').addEventListener('click',refresh);
+$('updateApp').addEventListener('click',async()=>{
+  const status=$('updateAppStatus'), button=$('updateApp');
+  button.disabled=true; status.textContent='Güncelleme hazırlanıyor…';
+  try{
+    await api('/api/app-update',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    let disconnected=false;
+    for(let i=0;i<180;i++){
+      await new Promise(resolve=>setTimeout(resolve,2000));
+      try{
+        const state=await api('/api/app-update');
+        if(state.status==='error') throw new Error(state.message||'Güncelleme başarısız.');
+        if(state.status==='ready'){ status.textContent='Güncelleme tamamlandı. Sayfa yenileniyor…'; location.reload(); return; }
+        if(state.status==='restarting') status.textContent='Kasalar mühürlendi; uygulama yeniden açılıyor…';
+      }catch(error){
+        if(error.status===401 && disconnected){ location.reload(); return; }
+        if(error.status || error.message==='Failed to fetch'){ disconnected=true; status.textContent='Uygulama yeniden açılıyor…'; continue; }
+        throw error;
+      }
+    }
+    status.textContent='Uygulamanın açılması bekleniyor; sayfayı biraz sonra yenileyin.';
+  }catch(error){ status.textContent=error.message; }
+  finally{ button.disabled=false; }
+});
 $('loadLogs').addEventListener('click',loadLogs);
 $('logSource').addEventListener('change',loadLogs);
 setInterval(refresh,2200);
