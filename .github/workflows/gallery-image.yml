@@ -34,8 +34,10 @@ jobs:
           assert catalog['workflows']['flux3']['steps'] == 16
           assert 'flux3-image-klein-base' not in json.dumps(catalog['groups']['flux3'])
           assert catalog['workflows']['illustrious']['lora_group'] == 'anime_desire_lora'
-          assert catalog['groups']['anima']['enabled'] is False
-          assert catalog['groups']['moody']['enabled'] is False
+          assert 'anima' not in catalog['groups']
+          assert 'moody' not in catalog['groups']
+          assert 'anima' not in catalog['workflows']
+          assert 'moody_anima' not in catalog['workflows']
           assert catalog['llm_defaults']['image']['flux3'] == 'llama'
           assert catalog['llm_defaults']['chat'] == 'llm_26b'
           print('model catalog checks passed')
