@@ -43,6 +43,7 @@ _active_cancel = None
 _pause_requested = set()
 _active_process = None
 _active_progress = {}
+_last_console_progress = {}
 _comfy_process = None
 _data_lock = None
 _flex = None
@@ -1118,12 +1119,50 @@ def remove(group):
 
 
 def _progress(group, stage, *, name=None, downloaded=None, total=None, rate=None):
+    now = time.monotonic()
+    log_line = False
     with _lock:
         _state[group] = ("running", stage)
         _active_progress.update({"stage": stage, "file": name,
                                  "downloaded": downloaded, "total": total,
                                  "rate_mib_s": rate})
-    print(f"[pod-setup] {group}: {stage}", flush=True)
+        progress_key = (group, name or "")
+        previous = _last_console_progress.get(progress_key)
+        if name and stage == "İndiriliyor":
+            log_line = (previous is None or previous[0] != stage
+                        or now - previous[1] >= 5.0)
+        else:
+            log_line = previous is None or previous[0] != stage
+        if log_line:
+            _last_console_progress[progress_key] = (stage, now)
+    if log_line:
+        parts = [f"[pod-setup] {group}: {stage}"]
+        if name:
+            parts.append(str(name))
+        if downloaded is not None:
+            if isinstance(total, (int, float)) and total > 0:
+                percent = max(0.0, min(100.0, 100.0 * downloaded / total))
+                parts.append("%.1f MiB / %.1f MiB (%.0f%%)" %
+                             (downloaded / (1024 * 1024),
+                              total / (1024 * 1024), percent))
+            else:
+                parts.append("%.1f MiB" % (downloaded / (1024 * 1024)))
+        if isinstance(rate, (int, float)):
+            parts.append("%.1f MiB/sn" % max(0.0, rate))
+            if (isinstance(downloaded, (int, float))
+                    and isinstance(total, (int, float))
+                    and total > downloaded and rate > 0):
+                remaining = (total - downloaded) / (rate * 1024 * 1024)
+                if remaining < 60:
+                    eta = "kalan %.0f sn" % remaining
+                elif remaining < 3600:
+                    minutes, seconds = divmod(int(remaining), 60)
+                    eta = "kalan %d dk %02d sn" % (minutes, seconds)
+                else:
+                    hours, remainder = divmod(int(remaining), 3600)
+                    eta = "kalan %d sa %d dk" % (hours, remainder // 60)
+                parts.append(eta)
+        print(" · ".join(parts), flush=True)
 
 
 def _run():
@@ -1175,6 +1214,12 @@ def _run():
                     with (ROOT / "setup.log").open("a", encoding="utf-8") as log:
                         log.write("[optional] %s atlandı (%s)\n" %
                                   (file["name"], type(exc).__name__))
+                else:
+                    target = MODELS / file["dir"] / file["name"]
+                    if target.is_file():
+                        _progress(group, "Dosya hazır", name=file["name"],
+                                  downloaded=target.stat().st_size,
+                                  total=file.get("size"))
             if item["engine"] == "comfy":
                 _progress(group, "ComfyUI bağlantısı kontrol ediliyor")
                 _wait_comfy(cancel_event)
@@ -1197,6 +1242,9 @@ def _run():
             _active_cancel = None
             _active_process = None
             _active_progress.clear()
+            for key in [key for key in _last_console_progress if key[0] == group]:
+                _last_console_progress.pop(key, None)
+        print(f"[pod-setup] {group}: {result[0]}", flush=True)
 
 
 def _command(args, label, *, cwd=None, cancel=None, timeout=1800):
@@ -1453,7 +1501,9 @@ except HfHubHTTPError as e:
     source = incoming / file["path"]
     source.parent.mkdir(parents=True, exist_ok=True)
     previous_time = time.monotonic()
-    previous_size = source.stat().st_size if source.exists() else 0
+    partial = _hf_incomplete_file(incoming, file["path"])
+    progress_file = partial if partial and partial.exists() else source
+    previous_size = progress_file.stat().st_size if progress_file.exists() else 0
     process = None
     try:
         with root_log.open("ab") as log:
@@ -1472,7 +1522,10 @@ except HfHubHTTPError as e:
                     raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
                 time.sleep(1)
                 now = time.monotonic()
-                current_size = source.stat().st_size if source.exists() else previous_size
+                partial = _hf_incomplete_file(incoming, file["path"])
+                progress_file = partial if partial and partial.exists() else source
+                current_size = (progress_file.stat().st_size
+                                if progress_file.exists() else previous_size)
                 rate = max(0, current_size - previous_size) / max(now - previous_time, .001) / (1024 * 1024)
                 _progress(group, "İndiriliyor", name=file["name"],
                           downloaded=current_size, total=file.get("size"), rate=round(rate, 2))
@@ -1672,3 +1725,17 @@ def _write_verification(path, file):
     if expected:
         _verification_file(path).write_text(
             expected.lower() + ":" + str(path.stat().st_size), encoding="ascii")
+
+
+def _hf_incomplete_file(local_dir, filename):
+    """Find Hugging Face's resumable partial file inside its local-dir cache."""
+    try:
+        from huggingface_hub._local_folder import get_local_download_paths
+
+        paths = get_local_download_paths(Path(local_dir), filename)
+        metadata = paths.metadata_path.read_text(encoding="utf-8").splitlines()
+        if len(metadata) >= 2 and metadata[1]:
+            return paths.incomplete_path(metadata[1])
+    except (ImportError, OSError, ValueError, IndexError, AttributeError):
+        pass
+    return None

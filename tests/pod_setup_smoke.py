@@ -1,3 +1,4 @@
+import contextlib
 import http.server
 import builtins
 import copy
@@ -46,6 +47,18 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         assert target.read_bytes() == b"synthetic-model"
     finally:
         sys.executable = real_python
+
+    # Hugging Face keeps local_dir transfer bytes in a resumable .incomplete
+    # file; the installer must measure that file before it is renamed.
+    from huggingface_hub._local_folder import get_local_download_paths
+    hf_progress_root = scratch / "hf-progress"
+    hf_progress_root.mkdir()
+    hf_progress_paths = get_local_download_paths(hf_progress_root, "fixture/weights.bin")
+    hf_progress_paths.metadata_path.write_text("0123456789abcdef\nfixture-etag\n0\n",
+                                               encoding="utf-8")
+    hf_partial = hf_progress_paths.incomplete_path("fixture-etag")
+    hf_partial.write_bytes(b"partial model bytes")
+    assert pod_setup._hf_incomplete_file(hf_progress_root, "fixture/weights.bin") == hf_partial
 
     payload_size = 16 * 1024 * 1024
 
@@ -149,6 +162,29 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     assert "tokenizers==4.57.6" in llama_logs, llama_logs
     assert "synthetic ComfyUI output" in comfy_logs, comfy_logs
     assert "WebUI 8189 portunda hazır" in webui_logs, webui_logs
+
+    # Container logs include download size, percentage, speed and ETA without
+    # flooding the terminal on every one-second polling iteration.
+    saved_progress_log = dict(pod_setup._last_console_progress)
+    pod_setup._last_console_progress.clear()
+    speed_log = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(speed_log), \
+                patch.object(pod_setup.time, "monotonic",
+                             side_effect=(100.0, 102.0, 105.0)):
+            for downloaded in (1, 3, 6):
+                pod_setup._progress(
+                    "synthetic-speed", "İndiriliyor", name="weights.safetensors",
+                    downloaded=downloaded * 1024 * 1024,
+                    total=10 * 1024 * 1024, rate=2.0)
+        speed_text = speed_log.getvalue()
+        assert speed_text.count("synthetic-speed") == 2, speed_text
+        assert "1.0 MiB / 10.0 MiB (10%)" in speed_text
+        assert "6.0 MiB / 10.0 MiB (60%)" in speed_text
+        assert "2.0 MiB/sn" in speed_text and "kalan 2 sn" in speed_text
+    finally:
+        pod_setup._last_console_progress.clear()
+        pod_setup._last_console_progress.update(saved_progress_log)
 
     # Both selectable video modes must build valid graphs from the real catalog.
     pod_setup.status = lambda: {"gruplar": [
@@ -408,4 +444,4 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         if saved_bootstrap is not None:
             os.environ["WEBUI_BOOTSTRAP_PASSWORD"] = saved_bootstrap
 
-print("model download, pause/resume/cancellation, LoRA/settings, model prompts, GPU diagnostics, and log retrieval checks passed")
+print("model download, terminal speed logs, cancellation, LoRA/settings, prompts, GPU diagnostics, and log retrieval checks passed")
