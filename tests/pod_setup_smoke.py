@@ -325,6 +325,25 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         assert marker in profile_prompt
         for field in ("positive", "positive_tr", "negative", "caption_tr", "tags"):
             assert field in profile_prompt, (profile, field)
+    previous_runpod_mode = server.RUNPOD_MODE
+    server.RUNPOD_MODE = True
+    try:
+        default_context = {"llm_ctx": 8192}
+        assert server._llm_istek_baglami(
+            default_context, "llm_prompt",
+            {"model_prompt_profile": "minimaxh3"}) == 16384
+        assert server._llm_istek_baglami(
+            default_context, "goruntu",
+            {"prompt_destek": True, "is_tipi": "video-uretim"}) == 16384
+        assert server._llm_istek_baglami(
+            default_context, "goruntu",
+            {"prompt_destek": True, "is_tipi": "goruntu-uretim"}) == 8192
+        assert server._llm_istek_baglami(
+            {"llm_ctx": 32768}, "llm_prompt",
+            {"model_prompt_profile": "minimaxh3"}) == 32768
+        assert default_context["llm_ctx"] == 8192
+    finally:
+        server.RUNPOD_MODE = previous_runpod_mode
     from image_graphs import _flux3_layout_elements
 
     bbox_caption, bbox_elements = _flux3_layout_elements(

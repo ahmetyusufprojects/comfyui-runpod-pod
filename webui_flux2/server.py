@@ -1151,6 +1151,25 @@ def _llm_prompt_gecmisine_yaz(sahip, req, sonuc):
         pass
 
 
+RUNPOD_VIDEO_PROMPT_CTX = 16384
+
+
+def _llm_istek_baglami(ayar, tur, req):
+    """Keep long RunPod video prompts inside the model context without saving a user setting."""
+    try:
+        context = int(ayar.get("llm_ctx") or _LLM_VARSAYILAN_CTX)
+    except (TypeError, ValueError, OverflowError):
+        context = _LLM_VARSAYILAN_CTX
+    if not RUNPOD_MODE:
+        return context
+    video_prompt = (tur == "llm_prompt"
+                    and req.get("model_prompt_profile") == "minimaxh3")
+    if tur == "goruntu" and req.get("prompt_destek"):
+        references = int(bool(req.get("image_base64"))) + int(bool(req.get("image2_base64")))
+        video_prompt = is_tipini_belirle(req, references) == IS_TIPI_VIDEO
+    return max(context, RUNPOD_VIDEO_PROMPT_CTX) if video_prompt else context
+
+
 def _llm_kuyruk_isini_calistir(job):
     global _aktif_llm
     req = job.get("istek") or {}
@@ -1203,7 +1222,7 @@ def _llm_kuyruk_isini_calistir(job):
             llm.ayarlarini_uygula(ayar)
         canli = llm.durum()["canli"]
         try:
-            llm.baglam_ayarla(ayar.get("llm_ctx") or _LLM_VARSAYILAN_CTX)
+        llm.baglam_ayarla(_llm_istek_baglami(ayar, tur, req))
         except llm.LLMHatasi:
             pass
         if llm.baglam_degisti() and not llm.istek_suruyor():
