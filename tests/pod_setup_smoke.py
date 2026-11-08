@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+from unittest.mock import patch
 
 sys.path.insert(0, "/opt/webui_flux2")
 import pod_setup
@@ -202,6 +203,28 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         builtins.open = original_open
         psutil.virtual_memory = original_virtual_memory
 
+    # Model switching keeps llama-server when live free VRAM covers the image
+    # model plus headroom, and stops it when the measured space is insufficient.
+    started_images = []
+    stopped_llms = []
+    with patch.object(server, "RUNPOD_MODE", True), \
+            patch.object(server.llm, "durum", return_value={"canli": True}), \
+            patch.object(server, "_isi_calistir",
+                         side_effect=lambda job: started_images.append(job)), \
+            patch.object(server, "_llm_kapat_ve_bekle",
+                         side_effect=lambda: stopped_llms.append(True) or True):
+        for model, free_mb, keep_llm in (
+                ("flux3", 13700, True), ("flux3", 13699, False),
+                ("krea2", 23700, True), ("krea2", 23699, False)):
+            job = {"iptal": False, "tur": "gorsel",
+                   "istek": {"model": model}}
+            with patch.object(server, "_vram_bos_mb", return_value=free_mb):
+                server._gpu_isini_calistir(job)
+            assert bool(job.get("_llama_bellekte_kaldi")) is keep_llm, job
+            assert bool(job.get("_llama_canliydi"))
+        assert len(stopped_llms) == 2, stopped_llms
+        assert len(started_images) == 4, started_images
+
     # Queue pause/resume/cancel transitions use only an enabled group and a
     # dummy worker handle; no real model job or user data is touched.
     saved_ready = pod_setup._ready
@@ -240,6 +263,14 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     profile_prompt = server.llm._uretim_sistem_mesaji(
         "fikir", "en", "orta", model_prompt_profile="flux3", bbox_mode=True)
     assert "element table" in profile_prompt and "positive_tr" in profile_prompt
+    for profile, marker in (("krea2", "Character-Centric Image Prompt Architect"),
+                            ("minimaxh3", "Full-Reference Mode Rewrite Output Format Guide")):
+        profile_prompt = server.llm._uretim_sistem_mesaji(
+            "video" if profile == "minimaxh3" else "fikir",
+            "en", "orta", model_prompt_profile=profile)
+        assert marker in profile_prompt
+        for field in ("positive", "positive_tr", "negative", "caption_tr", "tags"):
+            assert field in profile_prompt, (profile, field)
     from image_graphs import _flux3_layout_elements
 
     bbox_caption, bbox_elements = _flux3_layout_elements(
@@ -254,6 +285,32 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     saved_catalog = copy.deepcopy(pod_setup.CATALOG)
     original_parse_model_link = pod_setup._parse_model_link
     original_parse_lora_link = pod_setup._parse_lora_link
+    # Global Volume does not promise atomic rename. Verify versioned immutable
+    # settings can be written, reread after a restart-style rebind, and recover
+    # the previous valid version if the newest object is incomplete.
+    legacy_settings = scratch / "global-volume" / "system-settings.json"
+    legacy_settings.parent.mkdir()
+    old_settings = copy.deepcopy(pod_setup._SYSTEM_SETTINGS_DEFAULT)
+    assert old_settings["auto_download"] is True
+    old_settings["auto_download"] = False
+    legacy_settings.write_text(json.dumps(old_settings), encoding="utf-8")
+    pod_setup._system_settings_path = legacy_settings
+    assert pod_setup._system_settings_read()["auto_download"] is False
+    with patch.object(pathlib.Path, "replace",
+                      side_effect=AssertionError("Global Volume rename must not be used")):
+        pod_setup.update_system_settings({"auto_download": True})
+        pod_setup.update_system_settings({
+            "default_download_order": ["llm_26b", "zimage"]})
+    versions = pod_setup._system_settings_versions()
+    assert len(versions) == 2, versions
+    pod_setup._system_settings_path = pathlib.Path(str(legacy_settings))
+    persisted = pod_setup._system_settings_read()
+    assert persisted["auto_download"] is True
+    assert persisted["default_download_order"] == ["llm_26b", "zimage"]
+    versions[0][2].write_text("{incomplete", encoding="utf-8")
+    recovered = pod_setup._system_settings_read()
+    assert recovered["auto_download"] is True
+    assert recovered["default_download_order"] != ["llm_26b", "zimage"]
     try:
         pod_setup._system_settings_path = scratch / "universal-settings.json"
         pod_setup.update_system_settings({
@@ -301,5 +358,53 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         pod_setup._parse_lora_link = original_parse_lora_link
         pod_setup.CATALOG.clear()
         pod_setup.CATALOG.update(saved_catalog)
+
+    # A fresh deployment starts the saved download order automatically, using
+    # only an isolated synthetic account record and volume prefix.
+    saved_ready = pod_setup._ready
+    saved_flex = pod_setup._flex
+    saved_data_lock = pod_setup._data_lock
+    saved_settings_path = pod_setup._system_settings_path
+    saved_validate_mount = pod_setup.validate_mount
+    saved_prefix = os.environ.get("POD_FLEX_PREFIX")
+    saved_bootstrap = os.environ.pop("WEBUI_BOOTSTRAP_PASSWORD", None)
+    setup_volume = scratch / "auto-download-volume"
+    setup_volume.mkdir()
+    account_file = scratch / "auto-download-account.json"
+    account_file.write_text("{}", encoding="utf-8")
+
+    class InstalledSyntheticAccount:
+        dosya = str(account_file)
+
+        @staticmethod
+        def kurulu_mu():
+            return True
+
+    started_on_boot = []
+    try:
+        os.environ["POD_FLEX_PREFIX"] = "gallery-auto-test"
+        pod_setup.validate_mount = lambda: setup_volume
+        pod_setup._ready = False
+        pod_setup._flex = None
+        pod_setup._data_lock = None
+        with patch.object(pod_setup, "start",
+                          side_effect=lambda group: started_on_boot.append(group)):
+            pod_setup.prepare_data(pod_setup.ROOT / "auto-download-user-data",
+                                   InstalledSyntheticAccount())
+        assert started_on_boot == ["zimage", "llama", "llm_12b", "llm_26b"], started_on_boot
+    finally:
+        if pod_setup._data_lock is not None and pod_setup._data_lock is not saved_data_lock:
+            pod_setup._data_lock.close()
+        pod_setup._ready = saved_ready
+        pod_setup._flex = saved_flex
+        pod_setup._data_lock = saved_data_lock
+        pod_setup._system_settings_path = saved_settings_path
+        pod_setup.validate_mount = saved_validate_mount
+        if saved_prefix is None:
+            os.environ.pop("POD_FLEX_PREFIX", None)
+        else:
+            os.environ["POD_FLEX_PREFIX"] = saved_prefix
+        if saved_bootstrap is not None:
+            os.environ["WEBUI_BOOTSTRAP_PASSWORD"] = saved_bootstrap
 
 print("model download, pause/resume/cancellation, LoRA/settings, model prompts, GPU diagnostics, and log retrieval checks passed")

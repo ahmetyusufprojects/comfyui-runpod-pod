@@ -51,7 +51,7 @@ _system_settings_path = None
 _system_settings_lock = threading.RLock()
 _SYSTEM_SETTINGS_DEFAULT = {
     "schema": 1,
-    "auto_download": False,
+    "auto_download": True,
     "default_download_order": ["zimage", "llama", "llm_12b", "llm_26b"],
     "llm_defaults": _CATALOG_DATA.get("llm_defaults") or {},
     "link_overrides": {},
@@ -206,10 +206,26 @@ def _system_settings_read():
     settings = json.loads(json.dumps(_SYSTEM_SETTINGS_DEFAULT))
     if _system_settings_path is None:
         return settings
-    try:
-        saved = json.loads(_system_settings_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return settings
+    saved = None
+    # Global Volume is object-backed storage, not a POSIX filesystem. Read
+    # immutable, checksummed versions first; keep the old single-file format as
+    # a migration fallback for settings written by earlier images.
+    for timestamp, digest, candidate in _system_settings_versions():
+        try:
+            payload = candidate.read_bytes()
+            if hashlib.sha256(payload).hexdigest() != digest:
+                continue
+            value = json.loads(payload.decode("utf-8"))
+        except (OSError, ValueError, TypeError, UnicodeDecodeError):
+            continue
+        if isinstance(value, dict) and value.get("schema") == 1:
+            saved = value
+            break
+    if saved is None:
+        try:
+            saved = json.loads(_system_settings_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return settings
     if not isinstance(saved, dict) or saved.get("schema") != 1:
         return settings
     if isinstance(saved.get("auto_download"), bool):
@@ -235,14 +251,77 @@ def _system_settings_read():
     return settings
 
 
+def _system_settings_versions():
+    """Return verified-version filenames in newest-first order."""
+    if _system_settings_path is None:
+        return []
+    pattern = re.compile(
+        re.escape(_system_settings_path.stem)
+        + r"-(\d{19})-([a-f0-9]{16})-([a-f0-9]{64})\.json$")
+    try:
+        entries = list(_system_settings_path.parent.iterdir())
+    except OSError:
+        return []
+    versions = []
+    for candidate in entries:
+        match = pattern.fullmatch(candidate.name)
+        if match and candidate.is_file():
+            versions.append((match.group(1), match.group(3), candidate))
+    return sorted(versions, key=lambda item: (item[0], item[2].name), reverse=True)
+
+
 def _system_settings_write(settings):
     if _system_settings_path is None:
         raise RuntimeError("Kalıcı sistem ayarları için Flex dizini hazır değil.")
-    temporary = _system_settings_path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2),
-                         encoding="utf-8")
-    temporary.chmod(0o600)
-    temporary.replace(_system_settings_path)
+    payload = json.dumps(settings, ensure_ascii=False, indent=2).encode("utf-8")
+    digest = hashlib.sha256(payload).hexdigest()
+    timestamp = time.time_ns()
+    unique = os.urandom(8).hex()
+    destination = _system_settings_path.with_name(
+        "%s-%019d-%s-%s.json" %
+        (_system_settings_path.stem, timestamp, unique, digest))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # A new object is written directly and checked after close. This avoids
+    # relying on rename/replace semantics that Global Volume does not promise.
+    with destination.open("wb") as stream:
+        stream.write(payload)
+    # Global Volume objects can become visible to the mounted filesystem a
+    # little after the write completes. Retry the read-back before reporting a
+    # failed save; the immutable object remains safe if visibility is delayed.
+    verified = False
+    last_error = None
+    for attempt in range(6):
+        try:
+            if destination.read_bytes() == payload:
+                verified = True
+                break
+        except OSError as error:
+            last_error = error
+        if attempt < 5:
+            time.sleep(min(0.2 * (2 ** attempt), 2.0))
+    if not verified:
+        message = "Kalıcı sistem ayarları doğrulanamadı."
+        if last_error is not None:
+            message += " (%s)" % last_error
+        raise RuntimeError(message)
+    versions = _system_settings_versions()
+    valid = []
+    invalid = []
+    for _, expected_digest, old in versions:
+        try:
+            old_payload = old.read_bytes()
+            old_settings = json.loads(old_payload.decode("utf-8"))
+            is_valid = (hashlib.sha256(old_payload).hexdigest() == expected_digest
+                        and isinstance(old_settings, dict)
+                        and old_settings.get("schema") == 1)
+        except (OSError, ValueError, TypeError, UnicodeDecodeError):
+            is_valid = False
+        (valid if is_valid else invalid).append(old)
+    for old in invalid + valid[8:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
 
 def _hf_link(file):
