@@ -1230,6 +1230,7 @@ def _llm_kuyruk_isini_calistir(job):
             raise RuntimeError("iptal edildi")
         ayar = _ayar_oku(sahip)
         llm_secimi = ayar.get("llm_model", "auto")
+        model_yedek_bilgisi = None
         if RUNPOD_MODE:
             if llm_secimi == "auto":
                 sohbet_isi = tur in ("llm_chat", "llm_preload")
@@ -1239,23 +1240,22 @@ def _llm_kuyruk_isini_calistir(job):
                 model_ad = {MODEL_Z_IMAGE: "z_image", MODEL_FLUX2: "flux2",
                             MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
                             MODEL_ILLUSTRIOUS: "illustrious"}.get(model_ad, model_ad)
-                secilecek = pod_setup.default_llm_for(model_ad, chat=sohbet_isi)
-                # İstenen profil henüz indirilmediyse uygun, hazır bir yedek kullan.
-                adaylar = ([secilecek, "llama", "llm_12b", "llm_26b"]
-                           if not sohbet_isi else
-                           [secilecek, "llama", "llm_12b"])
-                secilecek = next((name for name in dict.fromkeys(adaylar)
-                                  if pod_setup.workflow_ready(name)), None)
-                if secilecek is None:
-                    raise RuntimeError(
-                        "Sohbet modeli henüz indirilmedi. Ayrı Kurulum sayfasından "
-                        "Gemma grubunu ekleyin; model dosyaları bu işlem sırasında inmeye başlar.")
+                istenen_model = pod_setup.default_llm_for(model_ad, chat=sohbet_isi)
             else:
-                secilecek = llm_secimi
-                if not pod_setup.workflow_ready(secilecek):
-                    raise RuntimeError(
-                        "Seçili Gemma modeli henüz hazır değil. 8192 portundaki "
-                        "Kurulum sayfasından ilgili modeli indirin.")
+                istenen_model = llm_secimi
+            secilecek = pod_setup.llm_profile_fallback(istenen_model)
+            if secilecek is None:
+                raise RuntimeError(
+                    "Seçilen model ve ondan küçük Gemma modelleri henüz kurulu değil. "
+                    "Kurulum sayfasından kullanmak istediğin modeli indir.")
+            if secilecek != istenen_model:
+                adlar = {"llm_26b": "Gemma 4 26B A4B",
+                         "llm_12b": "Gemma 4 12B", "llama": "Gemma 4 E4B"}
+                model_yedek_bilgisi = (
+                    adlar[istenen_model] + " kurulu değil; " + adlar[secilecek]
+                    + " kullanılıyor.")
+                job["ilerleme"] = {"asama": "model_secimi",
+                                   "calisan": model_yedek_bilgisi, "oran": 0.04}
             llm.model_ayarla(secilecek)
             llm.ayarlarini_uygula(ayar)
         canli = llm.durum()["canli"]
@@ -1269,11 +1269,14 @@ def _llm_kuyruk_isini_calistir(job):
             llm.durdur()
             canli = False
         if canli:
-            job["ilerleme"] = {"asama": "hazirlik", "calisan": "Model hazır",
+            job["ilerleme"] = {"asama": "hazirlik",
+                               "calisan": model_yedek_bilgisi or "Model hazır",
                                "oran": 0.1}
         else:
             job["ilerleme"] = {"asama": "yukleme",
-                               "calisan": "Model yükleniyor", "oran": 0.2}
+                               "calisan": ((model_yedek_bilgisi + " · ")
+                                           if model_yedek_bilgisi else "")
+                                          + "Model yükleniyor", "oran": 0.2}
         if tur == "llm_preload":
             _aktif_llm["durum"] = "Model yükleniyor"
             sonuc = llm.hazirla(gpu_hazirla=gpu_hazirla)
@@ -4559,6 +4562,62 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             kasa.bekleme_koy(kullanici, dakika)
             self._send(200, json.dumps({"dakika": dakika}))
+            return
+        if parsed.path == "/api/kasa/parola":
+            kullanici = self._auth_gerekli()
+            if kullanici is None:
+                return
+            if self._kasa_gerekli(kullanici) is None:
+                return
+            req = self._json_oku()
+            if "__hata__" in req:
+                self._send(400, json.dumps({"hata": req["__hata__"]}, ensure_ascii=False))
+                return
+            mevcut = req.get("mevcut") or ""
+            yeni = req.get("yeni") or ""
+            tekrar = req.get("tekrar") or ""
+            req["mevcut"] = req["yeni"] = req["tekrar"] = ""
+            kapanis = False
+            try:
+                if not kasa.kapanis_baslat(kullanici):
+                    self._send(409, '{"hata":"kasa şu anda başka bir işlemde"}')
+                    return
+                kapanis = True
+                # Bu isteğin kendisini bekleme listesinden çıkar; başka
+                # kaydetme istekleri bitmeden şifreli arşivi değiştirme.
+                with _http_yazma_kosulu:
+                    istekler = _kasa_yazma_istekleri.get(kullanici)
+                    if istekler is not None:
+                        istekler.discard(self)
+                        if not istekler:
+                            _kasa_yazma_istekleri.pop(kullanici, None)
+                    _http_yazma_kosulu.notify_all()
+                    yazmalar_bitti = _http_yazma_kosulu.wait_for(
+                        lambda: not _kasa_yazma_istekleri.get(kullanici), timeout=30)
+                if not yazmalar_bitti:
+                    self._send(409, '{"hata":"başka bir kayıt işlemi sürüyor; tamamlanınca tekrar dene"}')
+                    return
+                with _isler_kilit:
+                    calisan_is_var = any(
+                        islem.get("sahip") == kullanici and not islem["olay"].is_set()
+                        for islem in _isler.values())
+                if calisan_is_var:
+                    self._send(409, '{"hata":"önce devam eden üretim veya sohbet işlerinin bitmesini bekle"}')
+                    return
+                try:
+                    kasa.parola_degistir(kullanici, mevcut, yeni, tekrar)
+                except kasa.KasaHatasi as exc:
+                    mesaj = str(exc)
+                    durum = 400 if mesaj.startswith("yeni parola") else 403
+                    self._send(durum, json.dumps({"hata": mesaj}, ensure_ascii=False))
+                    return
+                except Exception:
+                    self._send(500, '{"hata":"parola değiştirilemedi; mevcut parola korunuyor"}')
+                    return
+                self._send(200, '{"degisti":true}')
+            finally:
+                if kapanis:
+                    kasa.kapanis_iptal(kullanici)
             return
         if parsed.path == "/api/sunucu-kapat":
             # Yalniz bu makineden (baslatici) istenir. Giris istemez:

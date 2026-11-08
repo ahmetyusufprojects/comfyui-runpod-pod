@@ -222,9 +222,9 @@
   <div class="kucuk" id="uretimPromptCeviriBilgi" role="status" aria-live="polite"></div>
 </div>
 <details id="uretimNegatifPanel" class="uretim-negatif">
-  <summary>Negative prompt <span>İsteğe bağlı</span></summary>
+  <summary>Negatif prompt <span>İsteğe bağlı</span></summary>
   <textarea id="negatif" rows="2" maxlength="2000" placeholder="Görselde olmamasını istediğin öğeleri yaz..."></textarea>
-  <div class="kucuk negatif-yardim">Z-Image ve Krea’nın hızlı sürümlerinde bu alan, varsayılan ayarda etkisiz kalabilir. İstersen “İleri örnekleme”den CFG’yi yükselt; üretim yavaşlayabilir ve sonuç değişebilir.</div>
+  <div class="kucuk negatif-yardim">Metin seçili görsel modelinin üretim akışına gönderilir. Bazı hızlı modellerde etkisinin belirginleşmesi için CFG değerini artırmak gerekebilir; bu sonuçları değiştirebilir.</div>
 </details>
 <div class="satir" id="pinBar">
 <div><button id="pin1Btn" class="hayalet kucukbtn">1</button></div>
@@ -388,6 +388,16 @@
         <p class="ayar-aciklama">Kasa belirtilen süre boşta kaldığında otomatik kapanır.</p>
         <div class="ayar-eylem-satiri"><div class="ayar-deger-birim"><input id="beklemeInput" type="number" value="15" min="1" max="1440"><span>dakika</span></div><button id="beklemeKaydet" class="hayalet">Süreyi kaydet</button></div>
         <div class="ayar-bilgi" id="beklemeBilgi" role="status"></div>
+      </div>
+      <div class="ayar-alan">
+        <label>Kasa parolasını değiştir</label>
+        <p class="ayar-aciklama">Kasayı açık tut. Değişiklikte mevcut kasa ve geri dönüş kopyası yeni parolayla yeniden şifrelenir. Yeni parola en az 12 karakter ve harf, rakam, işaret karışımı içermeli.</p>
+        <div class="ayar-form-grid uc">
+          <div class="ayar-alan"><label for="kasaEskiParola">Mevcut kasa parolası</label><div class="parola"><input id="kasaEskiParola" type="password" autocomplete="current-password"><button type="button" class="parolaGoz" data-hedef="kasaEskiParola" aria-label="Parolayı göster" aria-pressed="false">Göster</button></div></div>
+          <div class="ayar-alan"><label for="kasaYeniParola">Yeni kasa parolası</label><div class="parola"><input id="kasaYeniParola" type="password" autocomplete="new-password"><button type="button" class="parolaGoz" data-hedef="kasaYeniParola" aria-label="Parolayı göster" aria-pressed="false">Göster</button></div></div>
+          <div class="ayar-alan"><label for="kasaYeniParolaTekrar">Yeni parola (tekrar)</label><div class="parola"><input id="kasaYeniParolaTekrar" type="password" autocomplete="new-password"><button type="button" class="parolaGoz" data-hedef="kasaYeniParolaTekrar" aria-label="Parolayı göster" aria-pressed="false">Göster</button></div></div>
+        </div>
+        <div class="ayar-kart-alt"><button id="kasaParolaDegistir" class="hayalet">Kasa parolasını değiştir</button><div class="ayar-bilgi" id="kasaParolaBilgi" role="status" aria-live="polite"></div></div>
       </div>
     </section>
 

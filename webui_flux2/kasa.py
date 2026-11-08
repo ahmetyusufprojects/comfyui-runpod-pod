@@ -16,8 +16,10 @@ Parola kurallari:
 """
 
 import os as _os
+import hmac as _hmac
 import shutil as _shutil
 import subprocess as _sp
+import tempfile as _tempfile
 import threading as _th
 import time as _time
 from functools import wraps as _wraps
@@ -209,6 +211,81 @@ def _arsiv_sifrele(kaynak, cikti, parola):
         return tar.returncode == 0 and gpg.wait() == 0
 
 
+def _arsiv_yeniden_sifrele(kaynak, cikti, eski_parola, yeni_parola):
+    """Mevcut şifreli tar arşivini diske açmadan başka parolayla şifrele."""
+    cozen = None
+    sifreleyen = None
+    try:
+        cozen = _sp.Popen(_gpg_komutu() + ["-d", kaynak], stdin=_sp.PIPE,
+                          stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+                          creationflags=_NO_WINDOW)
+        sifreleyen = _sp.Popen(
+            _gpg_komutu() + ["--cipher-algo", "AES256", "--compress-algo", "none",
+                             "--yes", "--symmetric", "-o", cikti],
+            stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            creationflags=_NO_WINDOW)
+        cozen.stdin.write(eski_parola + b"\n")
+        cozen.stdin.close()
+        sifreleyen.stdin.write(yeni_parola + b"\n")
+        sifreleyen.stdin.flush()
+        while True:
+            parca = cozen.stdout.read(1024 * 1024)
+            if not parca:
+                break
+            sifreleyen.stdin.write(parca)
+        cozen.stdout.close()
+        sifreleyen.stdin.close()
+        cozen_sonuc = cozen.wait()
+        sifreleyen_sonuc = sifreleyen.wait()
+        return cozen_sonuc == 0 and sifreleyen_sonuc == 0
+    except (BrokenPipeError, OSError):
+        for process in (cozen, sifreleyen):
+            if process is not None and process.poll() is None:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+        for process in (cozen, sifreleyen):
+            if process is not None:
+                try:
+                    process.wait()
+                except OSError:
+                    pass
+        return False
+    finally:
+        for process in (cozen, sifreleyen):
+            if process is None:
+                continue
+            for pipe in (process.stdin, process.stdout):
+                if pipe is not None and not pipe.closed:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
+
+
+def _gecici_sifreli_yol(kullanici, tur):
+    fd, yol = _tempfile.mkstemp(prefix=".%s-%s-" % (kullanici, tur),
+                                suffix=".gpg", dir=KASALAR_DIR)
+    _os.close(fd)
+    _os.remove(yol)
+    return yol
+
+
+def _profil_gecisi(islem):
+    """Bir profilin disk işlemlerini sırala, diğer profillerin işini bekletme."""
+    @_wraps(islem)
+    def sar(kullanici, *args, **kwargs):
+        _kullanici_dogrula(kullanici)
+        with _kilit:
+            kilit = _profil_kilitleri.get(kullanici)
+            if kilit is None:
+                kilit = _profil_kilitleri[kullanici] = _th.RLock()
+        with kilit:
+            return islem(kullanici, *args, **kwargs)
+    return sar
+
+
 def _muhurle(kullanici, parola, kaynak_agac):
     """Arşivi şifreler, doğrular ve ancak sonra mevcut kasanın yerine koyar."""
     _os.makedirs(KASALAR_DIR, exist_ok=True)
@@ -247,18 +324,125 @@ def _muhurle(kullanici, parola, kaynak_agac):
             pass
 
 
-def _profil_gecisi(islem):
-    """Bir profilin disk işlemlerini sırala, diğer profillerin işini bekletme."""
-    @_wraps(islem)
-    def sar(kullanici, *args, **kwargs):
-        _kullanici_dogrula(kullanici)
+@_profil_gecisi
+def parola_degistir(kullanici, mevcut_parola, yeni_parola, tekrar):
+    """Açık kasayı ve onun geri dönüş kopyasını yeni parolayla yeniden mühürle.
+
+    Sunucu, işlem başlamadan önce kasayı geçici olarak kilitlemeli ve açık
+    üretim/yazma işlerinin bitmesini sağlamalıdır. Açık çalışma klasörü
+    yerinde kalır; yarım kalan işlemde eski şifreli dosyalar geri yüklenir.
+    """
+    _kullanici_dogrula(kullanici)
+    if not isinstance(yeni_parola, str) or yeni_parola != tekrar:
+        raise KasaHatasi("yeni parolalar eşleşmiyor")
+    if yeni_parola == mevcut_parola:
+        raise KasaHatasi("yeni parola mevcut paroladan farklı olmalı")
+    uyari = guc_uyarilari(yeni_parola)
+    if uyari:
+        raise KasaHatasi("yeni parola zayıf: " + "; ".join(uyari))
+
+    eski = _parola_hazirla(mevcut_parola)
+    yeni = _parola_hazirla(yeni_parola)
+    saklanan = None
+    asama_kasa = asama_onceki = None
+    tutulan_kasa = tutulan_onceki = None
+    kasa_yer_degisti = onceki_yer_degisti = False
+    yeni_kasa_yerlesik = yeni_onceki_yerlesik = False
+    tamamlandi = False
+    try:
         with _kilit:
-            kilit = _profil_kilitleri.get(kullanici)
-            if kilit is None:
-                kilit = _profil_kilitleri[kullanici] = _th.RLock()
-        with kilit:
-            return islem(kullanici, *args, **kwargs)
-    return sar
+            kayit = _acik.get(kullanici)
+            if kayit is None:
+                raise KasaHatasi("kasa kilitli")
+            if not kayit["kapaniyor"]:
+                raise KasaHatasi("parola değişikliği için kasa geçici olarak kilitlenmeli")
+            saklanan = bytearray(kayit["parola"])
+        if not _hmac.compare_digest(bytes(eski), bytes(saklanan)):
+            raise KasaHatasi(GENEL_HATA)
+
+        kasa = _kasa_dosya(kullanici)
+        onceki = _onceki_dosya(kullanici)
+        calisma = _calisma(kullanici)
+        if not _os.path.isfile(kasa) or not _deneme_cozum(kasa, eski):
+            raise KasaHatasi(GENEL_HATA)
+        if not (_os.path.isdir(calisma) and _os.listdir(calisma)):
+            raise KasaHatasi("kasa çalışma alanı bulunamadı")
+
+        _os.makedirs(KASALAR_DIR, exist_ok=True)
+        gizle(KASALAR_DIR)
+        asama_kasa = _gecici_sifreli_yol(kullanici, "yeni-kasa")
+        asama_onceki = _gecici_sifreli_yol(kullanici, "yeni-onceki")
+        tutulan_kasa = _gecici_sifreli_yol(kullanici, "eski-kasa")
+        tutulan_onceki = _gecici_sifreli_yol(kullanici, "eski-onceki")
+
+        if not _arsiv_sifrele(calisma, asama_kasa, yeni):
+            raise KasaHatasi("yeni kasa şifrelenemedi; eski parola korunuyor")
+        if not _deneme_cozum(asama_kasa, yeni):
+            raise KasaHatasi("yeni kasa doğrulanamadı; eski parola korunuyor")
+        # Önceki kasayı da yeni parolayla koru. Akış bellekte taşınır; diskte
+        # şifresiz ara arşiv veya klasör oluşturulmaz.
+        if not _arsiv_yeniden_sifrele(kasa, asama_onceki, eski, yeni):
+            raise KasaHatasi("kasa yedek kopyası yeniden şifrelenemedi")
+        if not _deneme_cozum(asama_onceki, yeni):
+            raise KasaHatasi("kasa yedek kopyası doğrulanamadı")
+
+        try:
+            _os.replace(kasa, tutulan_kasa)
+            kasa_yer_degisti = True
+            if _os.path.isfile(onceki):
+                _os.replace(onceki, tutulan_onceki)
+                onceki_yer_degisti = True
+            _os.replace(asama_kasa, kasa)
+            yeni_kasa_yerlesik = True
+            _os.replace(asama_onceki, onceki)
+            yeni_onceki_yerlesik = True
+            if kalici_kopya is not None:
+                kalici_kopya()
+            with _kilit:
+                guncel = _acik.get(kullanici)
+                if guncel is not kayit or not guncel["kapaniyor"]:
+                    raise KasaHatasi("kasa durumu değişti; parola güncellenemedi")
+                _sifirla(guncel["parola"])
+                guncel["parola"] = bytearray(yeni)
+                guncel["son"] = _time.time()
+            tamamlandi = True
+        except Exception:
+            # Yeni kasa ve Flex kopyası doğrulanmadan eski dosyaları bırakma.
+            if yeni_onceki_yerlesik:
+                try:
+                    _os.remove(onceki)
+                except OSError:
+                    pass
+            if yeni_kasa_yerlesik:
+                try:
+                    _os.remove(kasa)
+                except OSError:
+                    pass
+            if kasa_yer_degisti and _os.path.exists(tutulan_kasa):
+                _os.replace(tutulan_kasa, kasa)
+            if onceki_yer_degisti and _os.path.exists(tutulan_onceki):
+                _os.replace(tutulan_onceki, onceki)
+            raise
+
+        return {"degisti": True}
+    finally:
+        _sifirla(eski)
+        _sifirla(yeni)
+        if saklanan is not None:
+            _sifirla(saklanan)
+        # Ara dosyalar yalnızca şifreli arşivlerdir. Tutulan eski arşivleri
+        # silmek, başarılı değişiklikten sonra eski parolanın işe yaramasını
+        # önler. Bunlar Flex'e aktarılmaz; yalnızca adlandırılmış kasa
+        # dosyaları kalıcı yedek listesine girer.
+        yollar = [asama_kasa, asama_onceki]
+        if tamamlandi:
+            yollar.extend((tutulan_kasa, tutulan_onceki))
+        for yol in yollar:
+            if yol:
+                try:
+                    _os.remove(yol)
+                except OSError:
+                    pass
 
 
 def calisma_koku(kullanici):

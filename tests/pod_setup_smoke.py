@@ -20,6 +20,22 @@ import pod_setup
 assert not pod_setup.workflow_enabled("flux3")
 assert not pod_setup.workflow_ready("flux3")
 assert "flux3" not in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
+
+# Civitai page links must preserve the exact model version and work on both
+# official hosts, including the mature-content .red domain.
+with patch.object(pod_setup, "_civitai_resolve_metadata", return_value={"size": 123}):
+    red_source, red_suffix = pod_setup._parse_lora_link(
+        "https://civitai.red/models/2657057/moody-gal-momoka-krea2-zimage?modelVersionId=3125325")
+    red_direct_source, _ = pod_setup._parse_lora_link(
+        "https://civitai.red/api/download/models/3125325")
+    com_source, com_suffix = pod_setup._parse_lora_link(
+        "https://civitai.com/models/2657057/moody-gal-momoka-krea2-zimage?modelVersionId=3125325")
+assert red_suffix == com_suffix == ".safetensors"
+assert red_source["version"] == com_source["version"] == 3125325
+assert red_source["host"] == "civitai.red" and com_source["host"] == "civitai.com"
+assert red_direct_source["host"] == "civitai.red"
+assert pod_setup._file_link(dict(red_source, dir="loras", name="fixture.safetensors")) == (
+    "https://civitai.red/api/download/models/3125325")
 model_selector = re.search(
     r'<select id="runpodImageModel">(.*?)</select>',
     pathlib.Path("/opt/webui_flux2/index.html").read_text(encoding="utf-8"),

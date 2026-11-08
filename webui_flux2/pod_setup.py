@@ -28,6 +28,8 @@ if _CATALOG_DATA.get("schema") != 2:
     raise RuntimeError("Model listesi desteklenmeyen biçimde.")
 CATALOG = copy.deepcopy(_CATALOG_DATA.get("groups") or {})
 WORKFLOWS = copy.deepcopy(_CATALOG_DATA.get("workflows") or {})
+_CIVITAI_HOSTS = frozenset(("civitai.com", "www.civitai.com",
+                            "civitai.red", "www.civitai.red"))
 LLAMA_TAG = "b12128"
 LLAMA_RELEASE = {
     f"llama-{LLAMA_TAG}-bin-ubuntu-cuda-12.8-x64.tar.gz":
@@ -101,7 +103,7 @@ def _validate_catalog():
             source_type = file.get("source") or "hf"
             source = (source_type, file.get("repo"), file.get("url"),
                       file.get("revision"), file.get("path"), file.get("version"),
-                      file.get("sha256"))
+                      file.get("host"), file.get("sha256"))
             if target in targets and targets[target] != source:
                 raise RuntimeError(f"{group}: ortak dosyanın kaynağı gruplar arasında farklı.")
             targets[target] = source
@@ -110,6 +112,8 @@ def _validate_catalog():
             if source_type == "civitai":
                 if not isinstance(file.get("version"), int):
                     raise RuntimeError(f"{group}: Civitai sürüm numarası eksik.")
+                if file.get("host", "civitai.com") not in _CIVITAI_HOSTS:
+                    raise RuntimeError(f"{group}: Civitai alan adı geçersiz.")
             elif source_type == "url":
                 parsed = urllib.parse.urlsplit(file.get("url") or "")
                 if (parsed.scheme != "https" or not parsed.hostname or parsed.username
@@ -346,7 +350,10 @@ def _file_link(file):
     if source == "hf":
         return _hf_link(file)
     if source == "civitai":
-        return "https://civitai.com/api/download/models/%s" % int(file["version"])
+        host = file.get("host", "civitai.com")
+        if host not in _CIVITAI_HOSTS:
+            host = "civitai.com"
+        return "https://%s/api/download/models/%s" % (host, int(file["version"]))
     return str(file.get("url") or "")
 
 
@@ -358,7 +365,8 @@ def _apply_saved_links(settings):
             override = overrides.get(key)
             if not isinstance(override, dict):
                 continue
-            for field in ("source", "repo", "revision", "path", "url", "version", "size", "sha256"):
+            for field in ("source", "repo", "revision", "path", "url", "version",
+                          "host", "size", "sha256"):
                 file.pop(field, None)
                 if field in override:
                     file[field] = override[field]
@@ -559,9 +567,10 @@ def _parse_model_link(link):
         source = _parse_hf_link(value)
         source["source"] = "hf"
         return source, _hf_resolve_metadata(source)
-    if parsed.hostname in ("civitai.com", "www.civitai.com"):
+    if parsed.hostname in _CIVITAI_HOSTS:
         source, _ = _parse_lora_link(value)
-        return source, _civitai_resolve_metadata(source["version"])
+        return source, {key: source[key] for key in ("size", "sha256")
+                        if key in source}
     if any(key.casefold() in ("token", "api_key", "apikey", "key")
            for key in urllib.parse.parse_qs(parsed.query)):
         raise ValueError("Gizli anahtar bağlantıya eklenmemeli; Pod Secret kullanılır.")
@@ -578,12 +587,16 @@ def _parse_model_link(link):
     return {"source": "url", "url": value}, metadata
 
 
-def _civitai_resolve_metadata(version):
+def _civitai_resolve_metadata(version, host="civitai.com"):
     token = os.environ.get("CIVITAI_TOKEN")
     if not token or token.startswith("{{"):
         return {}
+    if host not in _CIVITAI_HOSTS:
+        host = "civitai.com"
+    if host.startswith("www."):
+        host = host[4:]
     request = urllib.request.Request(
-        "https://civitai.com/api/v1/model-versions/%d" % int(version),
+        "https://%s/api/v1/model-versions/%d" % (host, int(version)),
         headers={"Authorization": "Bearer " + token,
                  "User-Agent": "RunPod-WebUI/1"})
     try:
@@ -616,7 +629,7 @@ def _parse_lora_link(link):
         if suffix not in (".safetensors", ".pt"):
             raise ValueError("Hugging Face LoRA dosyası .safetensors veya .pt olmalı.")
         return dict(source, source="hf", **_hf_resolve_metadata(source)), suffix
-    if parsed.hostname not in ("civitai.com", "www.civitai.com"):
+    if parsed.hostname not in _CIVITAI_HOSTS:
         raise ValueError("Yalnızca Hugging Face veya Civitai LoRA bağlantısı desteklenir.")
     query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
     if any(key.casefold() in ("token", "api_key", "apikey") for key in query):
@@ -632,8 +645,9 @@ def _parse_lora_link(link):
                 continue
     if not version or version < 1:
         raise ValueError("Civitai bağlantısında model sürümü numarası bulunamadı.")
-    source = {"source": "civitai", "version": version}
-    return dict(source, **_civitai_resolve_metadata(version)), ".safetensors"
+    host = "civitai.red" if parsed.hostname.endswith(".red") else "civitai.com"
+    source = {"source": "civitai", "version": version, "host": host}
+    return dict(source, **_civitai_resolve_metadata(version, host)), ".safetensors"
 
 
 def add_lora(payload):
@@ -976,6 +990,19 @@ def workflow_ready(name):
     return workflow_enabled(name) and _engine_ready(group)
 
 
+LLM_PROFILE_SIZE_ORDER = ("llm_26b", "llm_12b", "llama")
+
+
+def llm_profile_fallback(preferred, ready_check=None):
+    """Choose the requested LLM or the next smaller ready profile."""
+    if preferred not in LLM_PROFILE_SIZE_ORDER:
+        raise ValueError("Bilinmeyen sohbet modeli.")
+    ready = ready_check or workflow_ready
+    start = LLM_PROFILE_SIZE_ORDER.index(preferred)
+    return next((name for name in LLM_PROFILE_SIZE_ORDER[start:]
+                 if ready(name)), None)
+
+
 def _bagimlilik_sirasi(group, gorulen=None):
     gorulen = gorulen or set()
     if group in gorulen:
@@ -1234,7 +1261,7 @@ def _run():
                 _install_comfy(cancel_event)
             elif item["engine"] == "llama":
                 _progress(group, "llama-server CUDA sürücüsü kontrol ediliyor")
-                _install_llama(cancel_event)
+                _install_llama(cancel_event, group=group)
             else:
                 raise RuntimeError("Model grubu için bilinmeyen çalışma ortamı.")
             optional_failures = []
@@ -1287,7 +1314,7 @@ def _run():
         print(f"[pod-setup] {group}: {result[0]}", flush=True)
 
 
-def _command(args, label, *, cwd=None, cancel=None, timeout=1800):
+def _command(args, label, *, cwd=None, cancel=None, timeout=1800, progress=None):
     global _active_process
     ROOT.mkdir(parents=True, exist_ok=True)
     with (ROOT / "setup.log").open("ab") as log:
@@ -1297,14 +1324,28 @@ def _command(args, label, *, cwd=None, cancel=None, timeout=1800):
         with _lock:
             _active_process = process
         start = time.monotonic()
+        progress_time = start
+        progress_size = 0
+        progress_logged = 0.0
         try:
             while process.poll() is None:
                 if cancel is not None and cancel.is_set():
                     _stop_process(process)
                     raise DownloadCancelled("Hazırlık iptal edildi.")
-                if time.monotonic() - start > timeout:
+                now = time.monotonic()
+                if now - start > timeout:
                     _stop_process(process)
                     raise RuntimeError(f"{label} zaman aşımına uğradı.")
+                if progress:
+                    path = Path(progress["path"])
+                    size = path.stat().st_size if path.is_file() else 0
+                    rate = max(0, size - progress_size) / max(now - progress_time, .001) / (1024 * 1024)
+                    if now - progress_logged >= 0.8:
+                        _progress(progress["group"], progress.get("stage", "İndiriliyor"),
+                                  name=progress["name"], downloaded=size,
+                                  total=progress.get("total"), rate=round(rate, 2))
+                        progress_logged = now
+                    progress_time, progress_size = now, size
                 time.sleep(0.2)
             if cancel is not None and cancel.is_set():
                 raise DownloadCancelled("Hazırlık iptal edildi.")
@@ -1438,11 +1479,14 @@ def _record_llama_cuda_scan(output):
             log.write("[llama] " + line + "\n")
 
 
-def _download_llama_package(archive, name, expected, cancel):
+def _download_llama_package(archive, name, expected, cancel, group="llama"):
     """Resume first; retry from scratch and then use GitHub's asset API."""
     def valid():
         if not archive.is_file() or not archive.stat().st_size:
             return False
+        size = archive.stat().st_size
+        _progress(group, "llama-server paketi doğrulanıyor", name=name,
+                  downloaded=size, total=LLAMA_RELEASE_ASSETS[name])
         with archive.open('rb') as stream:
             return hashlib.file_digest(stream, 'sha256').hexdigest() == expected
 
@@ -1464,7 +1508,10 @@ def _download_llama_package(archive, name, expected, cancel):
                         "--header", "User-Agent: RunPod-WebUI"])
         cmd.append(source)
         try:
-            _command(cmd, "llama-server paketi", cancel=cancel)
+            _command(cmd, "llama-server paketi", cancel=cancel,
+                     progress={"group": group, "name": name, "path": str(archive),
+                               "total": LLAMA_RELEASE_ASSETS[name],
+                               "stage": "llama-server paketi indiriliyor"})
         except DownloadCancelled:
             raise
         except (OSError, RuntimeError) as exc:
@@ -1479,7 +1526,7 @@ def _download_llama_package(archive, name, expected, cancel):
                        (last_error or "Bağlantı hatası."))
 
 
-def _install_llama(cancel):
+def _install_llama(cancel, group="llama"):
     llama = ROOT / "llama"
     marker = llama / ".pod-ready"
     target = Path(os.environ["LLAMA_SERVER_PATH"])
@@ -1493,7 +1540,7 @@ def _install_llama(cancel):
     llama.mkdir(parents=True, exist_ok=True)
     for name, expected in LLAMA_RELEASE.items():
         archive = ROOT / name
-        _download_llama_package(archive, name, expected, cancel)
+        _download_llama_package(archive, name, expected, cancel, group=group)
         with tarfile.open(archive) as package:
             package.extractall(llama, filter="data")
         archive.unlink()
@@ -1543,7 +1590,9 @@ def _model(file, cancel, group):
     global _active_process
     directory = MODELS / file["dir"]
     target = directory / file["name"]
-    if _model_present(target):
+    if target.is_file() and target.stat().st_size:
+        _progress(group, "Dosya doğrulanıyor", name=file["name"],
+                  downloaded=target.stat().st_size, total=file.get("size"))
         if _valid_model(target, file):
             _write_verification(target, file)
             return
@@ -1625,6 +1674,9 @@ except HfHubHTTPError as e:
         raise RuntimeError("Model erişim izni gerekiyor. Pod’a HF_TOKEN ekleyin.")
     if process.returncode:
         raise RuntimeError("Hugging Face model indirmesi başarısız oldu; logları kontrol edin.")
+    _progress(group, "Dosya doğrulanıyor", name=file["name"],
+              downloaded=source.stat().st_size if source.is_file() else 0,
+              total=file.get("size"))
     if not _valid_model(source, file):
         source.unlink(missing_ok=True)
         raise RuntimeError("Model dosyasının bütünlüğü doğrulanamadı.")
@@ -1667,6 +1719,13 @@ except Exception:
     previous_time = time.monotonic()
     previous_size = temp.stat().st_size if temp.exists() else 0
     process = None
+    host = file.get("host", "civitai.com")
+    if host not in _CIVITAI_HOSTS:
+        host = "civitai.com"
+    if host.startswith("www."):
+        host = host[4:]
+    payload = json.dumps({"url": f"https://{host}/api/download/models/{int(file['version'])}",
+                          "part": str(temp)}).encode("utf-8")
     try:
         with (ROOT / "setup.log").open("ab") as log:
             process = subprocess.Popen([sys.executable, "-c", helper],
@@ -1675,8 +1734,6 @@ except Exception:
                                        start_new_session=True)
             with _lock:
                 _active_process = process
-            payload = json.dumps({"url": f"https://civitai.com/api/download/models/{int(file['version'])}",
-                                  "part": str(temp)}).encode("utf-8")
             process.stdin.write(payload)
             process.stdin.close()
             while process.poll() is None:
@@ -1696,6 +1753,10 @@ except Exception:
                 _active_process = None
     if cancel.is_set():
         raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
+    if process.returncode == 43:
+        _progress(group, "Dosya doğrulanıyor", name=file["name"],
+                  downloaded=temp.stat().st_size if temp.is_file() else 0,
+                  total=file.get("size"))
     if process.returncode == 43 and _valid_model(temp, file):
         temp.replace(target)
         _write_verification(target, file)
@@ -1704,6 +1765,9 @@ except Exception:
         raise RuntimeError("Civitai model erişimi reddedildi; Pod Secret ayarını kontrol edin.")
     if process.returncode:
         raise RuntimeError("Civitai modeli indirilemedi; kurulum logunu kontrol edin.")
+    _progress(group, "Dosya doğrulanıyor", name=file["name"],
+              downloaded=temp.stat().st_size if temp.is_file() else 0,
+              total=file.get("size"))
     if not _valid_model(temp, file):
         temp.unlink(missing_ok=True)
         raise RuntimeError("Model dosyasının bütünlüğü doğrulanamadı.")
@@ -1766,6 +1830,9 @@ except Exception:
         raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
     if process.returncode:
         raise RuntimeError("Model indirilemedi; kurulum logunu kontrol edin.")
+    _progress(group, "Dosya doğrulanıyor", name=file["name"],
+              downloaded=temp.stat().st_size if temp.is_file() else 0,
+              total=file.get("size"))
     if not _valid_model(temp, file):
         temp.unlink(missing_ok=True)
         raise RuntimeError("Model dosyasının bütünlüğü doğrulanamadı.")

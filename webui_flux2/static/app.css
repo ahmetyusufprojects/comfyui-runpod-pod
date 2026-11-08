@@ -287,6 +287,7 @@ details.dusunme-kutu pre{margin:6px 0 0;max-height:200px;overflow:auto;font-size
 #wsUretim{height:calc(100dvh - 60px);margin-bottom:4px}
 .calisma-ana{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;overflow:hidden;padding:0}
 .calisma-ana .kart{flex:none}
+#wsStudyo .ps-kart{flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 #wsUretim > .calisma-ana{min-height:0}
 .uretim-kaydir{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
 .uretim-sahne{position:relative;display:flex;flex:0 0 auto;flex-direction:column;width:100%;height:100%;min-height:100%;max-height:100%;background:#0a0d12}

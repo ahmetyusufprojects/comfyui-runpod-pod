@@ -82,6 +82,16 @@ jobs:
           set -eu
           docker cp tests/pod_setup_smoke.py gallery-check:/tmp/pod_setup_smoke.py
           docker exec gallery-check /opt/webui-venv/bin/python /tmp/pod_setup_smoke.py
+      - name: Verify encrypted vault password rotation
+        run: |
+          set -eu
+          docker cp tests/kasa_password_rotation_smoke.py gallery-check:/tmp/kasa_password_rotation_smoke.py
+          docker exec gallery-check /opt/webui-venv/bin/python /tmp/kasa_password_rotation_smoke.py
+      - name: Verify LLM model fallback order
+        run: |
+          set -eu
+          docker cp tests/llm_model_fallback_smoke.py gallery-check:/tmp/llm_model_fallback_smoke.py
+          docker exec gallery-check /opt/webui-venv/bin/python /tmp/llm_model_fallback_smoke.py
       - name: Verify application update and rollback
         run: |
           set -eu

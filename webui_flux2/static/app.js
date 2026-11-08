@@ -709,6 +709,40 @@ $('sfrBtn').onclick = async () => {
     if (r.ok){ $('sfrEski').value = ''; $('sfrYeni').value = ''; }
   }catch(e){ $('sfrBilgi').textContent = 'HATA: ' + e; }
 };
+async function kasaParolasiDegistir(){
+  const button = $('kasaParolaDegistir');
+  const info = $('kasaParolaBilgi');
+  if(button.disabled) return;
+  const mevcut = $('kasaEskiParola').value;
+  const yeni = $('kasaYeniParola').value;
+  const tekrar = $('kasaYeniParolaTekrar').value;
+  if(!mevcut || !yeni || !tekrar){
+    info.textContent = 'Üç parola alanını da doldur.';
+    return;
+  }
+  button.disabled = true;
+  info.textContent = 'Kasa güvenli biçimde yeniden şifreleniyor...';
+  try{
+    const r = await _fetch('/api/kasa/parola', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mevcut, yeni, tekrar})});
+    const j = await r.json().catch(() => ({}));
+    if(!r.ok) throw new Error(j.hata || 'HTTP ' + r.status);
+    info.textContent = 'Kasa parolası değişti. Yeni parola sonraki açılışlarda kullanılacak.';
+    bilgi('Kasa parolası değiştirildi.');
+  }catch(e){
+    info.textContent = 'Değiştirilemedi: ' + (e.message || e);
+  }finally{
+    $('kasaEskiParola').value = '';
+    $('kasaYeniParola').value = '';
+    $('kasaYeniParolaTekrar').value = '';
+    parolaGozleriniKapat();
+    button.disabled = false;
+  }
+}
+$('kasaParolaDegistir').onclick = kasaParolasiDegistir;
+['kasaEskiParola','kasaYeniParola','kasaYeniParolaTekrar'].forEach(id =>
+  $(id).addEventListener('keydown', e => { if(e.key === 'Enter') kasaParolasiDegistir(); }));
 async function adminYukle(){
   try{
     const r = await _fetch('/api/kullanicilar');
@@ -4154,7 +4188,7 @@ uretimGecmisGenisliginiAyarla();
 
 function uretimArayuzunuKur(){
   const advanced = $('uretimAyarIcerik');
-  ['runpodModelWrap','kartRef','videoKart','kartCoz','kartOrn','uretimDestekPanel'].forEach(id => {
+  ['runpodModelWrap','kartRef','videoKart','kartCoz','kartOrn','uretimDestekPanel','uretimNegatifPanel'].forEach(id => {
     const el = $(id); if(el) advanced.appendChild(el);
   });
   $('uretimDestekPanel').hidden = false;
