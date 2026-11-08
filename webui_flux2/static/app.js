@@ -2,6 +2,13 @@
 /* Video ve görsel üretim aynı sıradaki GPU iş kuyruğunu kullanır. */
 const VIDEO_HAZIRLIK = {suresn: 0, fps: 0};
 let RUNPOD_WEBUI = false;
+const RUNPOD_IMAGE_DEFAULTS = {
+  z_image: {steps: 9, sampler: 'dpmpp_2m_sde'},
+  flux2: {steps: 4, sampler: 'euler'},
+  flux3: {steps: 16, sampler: 'euler'},
+  krea2: {steps: 8, sampler: 'euler_ancestral'},
+  illustrious: {steps: 28, sampler: 'euler'}
+};
 let fotoB64 = null, fotoB64_2 = null, fotoMime = null, fotoMime2 = null, takipIs = null;
 let gecSayfa = 1, gecListe = [], gecIdx = 0, gecToplam = 0, gecGorunum = 'izgara', prOnbellek = [];
 let gecFavoriler = false;
@@ -16,7 +23,7 @@ let uretimPinchMesafe = 0, uretimPinchDurum = null, uretimPanDurum = null, ureti
 let uretimGecmisGenislikUygula = null;
 let psGecmisSayfa = 1, psGecmisTum = [], psGecmisFavoriler = false;
 let promptDestekYaraticilik = 0.7, promptDestekUzunluk = 'orta';
-let uretimVarsayilan = {steps: 8, seed: -1, max_side: 1536};
+let uretimVarsayilan = {steps: 9, seed: -1, max_side: 1536};
 let uretimKesintisizAktif = false, uretimKesintisizIstek = null;
 let llmVarsayilanlar = null;
 let runpodLoraCurrentModel = null, runpodLoraSaved = null;
@@ -111,18 +118,15 @@ function uretimModGuncelle(){
   const model = otomatikModel();
   const modelDegisti = !!otomatikSonModel && otomatikSonModel !== model;
   if(modelDegisti){
-    const varsayilanlar = {
+    const varsayilanlar = RUNPOD_WEBUI ? RUNPOD_IMAGE_DEFAULTS : {
       flux2: {steps: 4, sampler: 'euler'},
       z_image: {steps: 8, sampler: 'res_multistep'},
-      flux3: {steps: 16, sampler: 'euler'},
-      krea2: {steps: 8, sampler: 'euler_ancestral'},
-      illustrious: {steps: 28, sampler: 'euler'},
       anima: {steps: 8, sampler: 'euler'},
       moody_anima: {steps: 4, sampler: 'euler'}
     };
     const eski = varsayilanlar[otomatikSonModel], yeni = varsayilanlar[model];
-    if(+$('steps').value === eski.steps) $('steps').value = yeni.steps;
-    if($('sampler').value === eski.sampler) $('sampler').value = yeni.sampler;
+    if(eski && yeni && +$('steps').value === eski.steps) $('steps').value = yeni.steps;
+    if(eski && yeni && $('sampler').value === eski.sampler) $('sampler').value = yeni.sampler;
   }
   otomatikSonModel = model;
   if(modelDegisti) runpodLoraYukle();
@@ -165,6 +169,7 @@ function uretimIcGorunum(){
   goster('videoKart', vm);
   goster('kartCoz', !vm);
   goster('kartOrn', !vm);
+  if($('uretimNegatifPanel')) $('uretimNegatifPanel').hidden = vm;
   if($('uretimPromptCeviri')) $('uretimPromptCeviri').disabled = vm;
 }
 function menuUygula(){
@@ -198,8 +203,8 @@ function menuUygula(){
 function kullaniciAyarlariniVarsayilanaAl(){
   const degerler = {
     prompt: '', negatif: '', w: 1024, h: 1024, maxside: 1536,
-    maxolcek: true, vmax: 1344, vsure: 5, vfps: '24', videoProfile: 'quality', steps: 8,
-    cfg: 1, sampler: 'res_multistep', seed: -1, wf: 'otomatik',
+    maxolcek: true, vmax: 1344, vsure: 5, vfps: '24', videoProfile: 'quality', steps: 9,
+    cfg: 1, sampler: 'dpmpp_2m_sde', seed: -1, wf: 'otomatik',
     preset: '1024x1024', animaModel: false, moodyAnimaModel: false,
     uretimPromptDestek: false, uretimPromptCeviri: false,
     limitInput: 0, beklemeInput: 15, llmCtx: 8000,
@@ -223,7 +228,7 @@ function kullaniciAyarlariniVarsayilanaAl(){
   promptDestekYaraticilik = 0.7;
   promptDestekUzunluk = 'orta';
   uretimKesintisizAktif = false; uretimKesintisizIstek = null;
-  uretimVarsayilan = {steps: 8, seed: -1, max_side: 1536};
+  uretimVarsayilan = {steps: 9, seed: -1, max_side: 1536};
   kilitOran = 1;
   sohbetBaglamBoyutu = 8000;
   sohbetBaglamGuncelle(null);
@@ -240,6 +245,9 @@ function kullaniciAyarlariniVarsayilanaAl(){
   $('psPozitif').value = ''; $('psPozitifTr').value = '';
   $('psNegatif').value = ''; $('psAciklama').textContent = '';
   $('psEtiketler').textContent = ''; $('psBilgi').textContent = '';
+  $('psPromptProfile').value = 'auto'; $('psFlux3BboxMode').checked = false;
+  $('psPromptProfile').disabled = false; $('psFlux3BboxMode').disabled = false;
+  $('psNegatifDetay').open = false;
   psTemizle(1); psTemizle(2); psModGuncelle();
   if($('llmLowBandwidth').onchange) $('llmLowBandwidth').onchange();
   cozunurlukGorunumu(); oranKilitGuncelle(); uretimIcGorunum(); uretimModGuncelle();
@@ -776,10 +784,8 @@ if(wfEl) wfEl.onchange = e => {
   formKaydet();
 };
 if($('runpodImageModel')) $('runpodImageModel').addEventListener('change', () => {
-  const defaults = {z_image:{steps:8,sampler:'res_multistep'},flux2:{steps:4,sampler:'euler'},
-    flux3:{steps:16,sampler:'euler'},krea2:{steps:8,sampler:'euler_ancestral'},
-    illustrious:{steps:28,sampler:'euler'}};
-  const previous = defaults[otomatikSonModel], next = defaults[otomatikModel()];
+  const previous = RUNPOD_IMAGE_DEFAULTS[otomatikSonModel];
+  const next = RUNPOD_IMAGE_DEFAULTS[otomatikModel()];
   if(previous && next && +$('steps').value === previous.steps) $('steps').value = next.steps;
   if(previous && next && $('sampler').value === previous.sampler) $('sampler').value = next.sampler;
   uretimModGuncelle(); formKaydet();
@@ -2522,6 +2528,8 @@ const uiAyarAlanlari = {
   ps_creativity: 'psYaraticilik',
   ps_length: 'psUzunluk',
   ps_language: 'psDil',
+  ps_prompt_profile: 'psPromptProfile',
+  ps_bbox_mode: 'psFlux3BboxMode',
   monitor_auto_refresh: 'izlemeOtomatik',
   log_source: 'logKaynak',
   log_lines: 'logSatir',
@@ -2768,6 +2776,7 @@ function uiAyarlariniUygula(ayarlar){
         (key === 'log_lines' ? '200' : '');
     else if(key === 'ps_length') el.value = 'orta';
     else if(key === 'ps_language') el.value = 'en';
+    else if(key === 'ps_prompt_profile') el.value = 'auto';
     else if(key === 'log_source') el.value = 'llama';
     else if(key === 'cinematic_mode') el.value = 'off';
   });
@@ -2933,7 +2942,7 @@ async function ayarYukle(){
     $('promptDestekYaraticilik').value = promptDestekYaraticilik;
     $('promptDestekUzunluk').value = promptDestekUzunluk;
     uretimVarsayilan = {
-      steps: +(j.ayarlar && j.ayarlar.uretim_varsayilan_steps || 8),
+      steps: +(j.ayarlar && j.ayarlar.uretim_varsayilan_steps || 9),
       seed: +(j.ayarlar && j.ayarlar.uretim_varsayilan_seed != null ? j.ayarlar.uretim_varsayilan_seed : -1),
       max_side: +(j.ayarlar && j.ayarlar.uretim_varsayilan_max_side || 1536)
     };
@@ -3089,31 +3098,70 @@ ayariDegisinceKaydet(['llmSistem','llmSistemSohbet','llmModFikir',
   el.addEventListener('change', formKaydet);
 });
 /* Prompt Stüdyosu: fikir/görsel/çeviri -> llama-server ile prompt üretimi. */
-let psB64_1 = null, psB64_2 = null, psMime1 = null, psMime2 = null, psURL_1 = null, psURL_2 = null, psSonuc = null, psSuruyor = false, psAktifIs = null;
+let psB64_1 = null, psB64_2 = null, psMime1 = null, psMime2 = null, psURL_1 = null, psURL_2 = null, psSonuc = null, psSuruyor = false, psAktifIs = null, psAktifProfil = 'auto';
 const llmIsTakipleri = {};
 /* Mod secimi YOK: referans sayisina gore sistem promptu otomatik secilir.
    0 referans = fikir, 1 = gorsel duzenleme, 2 = birlestirme. */
+function psReferansSayisi(){ return (psB64_1 ? 1 : 0) + (psB64_2 ? 1 : 0); }
 function psOtomatikMod(){
-  const n = (psB64_1 ? 1 : 0) + (psB64_2 ? 1 : 0);
+  const n = psReferansSayisi();
   return n === 2 ? 'birlestir' : (n === 1 ? 'gorsel' : 'fikir');
+}
+const PS_PROFIL_ADLARI = {auto:'Otomatik', general:'Genel', z_image:'Z-Image', flux3:'Flux 3 Klein', krea2:'Krea 2', minimaxh3:'MiniMax H3'};
+function psProfilIcin(mod){
+  const secili = $('psPromptProfile')?.value || 'auto';
+  if(secili !== 'auto') return secili;
+  if(mod === 'video') return 'minimaxh3';
+  if(RUNPOD_WEBUI){
+    const model = typeof runpodModelSecili === 'function' ? runpodModelSecili() : null;
+    if(!model) return psReferansSayisi() ? 'general' : 'z_image';
+    if(psReferansSayisi() && (model === 'krea2' || model === 'illustrious')) return 'general';
+    return ['z_image','flux3','krea2'].includes(model) ? model : 'general';
+  }
+  return otomatikModel() === 'z_image' && !psReferansSayisi() ? 'z_image' : 'general';
 }
 function psModGuncelle(){
   let m = psOtomatikMod();
-  if(RUNPOD_WEBUI && videoMu() && m !== 'ceviri') m = 'video';
+  if(videoMu() || $('psPromptProfile')?.value === 'minimaxh3') m = 'video';
   const bilgi = $('psModBilgi');
   if(bilgi){
-    bilgi.textContent = m === 'video' ? 'Video modeli için prompt üretilir' : m === 'birlestir' ? 'İki referans · birleştirme promptu üretilir' :
-      (m === 'gorsel' ? 'Bir referans · düzenleme promptu üretilir' :
-        'Referans yok · fikirden prompt üretilir');
+    bilgi.textContent = m === 'video' ? 'Video · hareket, kamera ve zaman akışı promptu üretilir' :
+      (m === 'birlestir' ? 'İki referans · birleştirme promptu üretilir' :
+        (m === 'gorsel' ? 'Bir referans · düzenleme promptu üretilir' :
+          'Referans yok · fikirden prompt üretilir'));
   }
-  $('psMetin').placeholder = m === 'gorsel' ?
+  $('psMetin').placeholder = m === 'video' ?
+    'Video sahnesini ve hareketini anlat... İstersen en fazla iki referans görsel ekle.' : (m === 'gorsel' ?
     'Görselde ne değişiklik istiyorsun? Örn. gökyüzünü mavi yap...' :
     (m === 'birlestir' ? 'İki görseli nasıl birleştirelim? (isteğe bağlı yönlendirme)...' :
-      'Ne keşfedilsin? Fikrini yaz...');
+      'Ne keşfedilsin? Fikrini yaz...'));
+  const efektif = psProfilIcin(m), bilgiMetin = $('psPromptProfileInfo');
+  const aciklamalar = {
+    auto: 'Otomatik seçim mevcut üretim modeline göre yapılır; üretim modelini değiştirmez.',
+    general: 'Uygulamanın genel prompt kuralları kullanılır; modelin üretim ayarı değişmez.',
+    z_image: 'Z-Image için verilen sahne, özne ve yerleşim ayrıntılarını koruyan prompt.',
+    flux3: 'Flux 3 için metinden görsel, referanslı düzenleme ve isteğe bağlı bbox tablosu.',
+    krea2: 'Krea 2 için karakterleri ve aralarındaki konumu ayrı ayrı kuran prompt.',
+    minimaxh3: 'MiniMax H3 için kesintisiz video akışı, referans rolleri ve ses bölümleri.'
+  };
+  if(bilgiMetin){
+    const temel = aciklamalar[$('psPromptProfile')?.value || 'auto'] || aciklamalar.auto;
+    bilgiMetin.textContent = ($('psPromptProfile')?.value === 'auto' ?
+      'Şu an: ' + (PS_PROFIL_ADLARI[efektif] || 'Genel') + ' · ' : '') + temel;
+  }
+  if($('psFlux3BboxWrap')) $('psFlux3BboxWrap').hidden = efektif !== 'flux3';
   $('psRefSlot1').hidden = !psB64_1;
   $('psRefSlot2').hidden = !psB64_2;
   $('psGorselOnizleme').hidden = !psB64_1 && !psB64_2;
 }
+$('psPromptProfile').addEventListener('change', () => {
+  uiAyarKaydet('ps_prompt_profile', $('psPromptProfile').value);
+  psModGuncelle();
+});
+$('psFlux3BboxMode').addEventListener('change', () => {
+  uiAyarKaydet('ps_bbox_mode', $('psFlux3BboxMode').checked);
+  psModGuncelle();
+});
 function psTemizle(slot){
   if(slot === 1){
     if(psURL_1){ URL.revokeObjectURL(psURL_1); psURL_1 = null; }
@@ -3175,11 +3223,15 @@ function psDosyaOku(input, slot){
 $('psGorsel1').onchange = e => psDosyaOku(e.target, 1);
 $('psGorsel2').onchange = e => psDosyaOku(e.target, 2);
 psModGuncelle();
+$('psNegatif').addEventListener('input', () => {
+  if(psSonuc) psSonuc.negative = $('psNegatif').value.slice(0, 2000);
+});
 function psSonucuGoster(s){
   psSonuc = s;
   $('psPozitif').value = s.positive || '';
   $('psPozitifTr').value = s.positive_tr || '';
   $('psNegatif').value = s.negative || '';
+  $('psNegatifDetay').open = !!String(s.negative || '').trim();
   $('psAciklama').textContent = s.caption_tr || '';
   $('psEtiketler').textContent = (s.tags || []).join(' · ');
   const sinir = s.sure_ms ? (' · ' + (s.sure_ms / 1000).toFixed(1) + ' sn') : '';
@@ -3193,6 +3245,7 @@ function psSonucuGoster(s){
     if(s.prompt_token) p.push(s.prompt_token + ' prompt token');
     if(s.deneme) p.push(s.deneme + ' deneme');
     if(s.ctx) p.push('ctx ' + s.ctx);
+    p.push('sistem ' + (PS_PROFIL_ADLARI[psAktifProfil] || 'Genel'));
     p.push('yaratıcılık ' + ($('psYaraticilik').value || ''));
     p.push('uzunluk ' + ($('psUzunluk').value || ''));
     p.push('dil ' + ($('psDil').value || ''));
@@ -3203,6 +3256,7 @@ function psSonucuGoster(s){
   $('psUygula').disabled = false; $('psKopyala').disabled = false; $('psKaydet').disabled = false;
   $('psHizliUret').disabled = false;
   $('psDurdur').disabled = true;
+  $('psPromptProfile').disabled = false; $('psFlux3BboxMode').disabled = false;
   try{ psModelDurumuYukle(); }catch(e){}
   try{ psGecmisYukle(); }catch(e){}
 }
@@ -3375,6 +3429,7 @@ function llmIsTakipEt(is_id, tur, sakla=true){
             psSonucuGoster(j.sonuc);
           }
           else{
+            $('psPromptProfile').disabled = false; $('psFlux3BboxMode').disabled = false;
             psCanliCiz(null);
             $('psDurum').textContent = j.durum === 'durduruldu' ? 'İş durduruldu.' : 'HATA: ' + (j.hata || 'prompt üretimi başarısız');
           }
@@ -3399,6 +3454,7 @@ function llmIsTakipEt(is_id, tur, sakla=true){
       try{ if(localStorage.getItem(llmIsAnahtar(tur)) === is_id) localStorage.removeItem(llmIsAnahtar(tur)); }catch(ignore){}
       if(tur === 'llm_prompt' && is_id === psAktifIs){
         psSuruyor = false; psAktifIs = null; $('psUret').disabled = false; $('psDurdur').disabled = true;
+        $('psPromptProfile').disabled = false; $('psFlux3BboxMode').disabled = false;
         psCanliCiz(null); $('psDurum').textContent = 'HATA: ' + e.message;
       }
       if(tur === 'llm_chat'){ sohbetBitir({durum: 'hata', hata: e.message}); }
@@ -3421,7 +3477,7 @@ async function llmIsleriniBagla(){
         if(bulunan.length) id = bulunan[bulunan.length - 1].is_id;
       }
       if(id){
-        if(tur === 'llm_prompt'){ psAktifIs = id; psSuruyor = true; $('psUret').disabled = true; $('psDurdur').disabled = false; }
+        if(tur === 'llm_prompt'){ psAktifIs = id; psSuruyor = true; $('psUret').disabled = true; $('psDurdur').disabled = false; $('psPromptProfile').disabled = true; $('psFlux3BboxMode').disabled = true; }
         else if(tur === 'llm_chat'){ sohbetAktifIs = id; sohbetCalisma(true); }
         else { $('psHazirla').disabled = true; $('psDurum').textContent = 'Model hazırlanıyor...'; }
         llmIsTakipEt(id, tur);
@@ -3432,47 +3488,50 @@ async function llmIsleriniBagla(){
 $('psUret').onclick = async () => {
   if(psSuruyor) return;
   let m = psOtomatikMod();
-  if(RUNPOD_WEBUI && videoMu() && m !== 'ceviri') m = 'video';
+  const seciliProfil = $('psPromptProfile').value || 'auto';
+  if(videoMu() || seciliProfil === 'minimaxh3') m = 'video';
+  const profile = psProfilIcin(m);
+  if(m === 'video' && !['minimaxh3','general'].includes(profile)){
+    $('psDurum').textContent = 'Video promptu için MiniMax H3 veya Genel profilini seç.';
+    return;
+  }
   if((m === 'gorsel') && !psB64_1){ $('psDurum').textContent = 'HATA: 1. görseli seç.'; return; }
   if((m === 'gorsel') && !$('psMetin').value.trim()){ $('psDurum').textContent = 'HATA: görselde ne değişiklik yapmak istediğinizi yazın.'; return; }
   if((m === 'birlestir') && (!psB64_1 || !psB64_2)){ $('psDurum').textContent = 'HATA: iki görseli de seç.'; return; }
-  if((m === 'fikir' || m === 'ceviri') && !$('psMetin').value.trim()){ $('psDurum').textContent = 'HATA: metin yaz.'; return; }
-  if(m === 'video' && !$('psMetin').value.trim()){ $('psDurum').textContent = 'HATA: video isteğini yaz.'; return; }
+  if((m === 'fikir' || m === 'ceviri' || m === 'video') && !$('psMetin').value.trim()){ $('psDurum').textContent = m === 'video' ? 'HATA: video isteğini yaz.' : 'HATA: metin yaz.'; return; }
    psSuruyor = true; $('psUret').disabled = true; $('psDurdur').disabled = true;
+   $('psPromptProfile').disabled = true; $('psFlux3BboxMode').disabled = true;
+   psAktifProfil = profile;
    psCanliCiz(null);
    $('psDurum').textContent = 'LLM kuyruğuna ekleniyor...';
   const gorseller = [];
   if(psB64_1) gorseller.push({mime: psMime1 || 'image/jpeg', veri: psB64_1});
   if(psB64_2) gorseller.push({mime: psMime2 || 'image/jpeg', veri: psB64_2});
-  let profile = null;
-  if(RUNPOD_WEBUI && m !== 'ceviri'){
-    const selected = runpodModelSecili();
-    profile = m === 'video' ? 'minimaxh3' :
-      ((gorseller.length && (!selected || selected === 'krea2' || selected === 'illustrious')) ? null : (selected || 'z_image'));
-  }
   try{
     const r = await fetch('/api/prompt-uret', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({mod: m, metin: $('psMetin').value, dil: $('psDil').value,
         yaraticilik: +$('psYaraticilik').value, uzunluk: $('psUzunluk').value,
         gorseller, model_prompt_profile: profile,
-        bbox_mode: profile === 'flux3' && !!$('flux3BboxMode')?.checked})});
+        bbox_mode: profile === 'flux3' && $('psFlux3BboxMode').checked})});
     const j = await r.json().catch(() => ({}));
      if(r.ok && j.is_id){
        psAktifIs = j.is_id;
        $('psDurdur').disabled = false;
        $('psDurum').textContent = 'LLM kuyruğunda' + (j.sira ? ' · sıra ' + j.sira : '');
        llmIsTakipEt(j.is_id, 'llm_prompt');
-     }else { psSuruyor = false; $('psUret').disabled = false; $('psDurdur').disabled = true; $('psDurum').textContent = 'HATA: ' + (j.hata || ('' + r.status)); }
+     }else { psSuruyor = false; $('psUret').disabled = false; $('psDurdur').disabled = true; $('psPromptProfile').disabled = false; $('psFlux3BboxMode').disabled = false; $('psDurum').textContent = 'HATA: ' + (j.hata || ('' + r.status)); }
   }catch(e){
      psSuruyor = false; $('psUret').disabled = false;
+     $('psPromptProfile').disabled = false; $('psFlux3BboxMode').disabled = false;
      $('psDurum').textContent = 'HATA: sunucuya ulaşılamadı (' + (e && e.message ? e.message : '') + ')';
   }
 };
 $('psUygula').onclick = () => {
   if(!psSonuc) return;
   $('prompt').value = psSonuc.positive || '';
-  if(psSonuc.negative) $('negatif').value = psSonuc.negative;
+  $('negatif').value = psSonuc.negative || '';
+  $('uretimNegatifPanel').open = !!String(psSonuc.negative || '').trim();
   formKaydet();
   aktifMenu = 'uretim'; menuUygula();
   bilgi('Prompt kutusuna uygulandı');
@@ -3490,7 +3549,12 @@ $('psHizliUret').onclick = () => {
   else { $('oniz2').removeAttribute('src'); $('oniz2').style.display = 'none'; $('foto2Kaldir').style.display = 'none'; }
   uretimOnizlemeGuncelle();
   $('prompt').value = psSonuc.positive;
-  $('steps').value = uretimVarsayilan.steps;
+  $('negatif').value = psSonuc.negative || '';
+  $('uretimNegatifPanel').open = !!String(psSonuc.negative || '').trim();
+  const varsayilanAdim = RUNPOD_WEBUI && uretimVarsayilan.steps === 9
+    ? (RUNPOD_IMAGE_DEFAULTS[otomatikModel()]?.steps || 9)
+    : uretimVarsayilan.steps;
+  $('steps').value = varsayilanAdim;
   $('seed').value = uretimVarsayilan.seed;
   $('maxside').value = uretimVarsayilan.max_side;
   $('maxolcek').checked = !!fotoB64;
@@ -3534,8 +3598,10 @@ document.addEventListener('click', e => {
 });
 $('psKopyala').onclick = async () => {
   if(!$('psPozitif').value && !$('psPozitifTr').value) return;
-  const metin = 'EN: ' + ($('psPozitif').value || '') + '\nTR: ' + ($('psPozitifTr').value || '');
-  try{ await navigator.clipboard.writeText(metin); bilgi('Kopyalandı (EN+TR)'); }
+  const negative = $('psNegatif').value.trim();
+  const metin = 'EN: ' + ($('psPozitif').value || '') + '\nTR: ' + ($('psPozitifTr').value || '') +
+    (negative ? '\nNEGATIVE: ' + negative : '');
+  try{ await navigator.clipboard.writeText(metin); bilgi(negative ? 'Kopyalandı (EN+TR+negative)' : 'Kopyalandı (EN+TR)'); }
   catch(e){ bilgi('Kopyalama reddedildi'); }
 };
 $('psKaydet').onclick = async () => {
@@ -4422,7 +4488,8 @@ async function sohbetSec(id){
 /* Prompt geçmişi: üretilen her prompt otomatik düşer. */
 function psGecmisiUygula(k){
   $('prompt').value = k.positive || '';
-  if(k.negative !== undefined) $('negatif').value = k.negative || '';
+  $('negatif').value = k.negative || '';
+  $('uretimNegatifPanel').open = !!String(k.negative || '').trim();
   formKaydet();
   aktifMenu = 'uretim'; menuUygula();
   window.scrollTo({top: 0, behavior: 'smooth'});
@@ -4431,6 +4498,8 @@ function psGecmisiUygula(k){
 function psGecmisDetay(k){
   const satirlar = [
     ['Tarih', k.tarih], ['Mod', k.mod], ['Dil', k.dil],
+    ['Sistem promptu', PS_PROFIL_ADLARI[k.model_prompt_profile || 'auto'] || 'Genel'],
+    ['BBox', k.bbox_mode ? 'Açık' : null],
     ['Yaratıcılık', k.yaraticilik], ['Uzunluk', k.uzunluk],
     ['Görsel', k.gorsel_sayisi], ['Süre', k.sure_ms ? (k.sure_ms / 1000).toFixed(1) + ' sn' : null],
     ['Yükleme', k.yukleme_ms ? (k.yukleme_ms / 1000).toFixed(1) + ' sn' : null],

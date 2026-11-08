@@ -11,7 +11,10 @@
       "group": "zimage",
       "diffusion_file": "moody-pro-v13.2_00001__fp8.safetensors",
       "text_encoder_file": "qwen_3_4b.safetensors",
-      "vae_file": "ae.safetensors"
+      "vae_file": "ae.safetensors",
+      "steps": 9,
+      "sampler": "dpmpp_2m_sde",
+      "cfg": 1.0
     },
     "flux3": {
       "group": "flux3",

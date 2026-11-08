@@ -575,6 +575,17 @@ body.uretim-tam-ekran{overflow:hidden}
 .ps-gorsel-menu button{background:transparent;box-shadow:none;text-align:left;font-size:12px}
 .ps-cikti-kart{padding:10px;border:1px solid var(--line);border-radius:13px;background:#111720}
 .ps-cikti-kart textarea{min-height:140px;max-height:38vh;resize:vertical}
+.uretim-negatif{margin:8px 0;padding:0 10px;border:1px solid var(--line);border-radius:11px;background:rgba(17,23,32,.72)}
+.uretim-negatif summary{padding:9px 0;cursor:pointer;color:var(--text);font-size:12px;font-weight:700}
+.uretim-negatif summary span{float:right;color:var(--muted);font-size:11px;font-weight:400}
+.uretim-negatif textarea{width:100%;min-height:64px;margin:0 0 5px;resize:vertical}
+.negatif-yardim{padding:0 0 8px;color:var(--muted);line-height:1.45}
+.ornekleme-ileri{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+.ornekleme-ileri summary{cursor:pointer;color:var(--muted);font-size:12px;margin-bottom:8px}
+.ornekleme-ileri input{display:block;max-width:140px;margin:5px 0 7px}
+.ornekleme-ileri .kucuk{max-width:620px;color:var(--muted);line-height:1.45}
+.ps-negatif-detay textarea{min-height:82px}
+.ps-negatif-detay summary span{color:var(--muted);font-weight:400}
 /* Prompt Stüdyosu: kompakt, mobil uyumlu. Sonuc one, ayrintilar <details> icinde. */
 .ps-kart{display:flex;flex-direction:column;gap:10px}
 .ps-ust{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
@@ -582,6 +593,13 @@ body.uretim-tam-ekran{overflow:hidden}
 .ps-durum-satiri{display:flex;align-items:center;gap:8px;min-width:0}
 .ps-durum-satiri .kucuk{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ps-mod-bilgi{padding:5px 9px;border:1px solid var(--line);border-radius:999px;background:rgba(13,18,25,.7);color:var(--muted);font-size:11px}
+.ps-profil-secimi{display:grid;grid-template-columns:minmax(190px,260px) 1fr;align-items:center;gap:7px 12px;padding:9px 10px;border:1px solid var(--line);border-radius:11px;background:rgba(17,23,32,.75)}
+.ps-profil-secimi label{margin:0;color:var(--text);font-size:11px;font-weight:700}
+.ps-profil-secimi select{width:100%;min-width:0;margin:0}
+.ps-profil-bilgi{grid-column:2;color:var(--muted);line-height:1.45}
+.ps-bbox-toggle{margin-top:10px;padding:9px 2px 2px;border-top:1px solid var(--line)}
+.ps-bbox-toggle[hidden]{display:none}
+@media(max-width:600px){.ps-profil-secimi{grid-template-columns:1fr;gap:5px}.ps-profil-bilgi{grid-column:1}}
 .ps-giris-cerceve{position:relative;display:flex;align-items:flex-end;gap:7px;padding:8px;border:1px solid var(--line2);border-radius:14px;background:#111720}
 .ps-giris-cerceve textarea{flex:1;min-width:0;margin:0;min-height:44px;max-height:180px;resize:vertical}
 .ps-gorsel-onizleme{display:flex;flex-wrap:wrap;gap:8px}

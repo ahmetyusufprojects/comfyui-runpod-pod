@@ -221,7 +221,11 @@
   <span class="kucuk">Yerel OPUS-MT modeli en fazla 24.000 karakter ve 8.192 alt token işler. Türkçe metin kutusu korunur; yalnızca İngilizce çeviri görsel modeline gönderilir. Prompt Stüdyosu seçeneğiyle aynı anda kullanılamaz.</span>
   <div class="kucuk" id="uretimPromptCeviriBilgi" role="status" aria-live="polite"></div>
 </div>
-<div style="display:none"><textarea id="negatif" style="min-height:44px"></textarea></div>
+<details id="uretimNegatifPanel" class="uretim-negatif">
+  <summary>Negative prompt <span>İsteğe bağlı</span></summary>
+  <textarea id="negatif" rows="2" maxlength="2000" placeholder="Görselde olmamasını istediğin öğeleri yaz..."></textarea>
+  <div class="kucuk negatif-yardim">Z-Image ve Krea’nın hızlı sürümlerinde bu alan, varsayılan ayarda etkisiz kalabilir. İstersen “İleri örnekleme”den CFG’yi yükselt; üretim yavaşlayabilir ve sonuç değişebilir.</div>
+</details>
 <div class="satir" id="pinBar">
 <div><button id="pin1Btn" class="hayalet kucukbtn">1</button></div>
 <div><button id="pin2Btn" class="hayalet kucukbtn">2</button></div>
@@ -265,11 +269,15 @@
 <div class="kart" id="kartOrn">
 <h3>Örnekleme</h3>
 <div class="satir">
-<div><label>Adım</label><input id="steps" type="number" value="8" min="1" max="50"></div>
-<div style="display:none"><label>CFG</label><input id="cfg" type="number" value="1" step="0.5"></div>
-<div style="display:none"><label>Sampler</label><select id="sampler"><option>euler</option><option>euler_ancestral</option><option>dpmpp_2m</option><option>uni_pc</option><option selected>res_multistep</option></select></div>
+<div><label>Adım</label><input id="steps" type="number" value="9" min="1" max="50"></div>
+<div style="display:none"><label>Sampler</label><select id="sampler"><option>euler</option><option>euler_ancestral</option><option>dpmpp_2m</option><option selected>dpmpp_2m_sde</option><option>uni_pc</option><option>res_multistep</option></select></div>
 <div><label>Seed (-1 rastgele)</label><input id="seed" type="number" value="-1"></div>
 </div>
+<details class="ornekleme-ileri">
+  <summary>İleri örnekleme</summary>
+  <label for="cfg">Prompt etkisi (CFG)</label><input id="cfg" type="number" value="1" min="0" max="30" step="0.1">
+  <div class="kucuk">1, hızlı modellerin örnek ayarıdır; bu değerde negative prompt etkisizdir. Yükseltmek üretimi yavaşlatabilir ve sonucu değiştirebilir.</div>
+</details>
 <div id="animaModelSecim" hidden>
 <div class="satir">
 <label class="ayar-toggle"><input id="animaModel" type="checkbox"><span><b>Anima Turbo v1.1</b><small>Turbo model · 8 adım.</small></span></label>
@@ -447,7 +455,7 @@
     <section class="ayar-kart" id="settingImage">
       <div class="ayar-kart-baslik"><span class="ayar-ikon uretim" aria-hidden="true">◈</span><div><h3>Hızlı üretim varsayılanları</h3><p>Yeni üretimlerinde kullanılacak temel değerleri belirle.</p></div></div>
       <div class="ayar-form-grid uc">
-        <div class="ayar-alan"><label for="uretimVarsayilanSteps">Adım sayısı</label><input id="uretimVarsayilanSteps" type="number" value="8" min="1" max="50"></div>
+        <div class="ayar-alan"><label for="uretimVarsayilanSteps">Adım sayısı</label><input id="uretimVarsayilanSteps" type="number" value="9" min="1" max="50"></div>
         <div class="ayar-alan"><label for="uretimVarsayilanSeed">Seed</label><input id="uretimVarsayilanSeed" type="number" value="-1"><span class="ayar-yardim">-1: rastgele</span></div>
         <div class="ayar-alan"><label for="uretimVarsayilanMaxSide">Maksimum kenar</label><div class="ayar-deger-birim"><input id="uretimVarsayilanMaxSide" type="number" value="1536" min="256" max="4096" step="16"><span>px</span></div></div>
       </div>
@@ -597,6 +605,18 @@
   </div>
 </div>
 <div class="kucuk ps-mod-bilgi" id="psModBilgi">Referans yok · fikirden prompt üretilir</div>
+<div class="ps-profil-secimi">
+  <label for="psPromptProfile">Prompt stili</label>
+  <select id="psPromptProfile">
+    <option value="auto" selected>Otomatik · üretim modelini izle</option>
+    <option value="general">Genel · uygulamanın varsayılanı</option>
+    <option value="z_image">Z-Image</option>
+    <option value="flux3">Flux 3 Klein</option>
+    <option value="krea2">Krea 2 · karakter odaklı</option>
+    <option value="minimaxh3">MiniMax H3 · video</option>
+  </select>
+  <div class="kucuk ps-profil-bilgi" id="psPromptProfileInfo" role="status">Otomatik seçim, mevcut üretim modeline uygun promptu kullanır. Bu seçim üretim modelini değiştirmez.</div>
+</div>
 <div id="psGorselOnizleme" class="uretim-gorsel-onizleme" hidden>
   <div class="uretim-ref-slot" id="psRefSlot1"><span>Referans 1</span><div id="psPreview1"></div></div>
   <div class="uretim-ref-slot" id="psRefSlot2" hidden><span>Referans 2</span><div id="psPreview2"></div></div>
@@ -626,6 +646,7 @@
 <div><label>Uzunluk</label><select id="psUzunluk"><option value="kisa">Kısa</option><option value="orta" selected>Orta</option><option value="uzun">Uzun</option></select></div>
 <div><label>Çıktı dili</label><select id="psDil"><option value="en" selected>İngilizce</option><option value="tr">Türkçe</option></select></div>
 </div>
+<label class="ayar-toggle ps-bbox-toggle" id="psFlux3BboxWrap" hidden><input id="psFlux3BboxMode" type="checkbox"><span><b>Flux bbox yerleşim tablosu</b><small>Global açıklamanın ardından öğeleri ve kutularını tek satırlık JSON dizisi olarak ekler. Uygulamanın dış JSON alanları değişmez.</small></span></label>
 </div>
 <div class="kucuk" id="psDurum">Model hazır değilse ilk istekte yüklenir.</div>
 <div class="kucuk" id="psCanli"></div>
@@ -638,7 +659,11 @@
   <div class="kucuk" id="psAciklama"></div>
   <div class="kucuk" id="psEtiketler"></div>
 </details>
-<div style="display:none"><textarea id="psNegatif" readonly></textarea></div>
+<details class="ps-detay ps-negatif-detay" id="psNegatifDetay">
+  <summary>Negative prompt <span>(isteğe bağlı)</span></summary>
+  <textarea id="psNegatif" rows="3" maxlength="2000" placeholder="Modelin kaçınacağı öğeleri yazabilir veya önerilen metni düzenleyebilirsin..."></textarea>
+  <div class="kucuk">Prompt Stüdyosu bir öneri üretirse burada görünür. Düzenleyip ana üretim alanına aktarabilirsin.</div>
+</details>
 </div>
 </section>
 </div>

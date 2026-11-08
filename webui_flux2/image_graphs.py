@@ -190,8 +190,8 @@ def build_z_image_prompt(p, image_name=None, image_name2=None):
         "2": {"class_type": "CLIPLoader",
               "inputs": {"clip_name": Z_IMAGE_TEXT_ENCODER_FILE, "type": "lumina2", "device": "default"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": Z_IMAGE_VAE_FILE}},
-        "5": {"class_type": "ConditioningZeroOut",
-              "inputs": {"conditioning": ["4", 0]}},
+        "5": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": p.get("negative", ""), "clip": ["2", 0]}},
         "6": {"class_type": "EmptySD3LatentImage",
               "inputs": {"width": p["width"], "height": p["height"], "batch_size": 1}},
         "7": {"class_type": "ModelSamplingAuraFlow",
@@ -208,6 +208,9 @@ def build_z_image_prompt(p, image_name=None, image_name2=None):
     }
     refs = [r for r in (image_name, image_name2) if r]
     if refs:
+        # Keep the existing reference-edit conditioning path unchanged.
+        pr["5"] = {"class_type": "ConditioningZeroOut",
+                   "inputs": {"conditioning": ["4", 0]}}
         for i, image_name in enumerate(refs, start=20):
             pr[str(i)] = {"class_type": "LoadImage", "inputs": {"image": image_name}}
         encode_inputs = {"clip": ["2", 0], "prompt": p["prompt"],
@@ -218,6 +221,42 @@ def build_z_image_prompt(p, image_name=None, image_name2=None):
     else:
         pr["4"] = {"class_type": "CLIPTextEncode",
                    "inputs": {"text": p["prompt"], "clip": ["2", 0]}}
+        if os.environ.get("WEBUI_RUNPOD") == "1":
+            # The provided Z-Image sample uses a partial first pass, latent
+            # upscaling, then a second noisy pass. Use it for text-to-image
+            # only; reference-image editing keeps its existing workflow.
+            steps = max(1, min(50, int(p.get("steps", 9))))
+            if steps >= 5:
+                scale = min(1.7, 4096.0 / max(p["width"], p["height"]))
+                first_end = max(1, min(steps - 1, round(steps * 7 / 9)))
+                second_start = max(0, min(steps - 1, round(steps * 4 / 9)))
+                sampler = p.get("sampler", "dpmpp_2m_sde")
+                pr["8"] = {"class_type": "KSamplerAdvanced", "inputs": {
+                    "model": ["7", 0], "positive": ["4", 0],
+                    "negative": ["5", 0], "latent_image": ["6", 0],
+                    "add_noise": "enable", "noise_seed": seed,
+                    "steps": steps, "cfg": p["cfg"],
+                    "sampler_name": sampler, "scheduler": "beta",
+                    "start_at_step": 0, "end_at_step": first_end,
+                    "return_with_leftover_noise": "enable"}}
+                pr["9"] = {"class_type": "LatentUpscaleBy", "inputs": {
+                    "samples": ["8", 0], "upscale_method": "bislerp",
+                    "scale_by": scale}}
+                pr["10"] = {"class_type": "KSamplerAdvanced", "inputs": {
+                    "model": ["7", 0], "positive": ["4", 0],
+                    "negative": ["5", 0], "latent_image": ["9", 0],
+                    "add_noise": "enable", "noise_seed": seed,
+                    "steps": steps, "cfg": p["cfg"],
+                    "sampler_name": sampler, "scheduler": "sgm_uniform",
+                    "start_at_step": second_start, "end_at_step": steps,
+                    "return_with_leftover_noise": "disable"}}
+                pr["11"] = {"class_type": "VAEDecode", "inputs": {
+                    "samples": ["10", 0], "vae": ["3", 0]}}
+                pr["12"] = {"class_type": "SaveImage", "inputs": {
+                    "images": ["11", 0], "filename_prefix": "webui-z-image"}}
+                actual_scale = scale
+                p["output_width"] = int(round(p["width"] * actual_scale / 8) * 8)
+                p["output_height"] = int(round(p["height"] * actual_scale / 8) * 8)
     return attach_loras(pr, p.get("loras")), seed
 
 
@@ -268,7 +307,7 @@ def build_flux3_prompt(p, image_name=None, image_name2=None):
         "4": {"class_type": "CLIPTextEncode",
               "inputs": {"text": prompt_text, "clip": ["2", 0]}},
         "5": {"class_type": "CLIPTextEncode",
-              "inputs": {"text": "", "clip": ["2", 0]}},
+              "inputs": {"text": p.get("negative", ""), "clip": ["2", 0]}},
         "6": {"class_type": "EmptyFlux2LatentImage",
               "inputs": {"width": p["width"], "height": p["height"],
                          "batch_size": 1}},
@@ -372,8 +411,8 @@ def build_krea2_prompt(p):
               "inputs": {"vae_name": KREA2_VAE_FILE}},
         "4": {"class_type": "CLIPTextEncode",
               "inputs": {"text": p["prompt"], "clip": ["2", 0]}},
-        "5": {"class_type": "ConditioningZeroOut",
-              "inputs": {"conditioning": ["4", 0]}},
+        "5": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": p.get("negative", ""), "clip": ["2", 0]}},
         "6": {"class_type": "EmptyLatentImage",
               "inputs": {"width": p["width"], "height": p["height"],
                          "batch_size": 1}},

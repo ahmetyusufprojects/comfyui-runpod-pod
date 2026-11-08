@@ -384,13 +384,14 @@ _FORM_SAYI = {"width": (64, 4096), "height": (64, 4096),
 _UI_ENUM = {
     "ps_length": ("kisa", "orta", "uzun"),
     "ps_language": ("en", "tr"),
+    "ps_prompt_profile": ("auto", "general", "z_image", "flux3", "krea2", "minimaxh3"),
     "history_view": ("izgara", "akis"),
     "log_source": ("llama", "comfy", "webui", "setup"),
     "cinematic_mode": ("off", "soft", "vivid"),
     "active_menu": ("uretim", "studyo", "kuyruk", "kutuphane", "arsiv",
                     "promptlar", "model", "izleme", "ayarlar", "yonetim"),
 }
-_UI_BOOL = {"monitor_auto_refresh", "history_favorites",
+_UI_BOOL = {"ps_bbox_mode", "monitor_auto_refresh", "history_favorites",
             "history_albums", "continuous_generation", "auto_open_result"}
 _UI_NUMBER = {"ps_creativity": (0.2, 1.2), "log_lines": (10, 500),
               "history_width": (220, 420)}
@@ -1176,6 +1177,8 @@ def _llm_prompt_gecmisine_yaz(sahip, req, sonuc):
             "gorsel_sayisi": len(req.get("gorseller") or []),
             "positive": sonuc.get("positive"), "positive_tr": sonuc.get("positive_tr"),
             "negative": sonuc.get("negative"), "caption_tr": sonuc.get("caption_tr"),
+            "model_prompt_profile": req.get("model_prompt_profile") or "auto",
+            "bbox_mode": bool(req.get("bbox_mode")),
             "tags": sonuc.get("tags"), "sure_ms": sonuc.get("sure_ms"),
             "token": sonuc.get("token"), "tok_s": sonuc.get("tok_s"),
             "prompt_token": sonuc.get("prompt_token"),
@@ -1197,7 +1200,8 @@ def _llm_istek_baglami(ayar, tur, req):
     if not RUNPOD_MODE:
         return context
     video_prompt = (tur == "llm_prompt"
-                    and req.get("model_prompt_profile") == "minimaxh3")
+                    and (req.get("model_prompt_profile") == "minimaxh3"
+                         or req.get("mod") == "video"))
     if tur == "goruntu" and req.get("prompt_destek"):
         references = int(bool(req.get("image_base64"))) + int(bool(req.get("image2_base64")))
         video_prompt = is_tipini_belirle(req, references) == IS_TIPI_VIDEO
@@ -1288,7 +1292,7 @@ def _llm_kuyruk_isini_calistir(job):
                              mod_ozel=(ayar.get("llm_mod") or {}).get(req.get("mod")),
                              model_prompt_profile=(req.get("model_prompt_profile")
                                                    if req.get("model_prompt_profile") in
-                                                   ("z_image", "flux3", "krea2", "minimaxh3") else None),
+                                                   ("general", "z_image", "flux3", "krea2", "minimaxh3") else None),
                              bbox_mode=bool(req.get("bbox_mode")),
                              gpu_hazirla=gpu_hazirla)
             _is_sonucu_baslat(job)
@@ -2899,7 +2903,8 @@ def _isi_calistir(job):
         default_sampler = workflow.get("sampler") or (
             "res_multistep" if model == MODEL_Z_IMAGE else "euler")
         default_steps = workflow.get("steps") or (
-            8 if model in (MODEL_Z_IMAGE, MODEL_ANIMA) else 4)
+            9 if model == MODEL_Z_IMAGE else
+            8 if model == MODEL_ANIMA else 4)
         default_cfg = workflow.get("cfg", 1.0)
         prompt_girdi = str(req.get("prompt_girdi") or req.get("prompt") or "")
         prompt_servis = str(req.get("prompt") or "")
@@ -2912,7 +2917,8 @@ def _isi_calistir(job):
             prompt_servis = ceviri["metin"]
             req["prompt_girdi"] = prompt_girdi
             req["prompt_en"] = prompt_servis
-        p = {"prompt": prompt_servis, "negative": req.get("negative", ""),
+        p = {"prompt": prompt_servis,
+             "negative": str(req.get("negative") or "").strip()[:2000],
              "width": w, "height": h, "seed": int(req.get("seed", -1)),
              "steps": max(1, min(50, int(req.get("steps", default_steps)))),
              "cfg": float(req.get("cfg", default_cfg)),
@@ -2949,6 +2955,9 @@ def _isi_calistir(job):
         else:
             prompt_builder = build_z_image_prompt if model == MODEL_Z_IMAGE else build_prompt
             prompt, seed = prompt_builder(p, image_name, image_name2)
+        if (model == MODEL_Z_IMAGE and not image_name and not image_name2
+                and p.get("output_width") and p.get("output_height")):
+            w, h = p["output_width"], p["output_height"]
         cid = uuid.uuid4().hex
         isitma_yolu = _imge_modeli_isitme_karari(
             model, bool(job.get("_llama_canliydi")))
@@ -3789,7 +3798,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ayar.setdefault("llm_ctx", 8000)
             ayar.setdefault("llm_prompt_destek_yaraticilik", 0.7)
             ayar.setdefault("llm_prompt_destek_uzunluk", "orta")
-            ayar.setdefault("uretim_varsayilan_steps", 8)
+            ayar.setdefault("uretim_varsayilan_steps", 9)
             ayar.setdefault("uretim_varsayilan_seed", -1)
             ayar.setdefault("uretim_varsayilan_max_side", 1536)
             ayar.setdefault("uretim_prompt_destek", False)
@@ -4639,6 +4648,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             req = self._json_oku()
             if "__hata__" in req:
                 self._send(400, json.dumps({"hata": req["__hata__"]}))
+                return
+            profile = req.get("model_prompt_profile", "auto")
+            if profile not in ("auto", "general", "z_image", "flux3", "krea2", "minimaxh3"):
+                self._send(400, '{"hata":"gecersiz prompt profili"}')
+                return
+            if "bbox_mode" in req and not isinstance(req.get("bbox_mode"), bool):
+                self._send(400, '{"hata":"bbox_mode boolean olmali"}')
+                return
+            if req.get("bbox_mode") and profile != "flux3":
+                self._send(400, '{"hata":"bbox modu Flux 3 prompt profili gerektirir"}')
+                return
+            if (profile == "minimaxh3" and req.get("mod") != "video") or (
+                    req.get("mod") == "video" and profile not in
+                    ("auto", "general", "minimaxh3")):
+                self._send(400, '{"hata":"video promptu için MiniMax H3 veya Genel profilini seç"}')
                 return
             job, sira = _kuyruga_ekle(req, kullanici, tur="llm_prompt")
             if job is None:

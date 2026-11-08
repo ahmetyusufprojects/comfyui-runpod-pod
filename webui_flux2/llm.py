@@ -194,6 +194,14 @@ MOD_TALIMATI = {
               "belirt. Sahne veya kamera kesmelerini kullanıcı istemedikçe ekleme.",
 }
 
+MODEL_PROMPT_DOSYALARI = {
+    "z_image": "z_image.txt",
+    "flux3": "flux.json",
+    "krea2": "krea2.txt",
+    "minimaxh3": "minimaxh3.txt",
+}
+MODEL_PROMPT_PROFILLERI = frozenset(("general", *MODEL_PROMPT_DOSYALARI))
+
 SEMA = {
     "type": "object",
     "properties": {
@@ -210,6 +218,8 @@ SEMA = {
 
 DUAL_UZUNLUK_TOKEN = {"kisa": 650, "orta": 900, "uzun": 1200}
 DUAL_UZUNLUK_MAX = {"kisa": 900, "orta": 1300, "uzun": 1600}
+VIDEO_UZUNLUK_TOKEN = {"kisa": 1600, "orta": 2600, "uzun": 3400}
+VIDEO_UZUNLUK_MAX = {"kisa": 2200, "orta": 3200, "uzun": 4000}
 JSON_DENEME = 3            # ilk istekten sonra en fazla 3 yeniden uretim
 YUKLEME_BEKLEME = 180      # model yüklenene dek /health için
 ISTEK_SURE = 600           # tek istek toplam timeout
@@ -1309,58 +1319,79 @@ def _son_kullanim_guncelle():
     _son_kullanim = time.monotonic()
 
 
+def _model_prompt_talimati(profile, mod, bbox_mode=False):
+    if profile in (None, "", "auto", "general"):
+        return ""
+    if profile not in MODEL_PROMPT_DOSYALARI:
+        raise LLMHatasi("geçersiz prompt profili", "istek")
+    path = os.path.join(BASE_DIR, "model_prompts", MODEL_PROMPT_DOSYALARI[profile])
+    try:
+        with open(path, "r", encoding="utf-8") as stream:
+            content = stream.read().strip()
+    except OSError as exc:
+        raise LLMHatasi("Seçilen sistem promptu bulunamadı: %s" % profile,
+                        "istek") from exc
+    if profile == "flux3":
+        try:
+            prompts = json.loads(content)
+        except ValueError as exc:
+            raise LLMHatasi("Flux 3 prompt dosyası geçerli JSON değil.",
+                            "istek") from exc
+        mode = "i2i" if mod in ("gorsel", "birlestir") else "t2i"
+        key = mode + ("_bbox" if bbox_mode else "")
+        content = prompts.get(key)
+        if not isinstance(content, str) or not content.strip():
+            raise LLMHatasi("Flux 3 prompt dosyasında %s bölümü eksik." % key,
+                            "istek")
+    if not content:
+        raise LLMHatasi("Seçilen sistem promptu boş: %s" % profile, "istek")
+    return content
+
+
 def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
                           mod_ozel=None, model_prompt_profile=None,
                           bbox_mode=False):
     siste = (sistem_ozel.strip() if isinstance(sistem_ozel, str)
              and sistem_ozel.strip() else SISTEM_PROMPTU)
-    bolumler = [siste]
-    if RUNPOD_MODE and model_prompt_profile in ("z_image", "flux3", "krea2", "minimaxh3"):
-        root = os.path.join(BASE_DIR, "model_prompts")
-        filename = {"z_image": "z_image.txt", "flux3": "flux.json", "krea2": "krea2.txt",
-                    "minimaxh3": "minimaxh3.txt"}[model_prompt_profile]
-        try:
-            with open(os.path.join(root, filename), "r", encoding="utf-8") as stream:
-                custom = stream.read().strip()
-            if model_prompt_profile == "flux3":
-                prompts = json.loads(custom)
-                mode = ("i2i" if mod in ("gorsel", "birlestir") else "t2i")
-                custom = str(prompts.get(mode + ("_bbox" if bbox_mode else "")) or "")
-            if custom:
-                bolumler.append("Seçili üretim modelinin özgün sistem talimatı:\n" + custom)
-        except (OSError, ValueError, TypeError):
-            pass
-    if RUNPOD_MODE and model_prompt_profile in ("z_image", "flux3", "krea2", "minimaxh3"):
+    bolumler = [siste, MOD_TALIMATI[mod]]
+    custom = _model_prompt_talimati(model_prompt_profile, mod, bbox_mode)
+    if custom:
+        bolumler.append("Seçilen modelin sağladığı sistem promptu; içerik ve "
+                        "çalışma mantığını koru:\n" + custom)
         bolumler.append(
-            "Referans talimatındaki çıktı biçimi yalnızca positive alanının içeriğini "
-            "belirler. Dış yanıt mutlaka uygulamanın JSON şemasına uyar; referansın "
-            "JSON kullanmama, yalnızca metin döndürme veya İngilizce dışında çıktı "
-            "vermeme talimatları dış yanıt ve positive_tr için geçerli değildir. "
-            "Referansta istenen bölüm başlıkları ve biçim, göreve uygunsa positive "
-            "metninin içinde korunur. Kullanılmayan referans, ses veya içerik uydurma.")
-    bolumler.append(MOD_TALIMATI[mod])
+            "Bu sistem promptundaki 'yalnızca metin', 'JSON döndürme' veya "
+            "benzeri dış biçim talimatları, uygulamanın aşağıdaki sabit JSON "
+            "cevap sözleşmesini değiştirmez. İstenen model biçimini positive "
+            "metninin içinde üret. Kaynağın bölüm başlıklarını ve özel işaretlerini "
+            "göreve uyuyorsa positive içinde aynen koru; içerik uydurma.")
     if isinstance(mod_ozel, str) and mod_ozel.strip():
         bolumler.append("Kullanıcının bu mod için ek tercihi:\n" +
                         mod_ozel.strip())
 
-    dil_adi = "Türkçe" if dil == "tr" else "İngilizce"
+    dil_adi = ("İngilizce" if model_prompt_profile in MODEL_PROMPT_DOSYALARI
+               else ("Türkçe" if dil == "tr" else "İngilizce"))
     bolumler.append(
-        "Sabit çıktı sözleşmesi: positive seçilen dilde tek metin alanıdır, doğrudan "
-        "görsel modeline verilebilen prompttur. positive_tr bunun anlamı ve "
-        "ayrıntıları koruyan doğal Türkçe karşılığıdır. negative yalnızca "
-        "isteğe özgü, gerçekten kaçınılması gereken öğeleri kısa yaz; böyle bir "
-        "öğe yoksa boş bırak. caption_tr Türkçe tek cümle, tags 3-5 kısa "
-        "etiket olsun. Genel kalite kalıpları, tekrarlar ve gereksiz teknik "
-        "terimler ekleme. İç düşünceyi gösterme; yalnızca şemaya uyan JSON döndür. "
-        "Kullanıcı veya mod tercihi bu sözleşmeyle çelişirse sözleşmeyi uygula.")
+        "Sabit dış JSON sözleşmesi: yanıt yalnızca uygulamanın mevcut nesne "
+        "şemasına uysun; alan adları positive, positive_tr, negative, caption_tr "
+        "ve tags olarak kalsın, başka alan ekleme. positive seçilen profilin "
+        "istenen dilindeki, görsel veya video modeline doğrudan verilebilen "
+        "prompttur. positive_tr bunun Türkçe karşılığıdır ve anlamı, özel "
+        "işaretleri, kutu bilgilerini ve bölüm sırasını korur. negative yalnızca "
+        "isteğe özgü kaçınılması gereken öğeleri içersin; yoksa boş dize olsun. "
+        "caption_tr kısa bir Türkçe özet, tags 3-5 kısa etiket olsun. Uygulama "
+        "şeması ile referans promptunun dış biçim talimatı çelişirse bu sözleşme "
+        "geçerlidir; referansın kendi biçimi positive metninin içinde kalır. "
+        "İç düşünce veya JSON dışında açıklama gösterme.")
     bolumler.append(
         "Çıktı dili: positive %s, positive_tr her zaman Türkçe." % dil_adi)
 
     if model_prompt_profile == "flux3" and bbox_mode:
         bolumler.append(
-            "Flux bbox biçimindeki açıklama ve onu izleyen JSON dizisinin tamamını "
-            "tek bir positive metin alanına yerleştir. Dış JSON şemasına yeni alan "
-            "ekleme; diziyi metnin içinde geçerli JSON olarak koru.")
+            "BBox modu: Flux'un global caption'ını ve ardından gelen JSON "
+            "dizisini birlikte positive alanına koy. positive_tr içinde de aynı "
+            "dizi yapısını, id değerlerini, anahtarları ve koordinatları aynen "
+            "koru; yalnızca açıklama metinlerini Türkçeye çevir. Dış uygulama "
+            "JSON'una bbox için yeni alan ekleme.")
     if mod == "gorsel":
         hedef = {"kisa": "10-25", "orta": "20-45", "uzun": "35-70"}[uzunluk]
         bolumler.append(
@@ -1379,11 +1410,16 @@ def _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel=None,
             "genişletme, özetleme veya yeni ayrıntı ekleme.")
     elif mod == "video":
         bolumler.append(
-            "Video biçimi: video modelinin talimatlarındaki akış, zaman ve sahne "
-            "devamlılığı kurallarını positive alanının içinde uygula. positive tek "
-            "bir metin değeridir; gerekirse kısa bölüm etiketleri ve satır sonları "
-            "kullan. positive_tr Türkçe karşılığıdır. JSON alan adlarını veya şemayı değiştirme.")
-    elif mod != "video" and not (model_prompt_profile == "flux3" and bbox_mode):
+            "Video çıktısında positive seçilen video sistem promptunun biçimini "
+            "ve shot sürekliliği kurallarını izlesin. MiniMax H3 profili "
+            "seçildiyse source'un subject_definitions, summary, "
+            "retention_analysis, detailed_description, overall_soundscape ve "
+            "non_diegetic_music bölümlerini bu sırada positive içinde koru. "
+            "positive_tr aynı yapının Türkçe karşılığıdır; sabit başlık ve "
+            "işaretleri değiştirme. Kullanılmayan ses veya referans türü uydurma. "
+            "MiniMax video akışında negatif prompt kullanılmadığından negative "
+            "değerini boş dize bırak.")
+    elif not (model_prompt_profile == "flux3" and bbox_mode):
         hedef = {"kisa": "60-90", "orta": "100-140",
                  "uzun": "150-220"}[uzunluk]
         bolumler.append(
@@ -1411,7 +1447,7 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
         raise LLMHatasi("görsel modu için 1 görsel gerekli", "istek")
     if mod == "birlestir" and len(gorseller) < 2:
         raise LLMHatasi("birleştirme için 2 görsel gerekli", "istek")
-    if mod in ("fikir", "ceviri") and not metin:
+    if mod in ("fikir", "ceviri", "video") and not metin:
         raise LLMHatasi("metin gerekli", "istek")
     try:
         yaraticilik = max(0.2, min(1.2, float(yaraticilik)))
@@ -1421,6 +1457,9 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
         uzunluk = "orta"
     if dil not in ("en", "tr"):
         dil = "en"
+    if model_prompt_profile not in (None, "", "auto", "general",
+                                     *MODEL_PROMPT_DOSYALARI):
+        raise LLMHatasi("geçersiz prompt profili", "istek")
 
     siste = _uretim_sistem_mesaji(mod, dil, uzunluk, sistem_ozel, mod_ozel,
                                   model_prompt_profile, bbox_mode)
@@ -1447,7 +1486,11 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
     girdi_tahmini = (len(siste) + len(metin)) // 3 + 320 * len(gorseller)
     etkin = etkin_baglam()
     tavan = max(320, etkin - girdi_tahmini - 128)
-    max_token = min(DUAL_UZUNLUK_TOKEN[uzunluk], tavan)
+    token_limitleri = (VIDEO_UZUNLUK_TOKEN if mod == "video" else
+                       DUAL_UZUNLUK_TOKEN)
+    token_artis_limitleri = (VIDEO_UZUNLUK_MAX if mod == "video" else
+                             DUAL_UZUNLUK_MAX)
+    max_token = min(token_limitleri[uzunluk], tavan)
     for deneme in range(1, JSON_DENEME + 2):
         deneme_sayisi = deneme
         if deneme == 1:
@@ -1485,7 +1528,7 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
         if sonuc:
             break
         if son_olcum.get("finish") == "length" and max_token < tavan:
-            max_token = min(tavan, DUAL_UZUNLUK_MAX[uzunluk],
+            max_token = min(tavan, token_artis_limitleri[uzunluk],
                             max_token + 400)
         time.sleep(0.15)
     if not sonuc:
@@ -1548,7 +1591,7 @@ def _normalizasyon(sonuc, uyari, sure_ms, olcum):
     pozitif_tr = str(sonuc.get("positive_tr") or "").strip()
     cikti = {"positive": pozitif,
              "positive_tr": pozitif_tr or pozitif,
-             "negative": str(sonuc.get("negative") or "").strip(),
+             "negative": str(sonuc.get("negative") or "").strip()[:2000],
              "caption_tr": str(sonuc.get("caption_tr") or "").strip()
                            or pozitif[:160],
              "tags": etiketler,
