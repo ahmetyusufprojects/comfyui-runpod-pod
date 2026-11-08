@@ -989,7 +989,9 @@ function galeriMedyasiEkle(tur, src, alt, poster){
   $('galeri').appendChild(el);
   return el;
 }
+let sonGosterilenSonuc = 0;
 function sonucuGoster(s){
+  const sonucNesli = ++sonGosterilenSonuc;
   /* Ayar: uretilen gorsel uretim sayfasina cekilsin mi (varsayilan: evet). */
   const cek = $('autoOpenResult') ? $('autoOpenResult').checked : true;
   if(aktifMenu === 'ayarlar') bilgi('Üretim tamamlandı. Sonuç Üretim sekmesinde hazır.');
@@ -1015,7 +1017,22 @@ function sonucuGoster(s){
   $('gecArama').value = '';
   /* Sonuç zaten üretim yanıtında bulunduğu için burada medya URL'sini yeniden
      indirmeyiz. Geçmiş listesi yenilenir, ekrandaki hazır sonuç korunur. */
-  gecmisYukle(true);
+  gecmisYukle(true).then(async () => {
+    if(sonucNesli !== sonGosterilenSonuc || uretimSeciliKayit || !s.gecmis) return;
+    const secimNesli = gecGorselSecimNesli;
+    const dosya = (s.gecmis_dosyalar || [])[0];
+    if(!dosya) return;
+    const k = {kayit: s.gecmis + '.json', dosya, tur: s.video_url ? 'video' : 'goruntu',
+      url: '/gecmis/' + encodeURIComponent(dosya), video_poster_url: s.video_poster_url,
+      prompt: s.prompt || '', yildiz: false};
+    try{
+      const response = await fetch('/gecmis/' + encodeURIComponent(k.kayit));
+      if(!response.ok) return;
+      const meta = await response.json();
+      if(sonucNesli !== sonGosterilenSonuc || secimNesli !== gecGorselSecimNesli || uretimSeciliKayit) return;
+      gecmisKaydiGoster(k, meta, -1, null, true);
+    }catch(e){}
+  });
   kuyrukYenile();
 }
 async function uret(istekSecenekleri, kesintisizDevam = false){
@@ -1999,12 +2016,17 @@ async function gecmisAcIdx(i, albumIndex){
   }catch(e){}
   if(secimNesli !== gecGorselSecimNesli ||
       (Number.isInteger(albumIndex) && albumNesli !== gecAlbumIstekNesli)) return;
+  gecmisKaydiGoster(k, meta, i, albumIndex, false);
+}
+function gecmisKaydiGoster(k, meta, i, albumIndex, medyayiKoru){
   uretimZoom = 1;
   const mount = $('galeri');
-  mount.replaceChildren();
-  const media = galeriMedyasiEkle(k.tur === 'video' ? 'video' : 'gorsel', k.url,
-                                  meta.prompt || 'Üretilen görsel', k.video_poster_url);
-  media.style.transform = 'scale(1)';
+  if(!medyayiKoru){
+    mount.replaceChildren();
+    const media = galeriMedyasiEkle(k.tur === 'video' ? 'video' : 'gorsel', k.url,
+                                    meta.prompt || 'Üretilen görsel', k.video_poster_url);
+    media.style.transform = 'scale(1)';
+  }
   uretimOffsetX = 0; uretimOffsetY = 0; uretimZoom = 1;
   $('uretimGoruntuBos').hidden = true;
   $('uretimGoruntuStage').hidden = false;
@@ -2045,9 +2067,9 @@ async function gecmisAcIdx(i, albumIndex){
   $('uretimSeciliBilgi').hidden = false;
   const detay = [];
   if(meta.width && meta.height) detay.push(meta.width + '×' + meta.height);
-  if(meta.model) detay.push(meta.model === 'z_image' ? 'Z-Image Turbo' :
-    (meta.model === 'anima' ? 'Anima Turbo v1.1' :
-      (meta.model === 'moody_anima' ? 'Anima Moody Mix v1.0' : 'Flux2 Klein')));
+  if(meta.model) detay.push(({z_image: 'Z-Image', flux2: 'Flux 2 Klein', flux3: 'Flux 3 Klein',
+    krea2: 'Krea 2', illustrious: 'Illustrious', anima: 'Anima Turbo v1.1',
+    moody_anima: 'Anima Moody Mix v1.0'})[meta.model] || meta.model);
   if(meta.steps) detay.push(meta.steps + ' step');
   if(meta.seed != null) detay.push('seed ' + meta.seed);
   if(k.tur === 'video' && meta.suresn) detay.push(meta.suresn + ' sn');
