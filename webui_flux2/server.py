@@ -3449,6 +3449,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 self._send(200, json.dumps({"kullanici": kullanici,
                                             "rol": _auth_store.rol(kullanici)}))
+        elif parsed.path == "/api/loras" and RUNPOD_MODE:
+            if self._auth_gerekli() is None:
+                return
+            query = urllib.parse.parse_qs(parsed.query or "")
+            model = (query.get("model") or [None])[0]
+            self._send(200, json.dumps({"loras": pod_setup.lora_status(model)},
+                                       ensure_ascii=False))
         elif parsed.path == "/api/kasa/durum":
             kullanici = self._auth_gerekli()
             if kullanici is None:

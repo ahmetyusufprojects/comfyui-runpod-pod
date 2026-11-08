@@ -193,6 +193,8 @@ def _lora_entries_clean(values):
 def _register_lora_groups(settings):
     """Expose saved LoRAs as ordinary cancellable installer download groups."""
     for entry in _lora_entries_clean(settings.get("loras")):
+        if not workflow_enabled(entry["model"]):
+            continue
         group = entry["group"]
         if group in CATALOG:
             continue
@@ -638,7 +640,8 @@ def add_lora(payload):
     model = payload.get("model")
     name = str(payload.get("name") or "").strip()[:80]
     link = str(payload.get("link") or "").strip()
-    if model not in _LORA_MODELS or not name or len(link) > 2000:
+    if (model not in _LORA_MODELS or not workflow_enabled(model)
+            or not name or len(link) > 2000):
         raise ValueError("LoRA adı, modeli veya bağlantısı geçersiz.")
     source, suffix = _parse_lora_link(link)
     digest = hashlib.sha256((model + "\0" + name + "\0" + link + "\0"
@@ -730,6 +733,8 @@ def lora_status(model=None):
     settings = _system_settings_read()
     result = []
     for entry in settings.get("loras", []):
+        if not workflow_enabled(entry.get("model")):
+            continue
         if model and entry.get("model") != model:
             continue
         group = entry.get("group")

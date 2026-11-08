@@ -118,6 +118,11 @@ function drawSystemSettings(data) {
   const availableGroups=new Set(groups.map(group=>group.id));
   const images=[['z_image','Z-Image · Moody Pro'],['flux2','Flux 2 Klein'],['flux3','Flux 3 Klein'],['krea2','Krea 2'],['illustrious','Illustrious']]
     .filter(([id])=>availableGroups.has(imageGroups[id]));
+  const availableImageModels=new Set(images.map(([id])=>id));
+  for(const option of $('loraModel').options)
+    option.disabled=!availableImageModels.has(option.value);
+  if($('loraModel').selectedOptions[0]?.disabled)
+    $('loraModel').value=images[0]?.[0]||'';
   const makeSelect=(caption,key,value)=>{
     const row=document.createElement('label'); row.className='llm-default-row';
     const name=document.createElement('span'); name.textContent=caption;
@@ -145,6 +150,7 @@ function drawSystemSettings(data) {
   }
   const loraList=$('loraList'); loraList.replaceChildren();
   for(const lora of settings.loras||[]){
+    if(!availableImageModels.has(lora.model)) continue;
     const row=document.createElement('article'); row.className='lora-row'; row.dataset.id=lora.id;
     const title=document.createElement('div'); title.className='lora-row-title';
     const heading=document.createElement('b'); heading.textContent=lora.name;

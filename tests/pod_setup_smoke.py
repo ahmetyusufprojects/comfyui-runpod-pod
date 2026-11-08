@@ -19,6 +19,13 @@ import pod_setup
 assert not pod_setup.workflow_enabled("flux3")
 assert not pod_setup.workflow_ready("flux3")
 assert "flux3" not in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
+try:
+    pod_setup.add_lora({"model": "flux3", "name": "disabled-model-test",
+                        "link": "https://huggingface.co/fixture/repo/resolve/main/lora.safetensors"})
+except ValueError:
+    pass
+else:
+    raise AssertionError("Flux 3 must not accept new LoRA records while disabled")
 model_selector = re.search(
     r'<select id="runpodImageModel">(.*?)</select>',
     pathlib.Path("/opt/webui_flux2/index.html").read_text(encoding="utf-8"),
