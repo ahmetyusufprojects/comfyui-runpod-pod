@@ -51,6 +51,7 @@ def main():
 
         # The downloadable recovery file is a verified GPG archive, and import
         # restores only the chosen synthetic user's encrypted vault.
+        kasa.kapanis_iptal(user)
         (work / "backup-marker.txt").write_text("keep from backup", encoding="utf-8")
         backup = Path(kasa.yedek_uret(user))
         assert backup.is_file() and backup.stat().st_size > 0
