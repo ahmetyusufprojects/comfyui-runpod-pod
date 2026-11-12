@@ -50,6 +50,13 @@ assert.match(mainHtml, /id="arsivSecimBar"/,
   'Archive exposes its multi-select controls');
 assert.match(mainHtml, /id="uretimPromptDuzenle"/,
   'production settings expose prompt edit mode');
+const setupHtml = fs.readFileSync('webui_flux2/setup.html', 'utf8');
+assert.match(setupHtml, /Tüm sistemi şifreleyip indir/,
+  'installer exposes encrypted whole-system backup export');
+assert.match(setupHtml, /tüm kullanıcı hesaplarını, şifreli kasaları[\s\S]*genel kurulum\/model ayarlarını/,
+  'whole-system backup scope includes all accounts and global settings');
+assert.match(setupHtml, /Tüm sistemi doğrula ve geri yükle/,
+  'installer restores a whole-system backup');
 assert.match(mainHtml, /id="psDefaultsSave"/,
   'Prompt Studio exposes editable quick-generation defaults');
 assert.match(source, /psDuzenlemeBaglam/,

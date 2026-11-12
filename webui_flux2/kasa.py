@@ -17,6 +17,8 @@ Parola kurallari:
 
 import os as _os
 import hmac as _hmac
+import hashlib as _hashlib
+import json as _json
 import shutil as _shutil
 import subprocess as _sp
 import tempfile as _tempfile
@@ -236,6 +238,200 @@ def yedek_uret(kullanici):
         raise
     finally:
         _sifirla(parola)
+
+
+def sistem_yedegi_uret(data_root, system_settings_path, parola):
+    """Create one encrypted archive containing every account record and global settings."""
+    hazir = _parola_hazirla(parola)
+    kok = _os.path.abspath(data_root)
+    gecici_kok = _tempfile.mkdtemp(prefix="webui-system-backup-")
+    payload = _os.path.join(gecici_kok, "payload")
+    data_copy = _os.path.join(payload, "data")
+    settings_copy = _os.path.join(payload, "global-settings")
+    _os.makedirs(data_copy, exist_ok=True)
+    _os.makedirs(settings_copy, exist_ok=True)
+    fd, hedef = _tempfile.mkstemp(prefix="webui-system-", suffix=".wuis.gpg")
+    _os.close(fd)
+    _os.remove(hedef)
+    try:
+        if _os.path.isdir(kok):
+            for entry in _os.scandir(kok):
+                if entry.name in (".webui.lock", ".flex-restore.tar", ".flex-save.tar"):
+                    continue
+                destination = _os.path.join(data_copy, entry.name)
+                if entry.is_dir(follow_symlinks=False):
+                    _shutil.copytree(entry.path, destination, symlinks=False)
+                elif entry.is_file(follow_symlinks=False):
+                    _shutil.copy2(entry.path, destination)
+        # Old browser sessions must never be transferred to another install.
+        account_file = _os.path.join(data_copy, "kullanicilar.json")
+        if _os.path.isfile(account_file):
+            with open(account_file, "r", encoding="utf-8") as stream:
+                accounts = _json.load(stream)
+            if not isinstance(accounts, dict) or not isinstance(accounts.get("kullanicilar"), dict):
+                raise KasaHatasi("kullanıcı kayıtları yedek için okunamadı")
+            accounts["oturumlar"] = {}
+            with open(account_file, "w", encoding="utf-8") as stream:
+                _json.dump(accounts, stream, ensure_ascii=False, indent=2)
+        settings_path = _os.path.abspath(str(system_settings_path or ""))
+        settings_parent = _os.path.dirname(settings_path)
+        if settings_parent and _os.path.isdir(settings_parent):
+            import re as _re
+            pattern = _re.compile(r"system-settings(?:-\d{19}-[a-f0-9]{16}-[a-f0-9]{64})?\.json$")
+            for entry in _os.scandir(settings_parent):
+                if pattern.fullmatch(entry.name) and entry.is_file(follow_symlinks=False):
+                    _shutil.copy2(entry.path, _os.path.join(settings_copy, entry.name))
+        settings_main = _os.path.join(settings_copy, "system-settings.json")
+        import re as _re
+        version_pattern = _re.compile(
+            r"system-settings-(\d{19})-[a-f0-9]{16}-([a-f0-9]{64})\.json$")
+        versions = []
+        for name in _os.listdir(settings_copy):
+            match = version_pattern.fullmatch(name)
+            if match:
+                versions.append((match.group(1), match.group(2), name))
+        for _, digest, name in sorted(versions, reverse=True):
+            candidate = _os.path.join(settings_copy, name)
+            try:
+                with open(candidate, "rb") as stream:
+                    content = stream.read()
+                value = _json.loads(content.decode("utf-8"))
+                if (_hashlib.sha256(content).hexdigest() == digest
+                        and isinstance(value, dict) and value.get("schema") == 1):
+                    with open(settings_main, "wb") as stream:
+                        stream.write(content)
+                    break
+            except (OSError, ValueError, UnicodeDecodeError):
+                continue
+        if not _os.path.isfile(settings_main):
+            raise KasaHatasi("genel kurulum ayarları yedekte bulunamadı")
+        if not _arsiv_sifrele(payload, hedef, hazir) or not _deneme_cozum(hedef, hazir):
+            raise KasaHatasi("şifreli sistem yedeği oluşturulamadı veya doğrulanamadı")
+        return hedef
+    except Exception:
+        try:
+            _os.remove(hedef)
+        except OSError:
+            pass
+        raise
+    finally:
+        _sifirla(hazir)
+        _shutil.rmtree(gecici_kok, ignore_errors=True)
+
+
+def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_path):
+    """Validate and restore a complete encrypted system backup with rollback."""
+    hazir = _parola_hazirla(parola)
+    hedef = _os.path.abspath(data_root)
+    parent = _os.path.dirname(hedef)
+    _os.makedirs(parent, exist_ok=True)
+    stage = _tempfile.mkdtemp(prefix=".webui-system-import-", dir=parent)
+    data_stage = _os.path.join(stage, "payload", "data")
+    settings_stage = _os.path.join(stage, "payload", "global-settings")
+    settings_path = _os.path.abspath(str(system_settings_path or ""))
+    settings_parent = _os.path.dirname(settings_path)
+    old_data = hedef + ".system-import-old"
+    settings_backup = _os.path.join(stage, "settings-old")
+    try:
+        if _os.path.exists(old_data):
+            raise KasaHatasi("önceki geri yükleme artığı bulundu; veri korunarak durduruldu")
+        if not _deneme_cozum(sifreli_dosya, hazir):
+            raise KasaHatasi(GENEL_HATA)
+        extract_root = os_path = _os.path.join(stage, "payload")
+        _os.makedirs(extract_root, exist_ok=True)
+        with _sp.Popen(_gpg_komutu() + ["-d", sifreli_dosya], stdin=_sp.PIPE,
+                       stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+                       creationflags=_NO_WINDOW) as gpg:
+            gpg.stdin.write(hazir + b"\n")
+            gpg.stdin.close()
+            import tarfile as _tarfile
+            with _tarfile.open(fileobj=gpg.stdout, mode="r|") as archive:
+                total = 0
+                for member in archive:
+                    name = member.name.replace("\\", "/")
+                    parts = [part for part in name.split("/") if part not in ("", ".")]
+                    if not parts and member.isdir():
+                        continue
+                    if (not parts or parts[0] not in ("data", "global-settings")
+                            or any(part == ".." for part in parts)
+                            or not (member.isdir() or member.isfile())
+                            or member.issym() or member.islnk()):
+                        raise KasaHatasi("yedek içinde güvenli olmayan dosya yolu var")
+                    total += max(0, member.size)
+                    if total > 20 * 1024 * 1024 * 1024:
+                        raise KasaHatasi("yedek açılmış boyut sınırını aşıyor")
+                    destination = _os.path.abspath(_os.path.join(extract_root, *parts))
+                    if not destination.startswith(extract_root + _os.sep):
+                        raise KasaHatasi("yedek içinde güvenli olmayan dosya yolu var")
+                    if member.isdir():
+                        _os.makedirs(destination, exist_ok=True)
+                    else:
+                        _os.makedirs(_os.path.dirname(destination), exist_ok=True)
+                        source = archive.extractfile(member)
+                        if source is None:
+                            raise KasaHatasi("yedek dosyası okunamadı")
+                        with source, open(destination, "wb") as output:
+                            _shutil.copyfileobj(source, output)
+            gpg.stdout.close()
+            if gpg.wait() != 0:
+                raise KasaHatasi(GENEL_HATA)
+        account_file = _os.path.join(data_stage, "kullanicilar.json")
+        with open(account_file, "r", encoding="utf-8") as stream:
+            accounts = _json.load(stream)
+        if not isinstance(accounts, dict) or not isinstance(accounts.get("kullanicilar"), dict):
+            raise KasaHatasi("yedekte geçerli kullanıcı kayıtları yok")
+        accounts["oturumlar"] = {}
+        with open(account_file, "w", encoding="utf-8") as stream:
+            _json.dump(accounts, stream, ensure_ascii=False, indent=2)
+        settings_main = _os.path.join(settings_stage, "system-settings.json")
+        with open(settings_main, "r", encoding="utf-8") as stream:
+            settings = _json.load(stream)
+        if not isinstance(settings, dict) or settings.get("schema") != 1:
+            raise KasaHatasi("yedekte geçerli genel ayarlar yok")
+
+        # Save existing data and settings so any filesystem error rolls back.
+        _os.makedirs(settings_backup, exist_ok=True)
+        if _os.path.isdir(settings_parent):
+            import re as _re
+            pattern = _re.compile(r"system-settings(?:-\d{19}-[a-f0-9]{16}-[a-f0-9]{64})?\.json$")
+            for entry in _os.scandir(settings_parent):
+                if pattern.fullmatch(entry.name) and entry.is_file(follow_symlinks=False):
+                    _shutil.copy2(entry.path, _os.path.join(settings_backup, entry.name))
+        if _os.path.exists(hedef):
+            _os.replace(hedef, old_data)
+        try:
+            _os.replace(data_stage, hedef)
+            _os.makedirs(settings_parent, exist_ok=True)
+            import re as _re
+            pattern = _re.compile(r"system-settings(?:-\d{19}-[a-f0-9]{16}-[a-f0-9]{64})?\.json$")
+            for entry in _os.scandir(settings_parent):
+                if pattern.fullmatch(entry.name) and entry.is_file(follow_symlinks=False):
+                    _os.remove(entry.path)
+            for entry in _os.scandir(settings_stage):
+                _shutil.copy2(entry.path, _os.path.join(settings_parent, entry.name))
+        except Exception:
+            if _os.path.isdir(hedef):
+                _shutil.rmtree(hedef, ignore_errors=True)
+            if _os.path.exists(old_data):
+                _os.replace(old_data, hedef)
+            for entry in _os.scandir(settings_parent):
+                if __import__("re").fullmatch(r"system-settings(?:-\d{19}-[a-f0-9]{16}-[a-f0-9]{64})?\.json", entry.name):
+                    try:
+                        _os.remove(entry.path)
+                    except OSError:
+                        pass
+            for entry in _os.scandir(settings_backup):
+                _shutil.copy2(entry.path, _os.path.join(settings_parent, entry.name))
+            raise
+        _shutil.rmtree(old_data, ignore_errors=True)
+        return {"aktarildi": True, "kullanici_sayisi": len(accounts["kullanicilar"])}
+    except KasaHatasi:
+        raise
+    except Exception as exc:
+        raise KasaHatasi("sistem yedeği güvenle içe aktarılamadı: " + str(exc)[:180]) from exc
+    finally:
+        _sifirla(hazir)
+        _shutil.rmtree(stage, ignore_errors=True)
 
 
 def _yedek_ice_aktar_impl(kullanici, sifreli_dosya, parola):

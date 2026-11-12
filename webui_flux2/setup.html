@@ -56,13 +56,16 @@
       </div>
       <div id="settingsView" hidden>
         <section class="panel settings-card">
-          <div class="section-title"><div><p class="eyebrow">KULLANICI YEDEĞİ</p><h2>Şifreli yedeği içe aktar</h2></div></div>
-          <p class="muted">WebUI Ayarları bölümünden alınmış `.wui.gpg` dosyasını seç. Yalnızca dosyanın kasasını açan parola çözebilir; mevcut hedef kasanın üzerine yazılır ve doğrulanır.</p>
+          <div class="section-title"><div><p class="eyebrow">TÜM SİSTEM YEDEĞİ</p><h2>Şifreli yedek oluştur veya geri yükle</h2></div></div>
+          <p class="muted">Yedek; tüm kullanıcı hesaplarını, şifreli kasaları, kullanıcı kayıtlarını ve volume üzerindeki genel kurulum/model ayarlarını içerir. Modeller ve ComfyUI dosyaları eklenmez. Seçtiğin parola yedek dosyasını korur; kullanıcıların kendi kasa parolaları değişmez. Geri yükleme mevcut sistem kayıtlarının tamamını değiştirir.</p>
+          <form id="backupExportForm" class="model-form">
+            <label>Yeni yedek parolası<input id="backupExportPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+            <button type="submit">Tüm sistemi şifreleyip indir</button><span id="backupExportStatus" class="muted" role="status"></span>
+          </form>
           <form id="backupImportForm" class="model-form">
-            <label>Hedef kullanıcı<select id="backupTargetUser" required></select></label>
-            <label>Kasa parolası<input id="backupPassword" type="password" autocomplete="current-password" required></label>
-            <label>Şifreli yedek<input id="backupFile" type="file" accept=".gpg,.wui.gpg,application/octet-stream" required></label>
-            <button type="submit">Yedeği doğrula ve içe aktar</button><span id="backupImportStatus" class="muted" role="status"></span>
+            <label>Yedek parolası<input id="backupPassword" type="password" autocomplete="current-password" required></label>
+            <label>Şifreli sistem yedeği<input id="backupFile" type="file" accept=".gpg,.wuis.gpg,application/octet-stream" required></label>
+            <button type="submit">Tüm sistemi doğrula ve geri yükle</button><span id="backupImportStatus" class="muted" role="status"></span>
           </form>
         </section>
         <section class="panel settings-card">

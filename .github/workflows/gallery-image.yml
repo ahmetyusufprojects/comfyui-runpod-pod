@@ -126,6 +126,11 @@ jobs:
           set -eu
           docker cp tests/kasa_password_rotation_smoke.py gallery-check:/tmp/kasa_password_rotation_smoke.py
           docker exec gallery-check /opt/webui-venv/bin/python /tmp/kasa_password_rotation_smoke.py
+      - name: Verify full-system encrypted backup and restore
+        run: |
+          set -eu
+          docker cp tests/system_backup_smoke.py gallery-check:/tmp/system_backup_smoke.py
+          docker exec gallery-check /opt/webui-venv/bin/python /tmp/system_backup_smoke.py
       - name: Verify explicit LLM model selection
         run: |
           set -eu

@@ -10,6 +10,7 @@ preset + maksimum boyuta olcekleme (en uzun kenar, 16'nin kati), steps/cfg/seed.
 Upscale YOK: istek uzerine kaldirildi, sadece saf uretim + duzenleme.
 """
 import base64
+import contextlib
 import datetime as _dt
 import hashlib
 import http.server
@@ -65,6 +66,50 @@ if RUNPOD_MODE:
 
 _app_update_lock = threading.Lock()
 _app_update_state = {"status": "idle"}
+_system_backup_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _sistem_yedegi_hazirla(parola):
+    """Pause writes, seal every open account, then prepare one full-system archive."""
+    if not _system_backup_lock.acquire(blocking=False):
+        raise RuntimeError("Başka bir sistem yedeği işlemi sürüyor.")
+    path = None
+    paused = False
+    try:
+        with _isler_kilit, pod_setup._lock:
+            if (_kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu
+                    or pod_setup._active or pod_setup._queue):
+                raise RuntimeError("Yedek öncesinde üretim ve indirme işlerinin bitmesini bekleyin.")
+        with _http_yazma_kosulu:
+            if _kapatma_istegi.is_set():
+                raise RuntimeError("Sistem başka bir kapanış veya güncelleme işlemi yürütüyor.")
+            _kapatma_istegi.set()
+            paused = True
+            if not _http_yazma_kosulu.wait_for(lambda: not _http_yazma_istekleri, timeout=30):
+                _kapatma_istegi.clear()
+                paused = False
+                raise RuntimeError("Önceki kayıt işlemleri tamamlanmadı.")
+        with _isler_kilit, pod_setup._lock:
+            if (_kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu
+                    or pod_setup._active or pod_setup._queue):
+                raise RuntimeError("Yedek hazırlanırken yeni bir iş kuyruğa girdi.")
+        closed = kasa.hepsini_kapat()
+        if any(not value for value in closed.values()):
+            raise RuntimeError("Bir veya daha fazla açık kasa mühürlenemedi.")
+        pod_setup.checkpoint()
+        path = kasa.sistem_yedegi_uret(
+            DATA_ROOT, pod_setup._system_settings_path, parola)
+        yield path
+    finally:
+        if path:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        if paused:
+            _kapatma_istegi.clear()
+        _system_backup_lock.release()
 
 def _app_update_worker():
     global _app_update_state
@@ -3414,11 +3459,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._send(200, json.dumps(pod_setup.system_settings(), ensure_ascii=False))
             return
-        if parsed.path == "/api/backup-users":
-            if not self._setup_yetkili():
-                return
-            self._send(200, json.dumps({"users": [x["kullanici"] for x in _auth_store.liste()]}, ensure_ascii=False))
-            return
         if parsed.path == "/api/loras" and RUNPOD_MODE:
             if self._auth_gerekli() is None:
                 return
@@ -3450,24 +3490,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not pod_setup.is_ready():
             self._send(503, '{"hata":"Sistem hazırlanıyor."}')
             return
+        if parsed.path == "/api/backup-export":
+            if not self._setup_yetkili():
+                return
+            parola = self.headers.get("X-Backup-Password") or ""
+            try:
+                with _sistem_yedegi_hazirla(parola) as path:
+                    self._send_file(path, "webui-system.wuis.gpg")
+            except (kasa.KasaHatasi, OSError, RuntimeError) as exc:
+                if not self.wfile.closed:
+                    self._send(409, json.dumps({"hata": str(exc)[:300]}, ensure_ascii=False))
+            return
         if parsed.path == "/api/backup-import":
             if not self._setup_yetkili():
                 return
-            kullanici = (self.headers.get("X-Backup-User") or "").strip()
             parola = self.headers.get("X-Backup-Password") or ""
             try:
                 length = int(self.headers.get("Content-Length", 0))
             except (TypeError, ValueError):
                 length = 0
-            if length <= 0 or length > 20 * 1024 * 1024 * 1024:
-                self._send(413, '{"hata":"Yedek boş veya 20 GiB sınırını aşıyor."}')
+            if length <= 0 or length > 100 * 1024 * 1024 * 1024:
+                self._send(413, '{"hata":"Yedek boş veya 100 GiB sınırını aşıyor."}')
                 return
-            if _auth_store.rol(kullanici) is None:
-                self._send(404, '{"hata":"Hedef kullanıcı bulunamadı."}')
+            try:
+                free_bytes = shutil.disk_usage(DATA_ROOT).free
+            except OSError:
+                free_bytes = 0
+            if free_bytes < length * 2 + 512 * 1024 * 1024:
+                self._send(507, '{"hata":"Yedeği güvenle geri yüklemek için geçici diskte yeterli boş alan yok."}')
                 return
-            os.makedirs(kasa.KASALAR_DIR, exist_ok=True)
-            fd, temp = tempfile.mkstemp(prefix="vault-import-", suffix=".wui.gpg",
-                                        dir=kasa.KASALAR_DIR)
+            fd, temp = tempfile.mkstemp(prefix="system-import-", suffix=".wuis.gpg")
             try:
                 with os.fdopen(fd, "wb") as stream:
                     remaining = length
@@ -3477,10 +3529,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             raise OSError("Yedek aktarımı yarıda kesildi.")
                         stream.write(block)
                         remaining -= len(block)
-                kasa.yedek_ice_aktar(kullanici, temp, parola)
-                if RUNPOD_MODE:
-                    pod_setup.checkpoint()
-                self._send(200, '{"aktarildi":true}')
+                if not _system_backup_lock.acquire(blocking=False):
+                    raise RuntimeError("Başka bir sistem yedeği işlemi sürüyor.")
+                try:
+                    with _isler_kilit, pod_setup._lock:
+                        if (_kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu
+                                or pod_setup._active or pod_setup._queue):
+                            raise RuntimeError("Yedeği yüklemeden önce iş ve indirmeleri bitirin.")
+                    with _http_yazma_kosulu:
+                        if _kapatma_istegi.is_set():
+                            raise RuntimeError("Sistem başka bir işlem yürütüyor.")
+                        _kapatma_istegi.set()
+                        if not _http_yazma_kosulu.wait_for(lambda: not _http_yazma_istekleri, timeout=30):
+                            _kapatma_istegi.clear()
+                            raise RuntimeError("Kayıt işlemleri tamamlanmadı.")
+                    try:
+                        with _isler_kilit, pod_setup._lock:
+                            if (_kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu
+                                    or pod_setup._active or pod_setup._queue):
+                                raise RuntimeError("İçe aktarma sırasında yeni bir iş kuyruğa girdi.")
+                        closed = kasa.hepsini_kapat()
+                        if any(not value for value in closed.values()):
+                            raise RuntimeError("Açık bir kullanıcı kasası mühürlenemedi; veri değiştirilmedi.")
+                        result = kasa.sistem_yedegi_ice_aktar(
+                            temp, parola, DATA_ROOT, pod_setup._system_settings_path)
+                        pod_setup.refresh_data_lock()
+                        pod_setup.checkpoint()
+                    finally:
+                        _kapatma_istegi.clear()
+                finally:
+                    _system_backup_lock.release()
+                self._send(200, json.dumps(result, ensure_ascii=False))
             except (kasa.KasaHatasi, OSError, RuntimeError) as exc:
                 self._send(400, json.dumps({"hata": str(exc)}, ensure_ascii=False))
             finally:
@@ -3488,6 +3567,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     os.remove(temp)
                 except OSError:
                     pass
+            return
+        if _kapatma_istegi.is_set():
+            self._send(503, '{"hata":"Sistem yedeği hazırlanıyor; kısa süre sonra yeniden deneyin."}')
             return
         if parsed.path == "/api/giris":
             if self._setup_parolasiz():
@@ -3754,21 +3836,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._send(200, json.dumps(_kasa_durum_bilgi(kullanici), ensure_ascii=False))
         elif parsed.path == "/api/backup-export":
-            kullanici = self._auth_gerekli()
-            if kullanici is None or self._kasa_gerekli(kullanici) is None:
-                return
-            path = None
+            parola = self.headers.get("X-Backup-Password") or ""
             try:
-                path = kasa.yedek_uret(kullanici)
-                self._send_file(path, "webui-%s.wui.gpg" % kullanici)
-            except (kasa.KasaHatasi, OSError):
-                self._send(409, '{"hata":"Şifreli yedek oluşturulamadı."}')
-            finally:
-                if path:
+                if RUNPOD_MODE:
+                    if self._admin_gerekli() is None:
+                        return
+                    with _sistem_yedegi_hazirla(parola) as path:
+                        self._send_file(path, "webui-system.wuis.gpg")
+                else:
+                    kullanici = self._auth_gerekli()
+                    if kullanici is None or self._kasa_gerekli(kullanici) is None:
+                        return
+                    path = kasa.yedek_uret(kullanici)
                     try:
+                        self._send_file(path, "webui-%s.wui.gpg" % kullanici)
+                    finally:
                         os.remove(path)
-                    except OSError:
-                        pass
+            except (kasa.KasaHatasi, OSError, RuntimeError) as exc:
+                self._send(409, json.dumps({"hata": str(exc)[:300]}, ensure_ascii=False))
         elif parsed.path == "/api/kullanicilar":
             if self._admin_gerekli() is None:
                 return
@@ -4083,7 +4168,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if RUNPOD_MODE and getattr(self.server, "server_port", 8189) == SETUP_PORT:
             self._setup_post(parsed)
             return
-        if parsed.path == "/api/sunucu-kapat":
+        if parsed.path == "/api/sunucu-kapat" or (RUNPOD_MODE and parsed.path == "/api/backup-export"):
             self._do_POST(parsed)
             return
         with _http_yazma_kosulu:

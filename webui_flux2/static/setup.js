@@ -86,28 +86,34 @@ function switchView(id) {
   for(const view of ['downloadsView','settingsView']) $(view).hidden=view!==id;
   document.querySelectorAll('.setup-tabs button').forEach(button=>
     button.classList.toggle('active',button.dataset.view===id));
-  if(id==='settingsView') { loadSystemSettings(); loadBackupUsers(); }
+  if(id==='settingsView') loadSystemSettings();
 }
-async function loadBackupUsers(){
-  const select=$('backupTargetUser'); if(!select||!currentUser)return;
+$('backupExportForm')?.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const password=$('backupExportPassword').value, status=$('backupExportStatus');
+  if(!password)return;
+  const button=event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled=true;status.textContent='Tüm hesaplar mühürleniyor ve sistem yedeği şifreleniyor…';
   try{
-    const data=await api('/api/backup-users');
-    select.replaceChildren();
-    for(const user of data.users||[]){const option=document.createElement('option');option.value=user;option.textContent=user;select.append(option);}
-    if(!select.options.length) throw new Error('Hesap bulunamadı.');
-  }catch(error){$('backupImportStatus').textContent=error.message;}
-}
+    const response=await fetch('/api/backup-export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'X-Backup-Password':password}});
+    if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.hata||`HTTP ${response.status}`);}
+    const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='webui-system.wuis.gpg';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+    $('backupExportPassword').value='';status.textContent='Tüm sistem yedeği AES-256 ile şifrelendi. Açık kasalar mühürlendi; WebUI’de yeniden açabilirsin.';
+  }catch(error){status.textContent='Yedek alınamadı: '+error.message;}
+  finally{button.disabled=false;}
+});
 $('backupImportForm')?.addEventListener('submit',async event=>{
   event.preventDefault();
-  const file=$('backupFile').files?.[0], user=$('backupTargetUser').value, password=$('backupPassword').value;
-  if(!file||!user||!password)return;
-  if(!window.confirm(`${user} hesabının kasası bu yedekle değiştirilsin mi?`))return;
+  const file=$('backupFile').files?.[0], password=$('backupPassword').value;
+  if(!file||!password)return;
+  if(!window.confirm('Bu işlem bu sistemdeki tüm kullanıcıları, kasaları ve genel ayarları yedekteki kayıtlarla değiştirecek. Devam edilsin mi?'))return;
   const status=$('backupImportStatus'), button=event.currentTarget.querySelector('button[type="submit"]');
-  status.textContent='Şifreli yedek doğrulanıyor…';button.disabled=true;
+  status.textContent='Tüm sistem yedeği doğrulanıyor…';button.disabled=true;
   try{
-    await api('/api/backup-import',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Backup-User':user,'X-Backup-Password':password},body:file});
+    const result=await api('/api/backup-import',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Backup-Password':password},body:file});
     $('backupPassword').value='';$('backupFile').value='';
-    status.textContent='Yedek içe aktarıldı. Kullanıcı WebUI’den kasasını açabilir.';
+    status.textContent=`${result.kullanici_sayisi||0} kullanıcı hesabı ve genel ayarlar geri yüklendi. Yedekteki hesapla yeniden giriş yap.`;
   }catch(error){status.textContent='İçe aktarma başarısız: '+error.message;}
   finally{button.disabled=false;}
 });

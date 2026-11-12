@@ -1124,6 +1124,18 @@ def checkpoint():
         _flex.save()
 
 
+def refresh_data_lock():
+    """Reacquire the container-data lock after a full data-tree replacement."""
+    global _data_lock
+    lock_path = Path(os.environ.get("WEBUI_DATA_ROOT", "/opt/runtime/user-data")) / ".webui.lock"
+    replacement = lock_path.open("a")
+    fcntl.flock(replacement, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    previous = _data_lock
+    _data_lock = replacement
+    if previous is not None:
+        previous.close()
+
+
 def storage_status():
     return {"storage_mode": _storage_mode,
             "storage_persistent": _storage_mode == "persistent"}
