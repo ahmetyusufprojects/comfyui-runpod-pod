@@ -947,7 +947,7 @@ if(wfEl) wfEl.onchange = e => {
   $('uretimGorselMod').classList.toggle('aktif', !video);
   $('uretimVideoMod').classList.toggle('aktif', video);
   $('wfAciklama').textContent = video ?
-    'Referans fotoğraftan sessiz video üretir (en az 1 referans). Ölçü en uzun kenara göre alınır.' :
+    'Referans fotoğraftan sesli video üretir (en az 1 referans). Ölçü en uzun kenara göre alınır.' :
     (RUNPOD_WEBUI ? 'Modeli aşağıdan seçebilirsin. Referanslı düzenlemede Flux 2 kullan.' :
      'Model otomatik seçilir: referans varsa Flux2 Klein düzenleme; yoksa Z-Image Turbo veya Anima modeli.');
   uretimIcGorunum();
@@ -1601,7 +1601,7 @@ function arsivSecimDurumuGuncelle(){
   if($('arsivSecilenSil')) $('arsivSecilenSil').disabled=!arsivSecilenler.size;
 }
 function arsivSecToggle(k){
-  if(!k?.silinebilir) return;
+  if(!k?.hash) return;
   if(arsivSecilenler.has(k.hash)) arsivSecilenler.delete(k.hash);
   else if(arsivSecilenler.size >= ARSIV_TOPLU_SIL_SINIRI){
     if($('arsivHata')) $('arsivHata').textContent='Bir seferde en fazla '+ARSIV_TOPLU_SIL_SINIRI+' fotoğraf seçebilirsin.';
@@ -1676,8 +1676,7 @@ function arsivIzgarasiCiz(){
     const select=document.createElement('button');
     select.type='button';select.className='arsiv-kart-sec';
     select.textContent=arsivSecilenler.has(k.hash)?'✓':'+';
-    select.disabled=!k.silinebilir;
-    select.title=k.silinebilir?'Arşiv kopyasını seç':'Bu görsel yalnızca kütüphane, geçmiş veya sohbette bulunuyor';
+    select.title='Arşiv görünümünden kaldır; kaynak kayıtları korunur';
     select.setAttribute('aria-label',select.title);
     select.setAttribute('aria-pressed',arsivSecilenler.has(k.hash)?'true':'false');
     select.onclick=e=>{e.stopPropagation();arsivSecToggle(k);};
@@ -1744,7 +1743,7 @@ function arsivSec(k){
     (kaynaklar.length ? '<div class="kucuk"><b>Bulunduğu yerler:</b><br>' +
       kaynaklar.map(escHtml).join('<br>') + '</div>' : '') +
     '<div class="satir"><div><button id="arsivReferans" class="kucukbtn">Üretimde referans olarak ekle</button></div></div>' +
-    (k.silinebilir ? '<div class="satir"><div><button id="arsivSil" class="tehlike kucukbtn">Arşiv kopyasını sil</button></div></div>' : ''));
+    '<div class="satir"><div><button id="arsivSil" class="tehlike kucukbtn">Arşivden kaldır</button></div></div>');
   const ref = document.getElementById('arsivReferans');
   if(ref) ref.onclick = async () => {
     const slot = uretimBosSlotBul();
@@ -1754,7 +1753,7 @@ function arsivSec(k){
   };
   const sil = document.getElementById('arsivSil');
   if(sil) sil.onclick = async () => {
-    if(!confirm('Bu fotoğrafın arşiv kopyası silinsin mi? Diğer bölümlerdeki kayıtlar etkilenmez.')) return;
+    if(!confirm('Bu fotoğraf arşiv görünümünden kaldırılsın mı? İçe aktarılmış arşiv kopyası varsa silinir; kütüphane, geçmiş ve sohbet kayıtları korunur.')) return;
     try{
       const r = await fetch('/api/arsiv/sil', {method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -1780,7 +1779,7 @@ $('arsivSecBtn').onclick=()=>{
 $('arsivSecimIptal').onclick=()=>{arsivSecimAktif=false;arsivSecimTemizle();};
 $('arsivSayfaSec').onclick=()=>{
   let sinirDoldu=false;
-  for(const k of arsivKayitlari) if(k.silinebilir&&!arsivSecilenler.has(k.hash)){
+  for(const k of arsivKayitlari) if(!arsivSecilenler.has(k.hash)){
     if(arsivSecilenler.size>=ARSIV_TOPLU_SIL_SINIRI){sinirDoldu=true;break;}
     arsivSecilenler.add(k.hash);
   }
@@ -1790,7 +1789,7 @@ $('arsivSayfaSec').onclick=()=>{
 $('arsivSecilenSil').onclick=async()=>{
   const hashes=Array.from(arsivSecilenler);
   if(!hashes.length) return;
-  if(!confirm(hashes.length+' içe aktarılmış arşiv kopyası silinsin mi? Kütüphane ve geçmiş kayıtları korunur.')) return;
+  if(!confirm(hashes.length+' fotoğraf arşiv görünümünden kaldırılsın mı? İçe aktarılmış kopyalar silinir; kütüphane, geçmiş ve sohbet kayıtları korunur.')) return;
   const button=$('arsivSecilenSil');button.disabled=true;
   try{
     const response=await fetch('/api/arsiv/sil-coklu',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hashes})});
@@ -1801,8 +1800,8 @@ $('arsivSecilenSil').onclick=async()=>{
     arsivSayfa=Math.min(arsivSayfa,Math.max(1,Math.ceil(arsivToplam/24)));
     arsivSecimAktif=false;arsivSecimTemizle();
     if($('arsivHata')) $('arsivHata').textContent=removed
-      ? removed+' arşiv kopyası silindi. Kütüphane ve geçmiş kopyaları korundu.'
-      : 'Seçilen fotoğraflar için silinebilir arşiv kopyası bulunamadı.';
+      ? removed+' fotoğraf arşiv görünümünden kaldırıldı. Kaynak kayıtlar korundu.'
+      : 'Seçili fotoğraflar arşivde bulunamadı.';
     await arsivYukle(true);
   }catch(error){
     if($('arsivHata')) $('arsivHata').textContent='Silme başarısız: '+(error.message||error);

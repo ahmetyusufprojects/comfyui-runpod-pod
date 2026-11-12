@@ -905,9 +905,6 @@ def _video_sablon_yukle(profile_name=None):
             ham["126"]["inputs"]["model"] = ["127", 0]
             ham.pop("145", None)
         ham["124"]["inputs"]["steps"] = int(profile.get("steps", 20))
-        # Sessiz taslak üretiminde örneklenen ses latent'ini çözmek ve eklemek gereksizdir.
-        ham.pop("121", None)
-        ham["130"]["inputs"].pop("audio", None)
     elif profile_name == "normal":
         ham["126"]["inputs"]["model"] = ["127", 0]
         ham.pop("145", None)
@@ -930,6 +927,7 @@ _VIDEO_ASAMA = {
     "BasicGuider": "Yonlendirici hazirlaniyor",
     "SamplerCustomAdvanced": "Video ornekleniyor",
     "VAEDecode": "Video cozuluyor",
+    "VAEDecodeAudio": "Ses cozuluyor",
     "CreateVideo": "Video birlestiriliyor",
     "SaveVideo": "Video kaydediliyor",
 }

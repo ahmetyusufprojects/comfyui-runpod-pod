@@ -22,6 +22,7 @@ _KILIT = threading.RLock()
 CACHE_AD = "arsiv_cache.json"
 ARSIV_DIR = "arsiv"
 THUMB_DIR = "arsiv_thumb"
+HIDDEN_AD = "arsiv_gizlenen.json"
 SOHBET_DOSYA = "sohbetler.json"
 GECERLI_UZANTILAR = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
 MIME_UZANTI = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
@@ -61,6 +62,36 @@ def _cache_yaz(kok, cache):
             json.dump(cache, f, ensure_ascii=False)
     except Exception:
         pass
+
+
+def _gizliler_oku(kok):
+    try:
+        with open(os.path.join(kok, HIDDEN_AD), "r", encoding="utf-8") as stream:
+            values = json.load(stream)
+        return {value for value in values
+                if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value)}
+    except Exception:
+        return set()
+
+
+def _gizliler_yaz(kok, values):
+    path = os.path.join(kok, HIDDEN_AD)
+    temporary = path + ".tmp"
+    os.makedirs(kok, exist_ok=True)
+    with open(temporary, "w", encoding="utf-8") as stream:
+        json.dump(sorted(values), stream)
+    os.replace(temporary, path)
+
+
+def _gizli_degistir(kok, ozet, gizle):
+    with _KILIT:
+        values = _gizliler_oku(kok)
+        if gizle:
+            values.add(ozet)
+        else:
+            values.discard(ozet)
+        _gizliler_yaz(kok, values)
+        return values
 
 
 def _sha256_bayt(veri):
@@ -236,6 +267,9 @@ def arsiv_indeksi(kok):
     if degisti:
         _cache_yaz(kok, cache)
 
+    gizlenen = _gizliler_oku(kok)
+    for ozet in gizlenen:
+        gruplar.pop(ozet, None)
     for g in gruplar.values():
         g["kaynak_sayisi"] = len(g["kaynaklar"])
         g["tur"] = ("video" if (g.get("ad") or "").lower().endswith(".mp4")
@@ -270,8 +304,7 @@ def arsiv_listesi(kok, sayfa=1, adet=24, arama=""):
             "bayt": g.get("bayt"), "boyut": g.get("boyut"),
             "kaynak_sayisi": g.get("kaynak_sayisi"),
             "kaynaklar": g.get("kaynaklar"),
-            "silinebilir": any(item.get("tur") == "ice-aktarim"
-                                for item in g.get("kaynaklar", [])),
+            "silinebilir": True,
             "tur": g.get("tur"),
             "url": "/api/arsiv/gorsel/%s" % g["hash"],
             "thumb": "/api/arsiv/thumb/%s" % g["hash"],
@@ -338,6 +371,7 @@ def arsiv_ice_aktar(kullanici_kok, gorseller):
     """
     indeks = arsiv_indeksi(kullanici_kok)
     mevcut = set(indeks["gruplar"].keys())
+    gizlenen = _gizliler_oku(kullanici_kok)
     d = os.path.join(kullanici_kok, ARSIV_DIR)
     _klasor_elin(d)
     eklenen = 0
@@ -367,6 +401,8 @@ def arsiv_ice_aktar(kullanici_kok, gorseller):
                 hatalar.append("geçerli bir görsel değil")
                 continue
             ozet = _sha256_bayt(veri)
+            if ozet in gizlenen:
+                gizlenen = _gizli_degistir(kullanici_kok, ozet, False)
             if ozet in mevcut:
                 tekrar += 1
                 kayitlar.append({"hash": ozet, "durum": "tekrar"})
@@ -393,9 +429,12 @@ def arsiv_ice_aktar(kullanici_kok, gorseller):
 
 
 def arsiv_sil(kok, ozet):
-    """Yalnızca içe aktarılan kopyayı siler; kütüphane/geçmiş kayıtlarına dokunmaz."""
+    """Arşiv görünümünden kaldır; içe aktarılan kopyayı temizle, kaynakları koru."""
+    if not isinstance(ozet, str) or not re.fullmatch(r"[a-f0-9]{64}", ozet):
+        return False
+    if _grup_bul(kok, ozet) is None:
+        return False
     d = os.path.join(kok, ARSIV_DIR)
-    silindi = False
     try:
         for ad in os.listdir(d):
             if not ad.startswith(ozet + "."):
@@ -405,20 +444,20 @@ def arsiv_sil(kok, ozet):
                 continue
             if os.path.isfile(yol):
                 os.remove(yol)
-                silindi = True
     except Exception:
         pass
+    _gizli_degistir(kok, ozet, True)
     try:
         t = os.path.join(kok, THUMB_DIR, ozet + ".jpg")
         if os.path.isfile(t):
             os.remove(t)
     except Exception:
         pass
-    return silindi
+    return True
 
 
 def arsiv_sil_coklu(kok, ozetler):
-    """Delete selected imported copies only; leave library/history/chat sources intact."""
+    """Hide selected images from the archive while retaining library/history/chat sources."""
     if not isinstance(ozetler, list) or len(ozetler) > 100:
         raise ValueError("En fazla 100 fotoğraf seçilebilir.")
     benzersiz = list(dict.fromkeys(ozetler))

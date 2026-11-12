@@ -44,8 +44,10 @@ assert.match(source, /\/api\/arsiv\/sil-coklu/,
   'Archive selection uses the protected bulk-delete endpoint');
 assert.match(source, /classList\.toggle\('arsiv-secim-modu',arsivSecimAktif\)/,
   'archive selection state enables the stylesheet selector for delete buttons');
-assert.match(source, /k\.silinebilir\s*\?\s*'<div class="satir"><div><button id="arsivSil"/,
-  'Archive delete action is only shown for imported copies');
+assert.match(source, /select\.title='Arşiv görünümünden kaldır; kaynak kayıtları korunur'/,
+  'all archive entries can be selected for removal without disabling the control');
+assert.doesNotMatch(source, /select\.disabled=!k\.silinebilir/,
+  'archive selection control is not disabled for library/history/chat photos');
 assert.match(mainHtml, /id="arsivSecimBar"/,
   'Archive exposes its multi-select controls');
 assert.match(mainHtml, /id="uretimPromptDuzenle"/,

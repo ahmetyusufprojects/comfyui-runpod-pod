@@ -280,8 +280,12 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     normal = server._video_sablon_yukle("normal")
     assert turbo["124"]["inputs"]["steps"] == 8
     assert turbo["126"]["inputs"]["model"] == ["145", 0]
+    assert turbo["121"]["class_type"] == "VAEDecodeAudio"
+    assert turbo["130"]["inputs"]["audio"] == ["121", 0]
     assert normal["124"]["inputs"]["steps"] == 20
     assert normal["126"]["inputs"]["model"] == ["127", 0]
+    assert normal["121"]["class_type"] == "VAEDecodeAudio"
+    assert normal["130"]["inputs"]["audio"] == ["121", 0]
     assert "145" not in normal
     server.RUNPOD_MODE = False
     windows_normal = server._video_sablon_yukle("normal")

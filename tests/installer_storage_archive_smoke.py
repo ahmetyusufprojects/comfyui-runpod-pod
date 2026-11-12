@@ -214,10 +214,14 @@ def check_archive_deletion():
         deleted = arsiv.arsiv_sil_coklu(str(root), [image_hash])
         assert deleted == [image_hash]
         after = arsiv.arsiv_listesi(str(root))
-        entry = next(item for item in after["kayitlar"] if item["hash"] == image_hash)
-        assert entry["silinebilir"] is False
-        assert any(source["tur"] == "kutuphane" for source in entry["kaynaklar"])
+        assert all(item["hash"] != image_hash for item in after["kayitlar"])
         assert image_path.is_file()
+
+        restored = arsiv.arsiv_ice_aktar(str(root), [{"bayt": image_bytes,
+                                                       "mime": "image/png"}])
+        assert restored["eklenen"] == 1
+        assert any(item["hash"] == image_hash
+                   for item in arsiv.arsiv_listesi(str(root))["kayitlar"])
 
         try:
             arsiv.arsiv_sil_coklu(str(root), ["../outside"])
@@ -225,7 +229,7 @@ def check_archive_deletion():
             pass
         else:
             raise AssertionError("invalid archive hashes must be rejected")
-    print("archive multi-delete removes imported copies and preserves library originals")
+    print("archive multi-delete hides every selected image and preserves source originals")
 
 
 if __name__ == "__main__":

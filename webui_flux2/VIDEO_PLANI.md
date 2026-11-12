@@ -42,8 +42,8 @@ Portable kök:
   21 GB dosyaları YENİDEN ADLANDIRMA (indirme/bozulma riski); onun yerine API şablonunda
   diskteki gerçek adlar kullanılır. Şablon dosyadaki adlarla birebir çalışırsa o adlar
   tercih edilir — karar 2. bölümde verilir, tek yerde not düşülür.
-- Ses: workflow'da ses hattı var (`<Audio 1>` + audio VAE). Faz 1'de SES YOK
-  (sessiz video); ses fazlalar listesine kalır, ilk kabulde aranmaz.
+- Ses: RunPod API iş akışında `<Audio 1>` hattı, `VAEDecodeAudio` ve audio VAE
+  açık tutulur; `CreateVideo` sesli sonucu `SaveVideo` düğümüne taşır.
 
 ## 2. ÖNCE YAP (oturum başında)
 
@@ -161,6 +161,5 @@ Portable kök:
 
 ## 8. FAZ DIŞI (bu planda YAPILMAZ, not düşülür)
 
-- Sesli video (`<Audio 1>` hattı, audio VAE): ayrı plan.
 - Metinden-video (referanssız) ve çoklu-sahne: ayrı plan.
 - Model indirme/değişimi, UI workflow dosyasının düzenlenmesi.
