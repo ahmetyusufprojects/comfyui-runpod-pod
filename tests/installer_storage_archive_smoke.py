@@ -35,7 +35,7 @@ def check_installer_routes():
     assert status == 401, (status, data)
     status, setup = http_json("http://127.0.0.1:8189/api/kurulum-durumu")
     assert status == 200 and setup.get("runpod") is True, (status, setup)
-    assert setup.get("kurulu") is False, setup
+    assert setup.get("kurulu") is True, setup
     assert setup.get("storage_mode") == "ephemeral", setup
     print("passwordless installer is limited to port 8192; main WebUI still requires login")
 
