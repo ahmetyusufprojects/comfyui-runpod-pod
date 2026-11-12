@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import threading
 
 from PIL import Image
@@ -269,6 +270,8 @@ def arsiv_listesi(kok, sayfa=1, adet=24, arama=""):
             "bayt": g.get("bayt"), "boyut": g.get("boyut"),
             "kaynak_sayisi": g.get("kaynak_sayisi"),
             "kaynaklar": g.get("kaynaklar"),
+            "silinebilir": any(item.get("tur") == "ice-aktarim"
+                                for item in g.get("kaynaklar", [])),
             "tur": g.get("tur"),
             "url": "/api/arsiv/gorsel/%s" % g["hash"],
             "thumb": "/api/arsiv/thumb/%s" % g["hash"],
@@ -412,3 +415,14 @@ def arsiv_sil(kok, ozet):
     except Exception:
         pass
     return silindi
+
+
+def arsiv_sil_coklu(kok, ozetler):
+    """Delete selected imported copies only; leave library/history/chat sources intact."""
+    if not isinstance(ozetler, list) or len(ozetler) > 100:
+        raise ValueError("En fazla 100 fotoğraf seçilebilir.")
+    benzersiz = list(dict.fromkeys(ozetler))
+    if any(not isinstance(ozet, str) or not re.fullmatch(r"[a-f0-9]{64}", ozet)
+           for ozet in benzersiz):
+        raise ValueError("Fotoğraf seçimi geçersiz.")
+    return [ozet for ozet in benzersiz if arsiv_sil(kok, ozet)]

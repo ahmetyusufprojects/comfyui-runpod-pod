@@ -24,7 +24,7 @@ jobs:
       - name: Check Python and setup UI syntax
         run: |
           set -eu
-          python3 -m py_compile webui_flux2/*.py pod-launch.py
+          python3 -m py_compile webui_flux2/*.py pod-launch.py tests/*.py
           node --check webui_flux2/static/app.js
           node --check webui_flux2/static/setup.js
           node tests/app_selection_smoke.js
@@ -37,6 +37,11 @@ jobs:
           assert catalog['workflows']['flux3']['steps'] == 16
           assert 'flux3-image-klein-base' not in json.dumps(catalog['groups']['flux3'])
           assert catalog['workflows']['illustrious']['lora_group'] == 'anime_desire_lora'
+          assert catalog['workflows']['illustrious']['steps'] == 28
+          assert catalog['workflows']['illustrious']['cfg'] == 5.0
+          qwen = catalog['groups']['llm_qwen9b']['files']
+          assert len(qwen) == 1 and qwen[0]['name'] == 'Qwen3.5-9B-abliterated-Q4_K_M.gguf'
+          assert qwen[0]['sha256'] == 'dba64d0e5cce0739e27535ee0a6b75249eb8006ce8b2d6c060e20750035c4695'
           assert 'anima' not in catalog['groups']
           assert 'moody' not in catalog['groups']
           assert 'anima' not in catalog['workflows']
@@ -99,6 +104,11 @@ jobs:
           set -eu
           docker cp tests/llm_model_manual_smoke.py gallery-check:/tmp/llm_model_manual_smoke.py
           docker exec gallery-check /opt/webui-venv/bin/python /tmp/llm_model_manual_smoke.py
+      - name: Verify passwordless installer, storage cleaning, and archive deletion
+        run: |
+          set -eu
+          docker cp tests/installer_storage_archive_smoke.py gallery-check:/tmp/installer_storage_archive_smoke.py
+          docker exec gallery-check /opt/webui-venv/bin/python /tmp/installer_storage_archive_smoke.py
       - name: Verify application update and rollback
         run: |
           set -eu

@@ -1141,6 +1141,124 @@ def status():
                 "ilerleme": dict(_active_progress), "hazir": _ready}
 
 
+def clear_rebuildable_storage():
+    """Remove only regenerable Pod installs, model files, and caches.
+
+    User data and the mounted Flex volume are deliberately outside the deletion
+    allowlist. This is a clean reinstall action, not an account reset.
+    """
+    global _comfy_process
+    with _lock:
+        if _active is not None or _queue:
+            raise RuntimeError("Önce devam eden model indirmelerini tamamlayın veya iptal edin.")
+        process = _comfy_process
+
+    root = ROOT.resolve()
+    protected = {root}
+    data_root = Path(os.environ.get("WEBUI_DATA_ROOT", str(root / "user-data"))).resolve()
+    volume = Path(os.environ.get("POD_VOLUME_MOUNT", "/workspace")).resolve()
+    protected.update((data_root, volume))
+    model_root = Path(os.environ.get("POD_MODEL_STORAGE", str(root / "models"))).resolve()
+
+    def overlaps(path, protected_path):
+        return (path == protected_path or path.is_relative_to(protected_path)
+                or protected_path.is_relative_to(path))
+
+    external_model_root = (model_root if model_root not in (root, Path("/"))
+                           and not any(overlaps(model_root, item)
+                                       for item in protected)
+                           else None)
+
+    candidates = [COMFY, root / "comfy-venv", root / "bin", root / "llama",
+                  root / "hf-cache", root / "cache", root / "uv-cache",
+                  root / "pip-cache"]
+    if external_model_root is not None:
+        candidates.append(external_model_root)
+    for variable in ("HF_HOME", "XDG_CACHE_HOME", "UV_CACHE_DIR"):
+        value = os.environ.get(variable)
+        if value:
+            candidates.append(Path(value).expanduser())
+    candidates.extend(root / name for name in LLAMA_RELEASE)
+    candidates.extend(root / name for name in
+                      ("setup.log", "comfyui.log", "llama.log", "webui.log"))
+
+    safe = []
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            under_runtime = resolved != root and resolved.is_relative_to(root)
+            is_model_storage = (external_model_root is not None
+                                and resolved == external_model_root)
+            if (not (under_runtime or is_model_storage)
+                    or any(overlaps(resolved, item) for item in protected)
+                    or resolved in seen):
+                continue
+            seen.add(resolved)
+            safe.append(candidate)
+        except (OSError, RuntimeError):
+            continue
+
+    _stop_process(process)
+    _comfy_process = None
+    try:
+        import llm
+        llm.durdur()
+    except Exception:
+        pass
+    try:
+        import prompt_translation
+        prompt_translation.modeli_bosalt()
+    except Exception:
+        pass
+
+    removed = 0
+    freed = 0
+    for candidate in safe:
+        try:
+            if candidate.is_symlink():
+                freed += candidate.lstat().st_size
+                candidate.unlink()
+                removed += 1
+                continue
+            if candidate.is_file():
+                freed += candidate.stat().st_size
+                candidate.unlink()
+                removed += 1
+                continue
+            if not candidate.is_dir():
+                continue
+            for current, directories, files in os.walk(candidate, followlinks=False):
+                for name in files:
+                    try:
+                        child = Path(current) / name
+                        stat = child.lstat() if child.is_symlink() else child.stat()
+                        freed += stat.st_size
+                    except OSError:
+                        pass
+                for name in directories:
+                    child = Path(current) / name
+                    if child.is_symlink():
+                        try:
+                            freed += child.lstat().st_size
+                        except OSError:
+                            pass
+            shutil.rmtree(candidate)
+            removed += 1
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise RuntimeError("Yeniden kurulabilir dosyalar temizlenemedi (%s)." %
+                               type(exc).__name__) from None
+
+    with _lock:
+        _state.clear()
+        _active_progress.clear()
+        _last_console_progress.clear()
+    return {"removed": removed, "freed_bytes": freed,
+            "preserved_user_data": True, "preserved_flex_settings": True}
+
+
 def _group_files_complete(group):
     item = CATALOG[group]
     return all(file.get("optional") or

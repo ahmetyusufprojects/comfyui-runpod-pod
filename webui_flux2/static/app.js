@@ -3,11 +3,11 @@
 const VIDEO_HAZIRLIK = {suresn: 0, fps: 0};
 let RUNPOD_WEBUI = false;
 const RUNPOD_IMAGE_DEFAULTS = {
-  z_image: {steps: 9, sampler: 'dpmpp_2m_sde'},
-  flux2: {steps: 4, sampler: 'euler'},
-  flux3: {steps: 16, sampler: 'euler'},
-  krea2: {steps: 8, sampler: 'euler_ancestral'},
-  illustrious: {steps: 28, sampler: 'euler'}
+  z_image: {steps: 9, sampler: 'dpmpp_2m_sde', cfg: 1},
+  flux2: {steps: 4, sampler: 'euler', cfg: 1},
+  flux3: {steps: 16, sampler: 'euler', cfg: 1},
+  krea2: {steps: 8, sampler: 'euler_ancestral', cfg: 1},
+  illustrious: {steps: 28, sampler: 'euler_ancestral', cfg: 5}
 };
 let fotoB64 = null, fotoB64_2 = null, fotoMime = null, fotoMime2 = null, takipIs = null;
 let gecSayfa = 1, gecListe = [], gecIdx = 0, gecToplam = 0, gecGorunum = 'izgara', prOnbellek = [];
@@ -248,6 +248,7 @@ function uretimModGuncelle(){
     const eski = varsayilanlar[otomatikSonModel], yeni = varsayilanlar[model];
     if(eski && yeni && +$('steps').value === eski.steps) $('steps').value = yeni.steps;
     if(eski && yeni && $('sampler').value === eski.sampler) $('sampler').value = yeni.sampler;
+    if(eski && yeni && eski.cfg != null && yeni.cfg != null && +$('cfg').value === eski.cfg) $('cfg').value = yeni.cfg;
   }
   otomatikSonModel = model;
   if(modelDegisti) runpodLoraYukle();
@@ -950,6 +951,7 @@ if($('runpodImageModel')) $('runpodImageModel').addEventListener('change', () =>
   const next = RUNPOD_IMAGE_DEFAULTS[otomatikModel()];
   if(previous && next && +$('steps').value === previous.steps) $('steps').value = next.steps;
   if(previous && next && $('sampler').value === previous.sampler) $('sampler').value = next.sampler;
+  if(previous && next && previous.cfg != null && next.cfg != null && +$('cfg').value === previous.cfg) $('cfg').value = next.cfg;
   uretimModGuncelle(); formKaydet();
 });
 if($('flux3BboxMode')) $('flux3BboxMode').addEventListener('change', formKaydet);
@@ -1579,6 +1581,36 @@ $('arsivAkisBtn').onclick = () => { arsivGorunum = 'akis'; libGorunumUygula(); }
 /* --- Arşiv: tüm fotoğraflar, hash ile tekilleştirilmiş --- */
 let arsivKayitlari = [], arsivSayfa = 1, arsivToplam = 0, arsivYukleniyor = false;
 let arsivGorunum = 'izgara', libGorunum = 'izgara';
+let arsivSecimAktif = false;
+const arsivSecilenler = new Set();
+const ARSIV_TOPLU_SIL_SINIRI = 100;
+function arsivSecimDurumuGuncelle(){
+  const bar=$('arsivSecimBar'), button=$('arsivSecBtn');
+  if($('arsivIzgara')) $('arsivIzgara').classList.toggle('secim-modu',arsivSecimAktif);
+  if(bar) bar.hidden=!arsivSecimAktif;
+  if(button){button.setAttribute('aria-pressed',arsivSecimAktif?'true':'false');button.textContent=arsivSecimAktif?'Seçim açık':'Seç';}
+  if($('arsivSecimSayisi')) $('arsivSecimSayisi').textContent=arsivSecilenler.size+' fotoğraf seçildi';
+  if($('arsivSecilenSil')) $('arsivSecilenSil').disabled=!arsivSecilenler.size;
+}
+function arsivSecToggle(k){
+  if(!k?.silinebilir) return;
+  if(arsivSecilenler.has(k.hash)) arsivSecilenler.delete(k.hash);
+  else if(arsivSecilenler.size >= ARSIV_TOPLU_SIL_SINIRI){
+    if($('arsivHata')) $('arsivHata').textContent='Bir seferde en fazla '+ARSIV_TOPLU_SIL_SINIRI+' fotoğraf seçebilirsin.';
+    return;
+  } else arsivSecilenler.add(k.hash);
+  const kart=document.querySelector('.arsiv-sec-kart[data-hash="'+k.hash+'"]');
+  if(kart){kart.classList.toggle('secili',arsivSecilenler.has(k.hash));
+    const sec=kart.querySelector('.arsiv-kart-sec');
+    if(sec) sec.setAttribute('aria-pressed',arsivSecilenler.has(k.hash)?'true':'false');}
+  arsivSecimDurumuGuncelle();
+}
+function arsivSecimTemizle(){
+  arsivSecilenler.clear();
+  document.querySelectorAll('.arsiv-sec-kart.secili').forEach(k=>k.classList.remove('secili'));
+  document.querySelectorAll('.arsiv-kart-sec[aria-pressed="true"]').forEach(k=>k.setAttribute('aria-pressed','false'));
+  arsivSecimDurumuGuncelle();
+}
 function libGorunumUygula(){
   const iz = $('libIzgara'), ak = $('arsivIzgara');
   if(iz) iz.classList.toggle('akis', libGorunum === 'akis');
@@ -1605,6 +1637,9 @@ function arsivIzgarasiCiz(){
     return;
   }
   arsivKayitlari.forEach(k => {
+    const wrap = document.createElement('div');
+    wrap.className = 'arsiv-sec-kart'+(arsivSecilenler.has(k.hash)?' secili':'');
+    wrap.dataset.hash = k.hash || '';
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'lib-kart';
     btn.setAttribute('aria-label', (k.ad || 'Fotoğraf') + ' ayrıntılarını aç');
@@ -1626,10 +1661,23 @@ function arsivIzgarasiCiz(){
     meta.textContent = p.join(' · ');
     detail.append(name, meta);
     btn.append(frame, detail);
-    btn.onclick = () => lbAcListe(arsivKayitlari, arsivKayitlari.indexOf(k));
-    iz.appendChild(btn);
+    btn.onclick = () => {
+      if(arsivSecimAktif){arsivSecToggle(k);return;}
+      lbAcListe(arsivKayitlari, arsivKayitlari.indexOf(k));
+    };
+    const select=document.createElement('button');
+    select.type='button';select.className='arsiv-kart-sec';
+    select.textContent=arsivSecilenler.has(k.hash)?'✓':'+';
+    select.disabled=!k.silinebilir;
+    select.title=k.silinebilir?'Arşiv kopyasını seç':'Bu görsel yalnızca kütüphane, geçmiş veya sohbette bulunuyor';
+    select.setAttribute('aria-label',select.title);
+    select.setAttribute('aria-pressed',arsivSecilenler.has(k.hash)?'true':'false');
+    select.onclick=e=>{e.stopPropagation();arsivSecToggle(k);};
+    wrap.append(btn,select);
+    iz.appendChild(wrap);
   });
   libGorunumUygula();
+  arsivSecimDurumuGuncelle();
 }
 function arsivSayfaCiz(){
   const kutu = $('arsivSayfalar');
@@ -1688,7 +1736,7 @@ function arsivSec(k){
     (kaynaklar.length ? '<div class="kucuk"><b>Bulunduğu yerler:</b><br>' +
       kaynaklar.map(escHtml).join('<br>') + '</div>' : '') +
     '<div class="satir"><div><button id="arsivReferans" class="kucukbtn">Üretimde referans olarak ekle</button></div></div>' +
-    '<div class="satir"><div><button id="arsivSil" class="tehlike kucukbtn">Arşiv kopyasını sil</button></div></div>');
+    (k.silinebilir ? '<div class="satir"><div><button id="arsivSil" class="tehlike kucukbtn">Arşiv kopyasını sil</button></div></div>' : ''));
   const ref = document.getElementById('arsivReferans');
   if(ref) ref.onclick = async () => {
     const slot = uretimBosSlotBul();
@@ -1711,10 +1759,47 @@ function arsivSec(k){
   };
 }
 $('arsivArama').addEventListener('input', () => {
+  arsivSecimTemizle();
   if(arsivAramaGecikme) clearTimeout(arsivAramaGecikme);
   arsivAramaGecikme = setTimeout(() => { arsivSayfa = 1; arsivYukle(true); }, 250);
 });
 let arsivAramaGecikme = null;
+$('arsivSecBtn').onclick=()=>{
+  arsivSecimAktif=!arsivSecimAktif;
+  if(!arsivSecimAktif) arsivSecimTemizle();
+  else arsivSecimDurumuGuncelle();
+};
+$('arsivSecimIptal').onclick=()=>{arsivSecimAktif=false;arsivSecimTemizle();};
+$('arsivSayfaSec').onclick=()=>{
+  let sinirDoldu=false;
+  for(const k of arsivKayitlari) if(k.silinebilir&&!arsivSecilenler.has(k.hash)){
+    if(arsivSecilenler.size>=ARSIV_TOPLU_SIL_SINIRI){sinirDoldu=true;break;}
+    arsivSecilenler.add(k.hash);
+  }
+  if(sinirDoldu&&$('arsivHata')) $('arsivHata').textContent='Bir seferde en fazla '+ARSIV_TOPLU_SIL_SINIRI+' fotoğraf seçebilirsin.';
+  arsivIzgarasiCiz();
+};
+$('arsivSecilenSil').onclick=async()=>{
+  const hashes=Array.from(arsivSecilenler);
+  if(!hashes.length) return;
+  if(!confirm(hashes.length+' içe aktarılmış arşiv kopyası silinsin mi? Kütüphane ve geçmiş kayıtları korunur.')) return;
+  const button=$('arsivSecilenSil');button.disabled=true;
+  try{
+    const response=await fetch('/api/arsiv/sil-coklu',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hashes})});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(data.hata||'HTTP '+response.status);
+    const removed=Number(data.silinen)||0;
+    arsivToplam=Math.max(0,arsivToplam-removed);
+    arsivSayfa=Math.min(arsivSayfa,Math.max(1,Math.ceil(arsivToplam/24)));
+    arsivSecimAktif=false;arsivSecimTemizle();
+    if($('arsivHata')) $('arsivHata').textContent=removed
+      ? removed+' arşiv kopyası silindi. Kütüphane ve geçmiş kopyaları korundu.'
+      : 'Seçilen fotoğraflar için silinebilir arşiv kopyası bulunamadı.';
+    await arsivYukle(true);
+  }catch(error){
+    if($('arsivHata')) $('arsivHata').textContent='Silme başarısız: '+(error.message||error);
+  }finally{button.disabled=!arsivSecilenler.size;}
+};
 $('arsivIceAktarBtn').onclick = () => $('arsivIceAktar').click();
 $('arsivIceAktar').onchange = async e => {
   const dosyalar = Array.from(e.target.files || []);
@@ -2112,6 +2197,10 @@ async function gecmisYukle(temizle){
         sayi.textContent = k.album_count;
         sayi.setAttribute('aria-label', k.album_count + ' fotoğraf');
         btn.appendChild(sayi);
+        const albumEtiket=document.createElement('span');
+        albumEtiket.className='gec-album-etiket';
+        albumEtiket.textContent=k.prompt||'Üretim albümü';
+        btn.appendChild(albumEtiket);
       }
       btn.onclick = () => {
         if(!k.album && !k.album_member &&
@@ -2425,7 +2514,10 @@ async function gecmisAlbumAc(i, focusFile, pageOverride){
     };
     const ad = document.createElement('strong');
     ad.textContent = album.prompt || 'Albüm';
-    baslik.append(geri, ad);
+    const ozet=document.createElement('span');
+    ozet.className='gec-album-ozet';
+    ozet.textContent=gecAlbumToplam+' fotoğraf · '+sayfa+'/'+pageCount;
+    baslik.append(geri, ad, ozet);
     iz.appendChild(baslik);
     const sayfaBaslangic = gecAlbumBaslangic;
     const sayfadakiFotograflar = gecAktifAlbum;
@@ -3275,7 +3367,7 @@ function psOtomatikMod(){
   const n = psReferansSayisi();
   return n === 2 ? 'birlestir' : (n === 1 ? 'gorsel' : 'fikir');
 }
-const PS_PROFIL_ADLARI = {auto:'Otomatik', general:'Genel', z_image:'Z-Image', flux3:'Flux 3 Klein', krea2:'Krea 2', minimaxh3:'MiniMax H3'};
+const PS_PROFIL_ADLARI = {auto:'Otomatik', general:'Genel', z_image:'Z-Image', flux3:'Flux 3 Klein', krea2:'Krea 2', illustrious:'Illustrious', minimaxh3:'MiniMax H3'};
 function psProfilIcin(mod){
   const secili = $('psPromptProfile')?.value || 'auto';
   if(secili !== 'auto') return secili;
@@ -3284,7 +3376,7 @@ function psProfilIcin(mod){
     const model = typeof runpodModelSecili === 'function' ? runpodModelSecili() : null;
     if(!model) return psReferansSayisi() ? 'general' : 'z_image';
     if(psReferansSayisi() && (model === 'krea2' || model === 'illustrious')) return 'general';
-    return ['z_image','flux3','krea2'].includes(model) ? model : 'general';
+    return ['z_image','flux3','krea2','illustrious'].includes(model) ? model : 'general';
   }
   return otomatikModel() === 'z_image' && !psReferansSayisi() ? 'z_image' : 'general';
 }
@@ -3310,6 +3402,7 @@ function psModGuncelle(){
     z_image: 'Z-Image için verilen sahne, özne ve yerleşim ayrıntılarını koruyan prompt.',
     flux3: 'Flux 3 için metinden görsel, referanslı düzenleme ve isteğe bağlı bbox tablosu.',
     krea2: 'Krea 2 için karakterleri ve aralarındaki konumu ayrı ayrı kuran prompt.',
+    illustrious: 'Illustrious için özne ve sahne bilgisini kısa, modelin etiket stiline uygun prompta çevirir.',
     minimaxh3: 'MiniMax H3 için kesintisiz video akışı, referans rolleri ve ses bölümleri.'
   };
   if(bilgiMetin){

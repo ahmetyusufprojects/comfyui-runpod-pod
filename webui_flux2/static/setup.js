@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const labels = {idle:'Kurulu değil',queued:'Sırada',running:'Hazırlanıyor',paused:'Duraklatıldı',ready:'Hazır',installed:'Dosyalar hazır',error:'Hata',cancelled:'İptal edildi'};
 let lastStatus = null, busy = false, logBusy = false, currentUser = null;
+let passwordlessInstaller = false;
 let systemSettingsLoaded = false, systemSettingsData = null;
 
 async function api(path, options={}) {
@@ -277,13 +278,17 @@ function loginView(name) {
   $('preparing').hidden=true;
   $('loginPanel').hidden=!!currentUser;
   $('dashboard').hidden=!currentUser;
-  if(currentUser) $('whoami').textContent=currentUser;
+  $('logout').hidden=passwordlessInstaller;
+  if(currentUser) $('whoami').textContent=passwordlessInstaller?'Kurulum paneli · parolasız':currentUser;
 }
 async function refresh() {
   if(busy) return; busy=true;
   try {
     const readiness=await api('/api/setup-state');
     $('connection').textContent=readiness.hazir?'Bağlı · kurulum hazır':'Bağlı · hazırlanıyor';
+    const noPassword=readiness.parolasiz===true;
+    if(noPassword!==passwordlessInstaller){passwordlessInstaller=noPassword;currentUser=null;}
+    $('logout').hidden=passwordlessInstaller;
     if(!readiness.hazir) {
       $('preparing').hidden=false; $('loginPanel').hidden=true; $('dashboard').hidden=true;
       $('prepareTitle').textContent=readiness.hata?'Pod hazırlığı tamamlanamadı':'Pod hazırlanıyor';
@@ -292,7 +297,9 @@ async function refresh() {
         :'WebUI çalışma alanı ve veri alanı hazırlanıyor. Bu sayfa açık kalabilir; ana WebUI girişinden bağımsızdır.';
       return;
     }
-    if(!currentUser) {
+    if(passwordlessInstaller) {
+      loginView('Kurulum paneli');
+    } else if(!currentUser) {
       try {
         const me=await api('/api/ben');
         if(me.rol!=='admin') { loginView(null); $('loginError').textContent='Bu panel yönetici girişi gerektiriyor.'; return; }
@@ -321,6 +328,18 @@ $('saveSystemSettings').addEventListener('click',async()=>{
       body:JSON.stringify({islem:'kaydet',auto_download:$('autoDownload').checked,default_download_order:order})});
     drawSystemSettings(data); $('settingsStatus').textContent='Genel ayarlar kaydedildi.';
   } catch(error) { $('settingsStatus').textContent=error.message; }
+});
+$('cleanStorage').addEventListener('click',async()=>{
+  const button=$('cleanStorage'), status=$('cleanStorageStatus');
+  if(!window.confirm('ComfyUI, indirilen modeller, LLM dosyaları ve önbellekler silinsin mi? Kullanıcı hesapları, kasa, arşiv ve genel ayarlar korunur. Modelleri daha sonra yeniden indirmen gerekir.')) return;
+  button.disabled=true; status.textContent='Aktif işler kontrol ediliyor…';
+  try{
+    const result=await api('/api/storage-clean',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({onay:true})});
+    const amount=Number(result.freed_bytes)||0;
+    status.textContent=`Temizlendi · ${result.removed||0} konum, ${(amount/1073741824).toFixed(1)} GiB boşaltıldı. Kullanıcı verileri ve genel ayarlar korundu.`;
+    lastStatus=await api('/api/pod-kurulum'); draw(lastStatus);
+  }catch(error){status.textContent=error.message;}
+  finally{button.disabled=false;}
 });
 $('modelForm').addEventListener('submit',async event=>{
   event.preventDefault();

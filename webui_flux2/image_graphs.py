@@ -456,7 +456,7 @@ def build_illustrious_prompt(p):
         "6": {"class_type": "KSampler",
               "inputs": {"model": ["2", 0], "seed": seed,
                          "steps": p.get("steps", 28), "cfg": p.get("cfg", 5.0),
-                         "sampler_name": p.get("sampler", "euler"),
+                         "sampler_name": p.get("sampler", "euler_ancestral"),
                          "scheduler": p.get("scheduler", "normal"),
                          "positive": ["3", 0], "negative": ["4", 0],
                          "latent_image": ["5", 0], "denoise": 1.0}},

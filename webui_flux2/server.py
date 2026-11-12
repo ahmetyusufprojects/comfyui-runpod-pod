@@ -384,7 +384,7 @@ _FORM_SAYI = {"width": (64, 4096), "height": (64, 4096),
 _UI_ENUM = {
     "ps_length": ("kisa", "orta", "uzun"),
     "ps_language": ("en", "tr"),
-    "ps_prompt_profile": ("auto", "general", "z_image", "flux3", "krea2", "minimaxh3"),
+    "ps_prompt_profile": ("auto", "general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3"),
     "history_view": ("izgara", "akis"),
     "log_source": ("llama", "comfy", "webui", "setup"),
     "cinematic_mode": ("off", "soft", "vivid"),
@@ -1364,7 +1364,7 @@ def _llm_kuyruk_isini_calistir(job):
                              mod_ozel=(ayar.get("llm_mod") or {}).get(req.get("mod")),
                              model_prompt_profile=(req.get("model_prompt_profile")
                                                    if req.get("model_prompt_profile") in
-                                                   ("general", "z_image", "flux3", "krea2", "minimaxh3") else None),
+                                                   ("general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3") else None),
                              bbox_mode=bool(req.get("bbox_mode")),
                              gpu_hazirla=gpu_hazirla)
             _is_sonucu_baslat(job)
@@ -1396,7 +1396,7 @@ def _llm_kuyruk_isini_calistir(job):
                 model_prompt_profile=(
                     "minimaxh3" if is_video else
                     (req.get("model") if req.get("model") in
-                     ("z_image", "flux3", "krea2") else None)),
+                     ("z_image", "flux3", "krea2", "illustrious") else None)),
                 bbox_mode=bool(req.get("flux3_bbox_mode")))
             _llm_prompt_gecmisine_yaz(sahip, {
                 "mod": mod, "metin": metin, "dil": "en",
@@ -3248,6 +3248,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return None
         return kullanici
 
+    def _setup_parolasiz(self):
+        return (RUNPOD_MODE
+                and getattr(self.server, "server_port", 8189) == SETUP_PORT
+                and os.environ.get("WEBUI_SETUP_PASSWORDLESS") == "1")
+
+    def _setup_yetkili(self):
+        """Passwordless access is restricted to the installer port and routes."""
+        return True if self._setup_parolasiz() else self._admin_gerekli() is not None
+
     def _kasa_gerekli(self, kullanici):
         """Kasa acik degilse 423 doner. Aciksa kullanim saatini tazeler."""
         with _http_yazma_kosulu:
@@ -3337,7 +3346,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path in ("/api/sunucu-hazir", "/api/setup-state"):
             ready = pod_setup.is_ready()
             self._send(200, json.dumps({"hazir": ready,
-                                       "hata": bool(_startup_error)}, ensure_ascii=False))
+                                       "hata": bool(_startup_error),
+                                       "parolasiz": self._setup_parolasiz()},
+                                  ensure_ascii=False))
             return
         if parsed.path == "/api/kurulum-durumu":
             if not pod_setup.is_ready():
@@ -3350,6 +3361,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(503, '{"hata":"Sistem hazırlanıyor."}')
             return
         if parsed.path == "/api/ben":
+            if self._setup_parolasiz():
+                self._send(200, json.dumps({"kullanici": "Kurulum paneli",
+                                           "rol": "admin", "parolasiz": True},
+                                          ensure_ascii=False))
+                return
             kullanici = self._oturum_kullanici()
             if kullanici is None:
                 self._send(401, '{"hata":"giris gerekli"}')
@@ -3358,11 +3374,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                             "rol": _auth_store.rol(kullanici)}))
             return
         if parsed.path == "/api/pod-kurulum":
-            if self._admin_gerekli() is not None:
-                self._send(200, json.dumps(pod_setup.status(), ensure_ascii=False))
+            if not self._setup_yetkili():
+                return
+            self._send(200, json.dumps(pod_setup.status(), ensure_ascii=False))
             return
         if parsed.path == "/api/app-update":
-            if self._admin_gerekli() is None:
+            if not self._setup_yetkili():
                 return
             state = dict(_app_update_state)
             if state.get('status') == 'idle':
@@ -3373,7 +3390,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps(state, ensure_ascii=False))
             return
         if parsed.path == "/api/system-settings":
-            if self._admin_gerekli() is None:
+            if not self._setup_yetkili():
                 return
             self._send(200, json.dumps(pod_setup.system_settings(), ensure_ascii=False))
             return
@@ -3386,7 +3403,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                        ensure_ascii=False))
             return
         if parsed.path == "/api/log":
-            if self._admin_gerekli() is None:
+            if not self._setup_yetkili():
                 return
             query = urllib.parse.parse_qs(parsed.query or "")
             source = (query.get("kaynak") or ["setup"])[0]
@@ -3409,6 +3426,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(503, '{"hata":"Sistem hazırlanıyor."}')
             return
         if parsed.path == "/api/giris":
+            if self._setup_parolasiz():
+                self._send(409, '{"hata":"Kurulum panelinde giriş gerekmiyor."}')
+                return
             req = self._json_oku()
             if "__hata__" in req:
                 self._send(400, json.dumps({"hata": req["__hata__"]}))
@@ -3428,7 +3448,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, '{"cikis":true}', ek_baslik=self._cerez_sil())
             return
         if parsed.path == "/api/app-update":
-            if self._admin_gerekli() is None:
+            if not self._setup_yetkili():
                 return
             if os.environ.get('WEBUI_UPDATE_SUPERVISOR') != '1':
                 self._send(409, '{"hata":"Bu imaj güncelleme başlatıcısını içermiyor; yeni Pod açın."}')
@@ -3441,7 +3461,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(202, '{"status":"preparing"}')
             return
         if parsed.path == "/api/pod-kurulum":
-            if self._admin_gerekli() is None:
+            if not self._setup_yetkili():
                 return
             if _kapatma_istegi.is_set():
                 self._send(409, '{"hata":"Güncelleme için uygulama kapanıyor."}')
@@ -3468,7 +3488,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(202, json.dumps(pod_setup.status(), ensure_ascii=False))
             return
         if parsed.path == "/api/system-settings":
-            if self._admin_gerekli() is None:
+            if not self._setup_yetkili():
                 return
             req = self._json_oku()
             if "__hata__" in req:
@@ -3507,6 +3527,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             except OSError:
                 self._send(500, '{"hata":"Sistem ayarı kaydedilemedi."}')
+                return
+            self._send(200, json.dumps(result, ensure_ascii=False))
+            return
+        if parsed.path == "/api/storage-clean":
+            if not self._setup_yetkili():
+                return
+            req = self._json_oku()
+            if "__hata__" in req:
+                self._send(400, json.dumps({"hata": req["__hata__"]}))
+                return
+            if req.get("onay") is not True:
+                self._send(400, '{"hata":"Temizleme onayı gerekli."}')
+                return
+            with _isler_kilit:
+                active_jobs = any(
+                    job.get("durum") in ("kuyrukta", "calisiyor")
+                    or (hasattr(job.get("olay"), "is_set")
+                        and not job["olay"].is_set())
+                    for job in _isler.values())
+                queued_jobs = bool(_kuyruk or _ceviri_kuyrugu)
+            if active_jobs or queued_jobs:
+                self._send(409, '{"hata":"Önce devam eden üretim ve sohbet işlerini bitirin."}')
+                return
+            if _app_update_state.get("status") in ("preparing", "downloading", "applying"):
+                self._send(409, '{"hata":"Uygulama güncellemesi sürerken depolama temizlenemez."}')
+                return
+            try:
+                result = pod_setup.clear_rebuildable_storage()
+            except (OSError, RuntimeError) as exc:
+                self._send(409, json.dumps({"hata": str(exc)}, ensure_ascii=False))
                 return
             self._send(200, json.dumps(result, ensure_ascii=False))
             return
@@ -4237,6 +4287,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
             silindi = arsiv.arsiv_sil(kok, ozet)
             self._send(200, json.dumps({"silindi": silindi}))
             return
+        if parsed.path == "/api/arsiv/sil-coklu":
+            kullanici = self._auth_gerekli()
+            if kullanici is None:
+                return
+            if self._kasa_gerekli(kullanici) is None:
+                return
+            req = self._json_oku()
+            if "__hata__" in req:
+                self._send(400, json.dumps({"hata": req["__hata__"]}))
+                return
+            hashes = req.get("hashes")
+            if not isinstance(hashes, list) or len(hashes) > 100:
+                self._send(400, '{"hata":"En fazla 100 fotoğraf seçilebilir."}')
+                return
+            try:
+                kok = _kullanici_koku(kullanici)
+                silinen = arsiv.arsiv_sil_coklu(kok, hashes)
+            except ValueError as exc:
+                self._send(400, json.dumps({"hata": str(exc)}, ensure_ascii=False))
+                return
+            except (OSError, RuntimeError):
+                self._send(409, '{"hata":"Arşiv kopyaları silinemedi."}')
+                return
+            self._send(200, json.dumps({"silinen": len(silinen),
+                                        "silinen_hashler": silinen}))
+            return
         if parsed.path == "/api/arsiv/ice-aktar":
             kullanici = self._auth_gerekli()
             if kullanici is None:
@@ -4838,7 +4914,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(400, '{"hata":"Seçilen LLM modeli bulunamadı."}')
                 return
             profile = req.get("model_prompt_profile", "auto")
-            if profile not in ("auto", "general", "z_image", "flux3", "krea2", "minimaxh3"):
+            if profile not in ("auto", "general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3"):
                 self._send(400, '{"hata":"gecersiz prompt profili"}')
                 return
             if "bbox_mode" in req and not isinstance(req.get("bbox_mode"), bool):

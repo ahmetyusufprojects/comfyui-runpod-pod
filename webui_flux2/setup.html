@@ -60,6 +60,12 @@
           <div class="actions"><button id="updateApp" type="button">Güncellemeyi başlat</button><span id="updateAppStatus" class="muted" role="status"></span></div>
           <div class="actions restart-actions"><button id="restartApp" class="quiet" type="button">Uygulamayı yeniden başlat</button><span id="restartAppStatus" class="muted" role="status">İndirilen modeller korunur.</span></div>
         </section>
+        <section class="panel settings-card clean-storage-card">
+          <div class="section-title"><div><p class="eyebrow">GEÇİCİ DEPOLAMA</p><h2>Yeniden kurulabilir dosyaları temizle</h2></div></div>
+          <p class="muted">ComfyUI, indirilen modeller, LLM dosyaları ve önbellekler silinir; gerektiğinde kurucu ekranından yeniden indirilebilir. Kullanıcı hesapları, kasa, arşiv ve genel ayarlar korunur.</p>
+          <p class="clean-storage-note">Bu işlem aktif üretim, sohbet veya model indirme işi varken çalışmaz. İndirmeler yeniden yapılacağı için Pod’un geçici disk kullanımı azalır.</p>
+          <div class="actions"><button id="cleanStorage" class="danger-button" type="button">Geçici depolamayı temizle</button><span id="cleanStorageStatus" class="muted" role="status"></span></div>
+        </section>
         <section class="panel settings-card">
           <div class="section-title"><div><p class="eyebrow">YENİ POD BAŞLANGICI</p><h2>Otomatik indirme ve sıra</h2></div></div>
           <p class="muted">Seçtiğin modeller her yeni Pod açıldığında sırayla hazırlanır. Bu liste mevcut oturumun sırasında yaptığın değişiklikleri etkilemez.</p>

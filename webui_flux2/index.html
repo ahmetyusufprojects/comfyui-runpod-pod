@@ -333,8 +333,16 @@
   <div class="lib-arama-alani"><input id="arsivArama" type="search" placeholder="Ara: dosya adı, tarih..." aria-label="Arşivde ara"></div>
   <button id="arsivIzgaraBtn" class="gec-gorunum-btn aktif" type="button" title="Kutucuklar">⌃</button>
   <button id="arsivAkisBtn" class="gec-gorunum-btn" type="button" title="Alt alta">≡</button>
+  <button id="arsivSecBtn" class="gec-gorunum-btn arsiv-sec-btn" type="button" aria-pressed="false">Seç</button>
   <button id="arsivIceAktarBtn" class="ayar-birincil" type="button">İçe aktar</button>
   <input type="file" id="arsivIceAktar" accept="image/*" multiple hidden>
+</div>
+<div id="arsivSecimBar" class="arsiv-secim-bar" hidden>
+  <span id="arsivSecimSayisi">0 fotoğraf seçildi</span>
+  <button id="arsivSayfaSec" class="hayalet kucukbtn" type="button">Sayfadakileri seç</button>
+  <span class="arsiv-secim-notu">Yalnızca içe aktarılan arşiv kopyaları silinir; kütüphane ve geçmiş kayıtları korunur.</span>
+  <button id="arsivSecimIptal" class="hayalet kucukbtn" type="button">Vazgeç</button>
+  <button id="arsivSecilenSil" class="tehlike kucukbtn" type="button" disabled>Seçilenleri sil</button>
 </div>
 <div id="arsivHata" class="lib-hata" role="status" aria-live="polite"></div>
 <div class="lib-izgara" id="arsivIzgara"></div>
@@ -645,6 +653,7 @@
     <option value="z_image">Z-Image</option>
     <option value="flux3">Flux 3 Klein</option>
     <option value="krea2">Krea 2 · karakter odaklı</option>
+    <option value="illustrious">Illustrious · etiket odaklı</option>
     <option value="minimaxh3">MiniMax H3 · video</option>
   </select>
   <div class="kucuk ps-profil-bilgi" id="psPromptProfileInfo" role="status">Otomatik seçim, mevcut üretim modeline uygun promptu kullanır. Bu seçim üretim modelini değiştirmez.</div>
