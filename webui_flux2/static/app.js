@@ -587,7 +587,7 @@ async function boot(){
         const ephemeral=RUNPOD_WEBUI&&k.storage_mode==='ephemeral';
         storageNote.hidden=!ephemeral;
         storageNote.textContent=ephemeral
-          ?'Kalıcı volume bağlı değil. İlk kurulum çalışır; ancak Pod silinirse kullanıcı verileri ve ayarlar kaybolur. Kalıcılık için küçük bir volume bağlayın.'
+          ?'Kalıcı volume bağlı değil. Sistem çalışır; ancak Pod durdurulursa, yeniden başlatılırsa veya silinirse kullanıcı verileri ve ayarlar kaybolur. Kalıcılık için küçük bir volume bağlayın.'
           :'';
       }
       for(const id of ['sohbetLlmModel','psLlmModel','uretimLlmModel']){

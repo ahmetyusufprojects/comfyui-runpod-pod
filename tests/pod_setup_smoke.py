@@ -615,6 +615,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     saved_settings_path = pod_setup._system_settings_path
     saved_validate_mount = pod_setup.validate_mount
     saved_prefix = os.environ.get("POD_FLEX_PREFIX")
+    saved_volume_mount = os.environ.get("POD_VOLUME_MOUNT")
     saved_bootstrap = os.environ.pop("WEBUI_BOOTSTRAP_PASSWORD", None)
     saved_auto_download = os.environ.get("WEBUI_AUTO_DOWNLOAD")
     setup_volume = scratch / "auto-download-volume"
@@ -638,6 +639,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     started_on_boot = []
     try:
         os.environ["POD_FLEX_PREFIX"] = "gallery-auto-test"
+        os.environ["POD_VOLUME_MOUNT"] = str(setup_volume)
         os.environ["WEBUI_AUTO_DOWNLOAD"] = "1"
         pod_setup.validate_mount = lambda: setup_volume
         pod_setup._ready = False
@@ -660,6 +662,10 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
             os.environ.pop("POD_FLEX_PREFIX", None)
         else:
             os.environ["POD_FLEX_PREFIX"] = saved_prefix
+        if saved_volume_mount is None:
+            os.environ.pop("POD_VOLUME_MOUNT", None)
+        else:
+            os.environ["POD_VOLUME_MOUNT"] = saved_volume_mount
         if saved_bootstrap is not None:
             os.environ["WEBUI_BOOTSTRAP_PASSWORD"] = saved_bootstrap
         if saved_auto_download is None:
