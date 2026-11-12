@@ -221,6 +221,7 @@ def yedek_uret(kullanici):
         parola = bytearray(kayit["parola"])
     fd, hedef = _tempfile.mkstemp(prefix="webui-yedek-", suffix=".wui.gpg")
     _os.close(fd)
+    _os.remove(hedef)  # GPG needs a non-existent output path (no overwrite prompt).
     try:
         if not _arsiv_sifrele(_calisma(kullanici), hedef, parola):
             raise KasaHatasi("şifreli yedek oluşturulamadı")
