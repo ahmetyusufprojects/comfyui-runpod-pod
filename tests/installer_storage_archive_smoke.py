@@ -2,10 +2,13 @@
 
 import json
 import os
+import sys
 import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, "/opt/webui_flux2")
 
 
 def http_json(url, method="GET", payload=None):
