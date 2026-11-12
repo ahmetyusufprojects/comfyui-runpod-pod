@@ -293,6 +293,12 @@ async function refresh() {
       storage.textContent=readiness.storage_persistent?'Kalıcı volume bağlı':'Volume yok · geçici disk';
       storage.title=readiness.storage_persistent?'Genel ayarlar ve doğrulanmış kasa kopyaları volume üzerinde saklanır.':'Pod durdurulur, yeniden başlatılır veya silinirse kullanıcı verileri ve ayarlar kaybolur.';
     }
+    const storageExplanation=$('storageExplanation');
+    if(storageExplanation){
+      storageExplanation.textContent=readiness.storage_persistent
+        ?'Modeller ve kurulum dosyaları geçici Pod diskinde hazırlanır. Genel ayarlar ve doğrulanmış kasa yedekleri bağlı volume üzerinde saklanır.'
+        :'Volume bağlı değil. Modeller, ayarlar, hesap ve kullanıcı verileri geçici diskte tutulur; Pod durdurulur, yeniden başlatılır veya silinirse silinir.';
+    }
     const noPassword=readiness.parolasiz===true;
     if(noPassword!==passwordlessInstaller){passwordlessInstaller=noPassword;currentUser=null;}
     $('logout').hidden=passwordlessInstaller;
