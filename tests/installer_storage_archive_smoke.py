@@ -94,7 +94,8 @@ def check_volume_optional_first_run():
             assert pod_setup.is_ready()
             assert not Path(no_volume_account.dosya).exists()
             assert pod_setup._flex is None
-            assert (user_data / "system-settings.json").is_file()
+            assert pod_setup._system_settings_path == user_data / "system-settings.json"
+            assert pod_setup._system_settings_versions()
             close_lock()
 
             volume = base / "empty-volume"
@@ -110,7 +111,8 @@ def check_volume_optional_first_run():
                 "storage_mode": "persistent", "storage_persistent": True}
             assert not Path(mounted_account.dosya).exists()
             assert pod_setup._flex is not None
-            assert (volume / "gallery-webui" / "system-settings.json").is_file()
+            assert pod_setup._system_settings_path == volume / "gallery-webui" / "system-settings.json"
+            assert pod_setup._system_settings_versions()
             close_lock()
     finally:
         close_lock()
