@@ -237,8 +237,7 @@ def yedek_uret(kullanici):
         _sifirla(parola)
 
 
-@_profil_gecisi
-def yedek_ice_aktar(kullanici, sifreli_dosya, parola):
+def _yedek_ice_aktar_impl(kullanici, sifreli_dosya, parola):
     """Validate an encrypted vault archive and atomically install it for a user."""
     _kullanici_dogrula(kullanici)
     hazir = _parola_hazirla(parola)
@@ -354,6 +353,9 @@ def _profil_gecisi(islem):
         with kilit:
             return islem(kullanici, *args, **kwargs)
     return sar
+
+
+yedek_ice_aktar = _profil_gecisi(_yedek_ice_aktar_impl)
 
 
 def _muhurle(kullanici, parola, kaynak_agac):
