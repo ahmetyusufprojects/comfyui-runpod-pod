@@ -54,7 +54,7 @@ assert.match(mainHtml, /id="psDefaultsSave"/,
   'Prompt Studio exposes editable quick-generation defaults');
 assert.match(source, /psDuzenlemeBaglam/,
   'prompt edit context is carried forward between Studio edits');
-assert.match(source, /$('prompt')\.value = s\.positive \|\| ''/,
+assert.ok(source.includes("$('prompt').value = s.positive || ''"),
   'prompt editing updates the active production prompt');
 assert.match(source, /uretim_prompt_duzenle/,
   'prompt edit mode is persisted with user generation settings');
