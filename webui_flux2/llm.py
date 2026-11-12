@@ -191,6 +191,7 @@ Referanslarda yalnızca görülebilen özelliklerden yararlan. Kişilerin kimli�
 Çıktı kurallarını ve seçili modun amacını koru. Kullanıcı başka dil istemedikçe açıklayıcı alanları Türkçe, pozitif promptu modelin en iyi işlediği dilde yaz. Bu görev için sonradan verilen mevcut JSON sözleşmesine aynen uy; yeni alan ekleme. İç düşünceyi, analiz adımlarını, başlık veya JSON dışında metin gösterme."""
 
 MOD_TALIMATI = {
+    "duzenle": "Kullanıcının verdiği mevcut görsel üretim promptunu düzenle. Sahnenin öznesini, eylemini, niyetini ve işe yarayan ayrıntılarını koru; yalnızca kullanıcının açıkça istediği değişiklikleri uygula. Promptu baştan başka bir fikre dönüştürme, istem dışı yeni öğe ekleme ve açıklama yazma. Sonuç, doğrudan görsel modeline verilecek güncel prompt olsun.",
     "fikir": "Kullanıcının fikrini tek, tutarlı bir görsel sahneye dönüştür. Ana "
              "özneyi, eylemi, duyguyu ve özellikle belirtilen stili koru. Kadraj, "
              "yerleşim, ışık, renk ve malzeme ayrıntılarından yalnızca sahneyi "
@@ -1641,7 +1642,7 @@ def _uret(mod, metin, gorseller, dil, yaraticilik, uzunluk,
         raise LLMHatasi("görsel modu için 1 görsel gerekli", "istek")
     if mod == "birlestir" and len(gorseller) < 2:
         raise LLMHatasi("birleştirme için 2 görsel gerekli", "istek")
-    if mod in ("fikir", "ceviri", "video") and not metin:
+    if mod in ("fikir", "ceviri", "video", "duzenle") and not metin:
         raise LLMHatasi("metin gerekli", "istek")
     try:
         yaraticilik = max(0.2, min(1.2, float(yaraticilik)))

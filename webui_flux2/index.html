@@ -214,6 +214,7 @@
 <div id="uretimDestekPanel" class="uretim-destek-panel" hidden>
   <label class="uretim-destek-etiket"><input id="continuousGeneration" type="checkbox"> Durdurulana kadar kesintisiz üret</label>
   <label class="uretim-destek-etiket"><input id="uretimPromptDestek" type="checkbox"> Promptu üretmeden önce Prompt Stüdyosu ile iyileştir</label>
+<label class="uretim-destek-etiket"><input id="uretimPromptDuzenle" type="checkbox"> Prompt Stüdyosu mevcut promptu düzenlesin</label>
   <label class="uretim-llm-secim"><span>LLM modeli</span><select id="uretimLlmModel"><option value="llm_26b">Gemma 4 26B A4B</option></select></label>
   <label class="uretim-destek-etiket uretim-prompt-tekrari" id="uretimPromptDestekTekrarWrap" hidden>
     <input id="uretimPromptDestekTekrar" type="checkbox"> Her görsel için promptu yeniden iyileştir
@@ -406,6 +407,11 @@
           <div class="ayar-alan"><label for="kasaYeniParolaTekrar">Yeni parola (tekrar)</label><div class="parola"><input id="kasaYeniParolaTekrar" type="password" autocomplete="new-password"><button type="button" class="parolaGoz" data-hedef="kasaYeniParolaTekrar" aria-label="Parolayı göster" aria-pressed="false">Göster</button></div></div>
         </div>
         <div class="ayar-kart-alt"><button id="kasaParolaDegistir" class="hayalet">Kasa parolasını değiştir</button><div class="ayar-bilgi" id="kasaParolaBilgi" role="status" aria-live="polite"></div></div>
+      </div>
+      <div class="ayar-alan backup-export-card">
+        <label>Kullanıcı kayıtlarının şifreli yedeği</label>
+        <p class="ayar-aciklama">Kütüphane, geçmiş, sohbetler ve kullanıcı ayarları açık kasanın parolasıyla AES-256 kullanılarak şifrelenir. Yedek yalnızca aynı kasa parolasıyla açılabilir.</p>
+        <button id="backupExport" class="hayalet" type="button">Şifreli yedeği indir</button><span id="backupExportStatus" role="status"></span>
       </div>
     </section>
 
@@ -689,6 +695,11 @@
 <div><label>Çıktı dili</label><select id="psDil"><option value="en" selected>İngilizce</option><option value="tr">Türkçe</option></select></div>
 <div><label for="psLlmModel">LLM</label><select id="psLlmModel"><option value="llm_26b">Gemma 4 26B A4B</option></select></div>
 </div>
+<section class="ps-hizli-ayarlar">
+  <b>Hızlı üretim ayarları</b>
+  <div class="satir"><div><label for="psDefaultSteps">Adım</label><input id="psDefaultSteps" type="number" min="1" max="50" value="9"></div><div><label for="psDefaultSeed">Seed</label><input id="psDefaultSeed" type="number" value="-1"></div><div><label for="psDefaultSide">Maks. kenar</label><input id="psDefaultSide" type="number" min="256" max="4096" step="16" value="1536"></div></div>
+  <div class="kucuk"><button id="psDefaultsSave" class="hayalet kucukbtn" type="button">Hızlı üret ayarlarını kaydet</button><span id="psDefaultsStatus" role="status"></span></div>
+</section>
 <div class="kucuk">Birden fazla prompt seçersen sırayla kuyruğa eklenir; her biri farklı bir alternatif üretir.</div>
 <label class="ayar-toggle ps-bbox-toggle" id="psFlux3BboxWrap" hidden><input id="psFlux3BboxMode" type="checkbox"><span><b>Flux bbox yerleşim tablosu</b><small>Global açıklamanın ardından öğeleri ve kutularını tek satırlık JSON dizisi olarak ekler. Uygulamanın dış JSON alanları değişmez.</small></span></label>
 </div>

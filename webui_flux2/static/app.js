@@ -1594,7 +1594,7 @@ const arsivSecilenler = new Set();
 const ARSIV_TOPLU_SIL_SINIRI = 100;
 function arsivSecimDurumuGuncelle(){
   const bar=$('arsivSecimBar'), button=$('arsivSecBtn');
-  if($('arsivIzgara')) $('arsivIzgara').classList.toggle('secim-modu',arsivSecimAktif);
+  if($('arsivIzgara')) $('arsivIzgara').classList.toggle('arsiv-secim-modu',arsivSecimAktif);
   if(bar) bar.hidden=!arsivSecimAktif;
   if(button){button.setAttribute('aria-pressed',arsivSecimAktif?'true':'false');button.textContent=arsivSecimAktif?'Seçim açık':'Seç';}
   if($('arsivSecimSayisi')) $('arsivSecimSayisi').textContent=arsivSecilenler.size+' fotoğraf seçildi';
@@ -3217,7 +3217,11 @@ async function ayarYukle(){
     $('uretimVarsayilanSteps').value = uretimVarsayilan.steps;
     $('uretimVarsayilanSeed').value = uretimVarsayilan.seed;
     $('uretimVarsayilanMaxSide').value = uretimVarsayilan.max_side;
+    if($('psDefaultSteps')) $('psDefaultSteps').value = uretimVarsayilan.steps;
+    if($('psDefaultSeed')) $('psDefaultSeed').value = uretimVarsayilan.seed;
+    if($('psDefaultSide')) $('psDefaultSide').value = uretimVarsayilan.max_side;
     $('uretimPromptDestek').checked = !!j.ayarlar.uretim_prompt_destek;
+    $('uretimPromptDuzenle').checked = !!j.ayarlar.uretim_prompt_duzenle;
     $('uretimPromptCeviri').checked = !!j.ayarlar.uretim_prompt_ceviri;
     if(j.ayarlar) formUygulaKayitli(j.ayarlar.form);
     if(RUNPOD_WEBUI) await runpodLoraYukle();
@@ -3262,6 +3266,20 @@ $('uretimVarsayilanKaydet').onclick = async () => {
     bilgiEl.textContent = 'Hızlı üretim varsayılanları kaydedildi.';
   }catch(e){ bilgiEl.textContent = 'HATA: ' + e.message; }
 };
+$('psDefaultsSave').onclick = async () => {
+  const status=$('psDefaultsStatus'), button=$('psDefaultsSave');button.disabled=true;
+  try{
+    const body={uretim_varsayilan_steps:+$('psDefaultSteps').value,
+      uretim_varsayilan_seed:+$('psDefaultSeed').value,
+      uretim_varsayilan_max_side:+$('psDefaultSide').value};
+    const r=await ayarlarGuncelle(body), j=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.hata||'HTTP '+r.status);
+    uretimVarsayilan={steps:body.uretim_varsayilan_steps,seed:body.uretim_varsayilan_seed,max_side:body.uretim_varsayilan_max_side};
+    $('uretimVarsayilanSteps').value=body.uretim_varsayilan_steps;$('uretimVarsayilanSeed').value=body.uretim_varsayilan_seed;$('uretimVarsayilanMaxSide').value=body.uretim_varsayilan_max_side;
+    status.textContent='Kaydedildi.';
+  }catch(error){status.textContent='Hata: '+error.message;}
+  finally{button.disabled=false;}
+};
 async function uretimPromptSecenekleriniKaydet(degisiklik){
   if(degisiklik === 'ceviri' && $('uretimPromptCeviri').checked)
     $('uretimPromptDestek').checked = false;
@@ -3270,7 +3288,8 @@ async function uretimPromptSecenekleriniKaydet(degisiklik){
   try{
     const r = await ayarlarGuncelle({
         uretim_prompt_destek: $('uretimPromptDestek').checked,
-        uretim_prompt_ceviri: $('uretimPromptCeviri').checked
+        uretim_prompt_ceviri: $('uretimPromptCeviri').checked,
+        uretim_prompt_duzenle: $('uretimPromptDuzenle').checked
       });
     const j = await r.json().catch(() => ({}));
     if(!r.ok) throw new Error(j.hata || r.status);
@@ -3294,6 +3313,7 @@ function promptSecenekKaydetSirali(degisiklik){
 }
 $('uretimPromptDestek').onchange = () => promptSecenekKaydetSirali('destek');
 $('uretimPromptCeviri').onchange = () => promptSecenekKaydetSirali('ceviri');
+$('uretimPromptDuzenle').onchange = () => promptSecenekKaydetSirali('duzenle');
 const ayarDegisiklikZamanlayicilari = {};
 const ayarDegisiklikIslemleri = {};
 function ayarDegisiklikIsleminiBaslat(dugmeId){
@@ -3366,7 +3386,7 @@ ayariDegisinceKaydet(['llmSistem','llmSistemSohbet','llmModFikir',
   el.addEventListener('change', formKaydet);
 });
 /* Prompt Stüdyosu: fikir/görsel/çeviri -> llama-server ile prompt üretimi. */
-let psB64_1 = null, psB64_2 = null, psMime1 = null, psMime2 = null, psURL_1 = null, psURL_2 = null, psSonuc = null, psSuruyor = false, psAktifIs = null, psAktifProfil = 'auto';
+let psB64_1 = null, psB64_2 = null, psMime1 = null, psMime2 = null, psURL_1 = null, psURL_2 = null, psSonuc = null, psSuruyor = false, psAktifIs = null, psAktifProfil = 'auto', psDuzenlemeBaglam = '';
 const llmIsTakipleri = {};
 /* Mod secimi YOK: referans sayisina gore sistem promptu otomatik secilir.
    0 referans = fikir, 1 = gorsel duzenleme, 2 = birlestirme. */
@@ -3498,6 +3518,12 @@ $('psNegatif').addEventListener('input', () => {
 function psSonucuGoster(s){
   psSonuc = s;
   $('psPozitif').value = s.positive || '';
+  if($('uretimPromptDuzenle').checked){
+    const onceki = $('prompt').value.trim();
+    psDuzenlemeBaglam = [psDuzenlemeBaglam, onceki, s.positive || ''].filter(Boolean).slice(-6).join('\n');
+    $('prompt').value = s.positive || '';
+    formKaydet();
+  }
   $('psPozitifTr').value = s.positive_tr || '';
   $('psNegatif').value = s.negative || '';
   $('psNegatifDetay').open = !!String(s.negative || '').trim();
@@ -3755,10 +3781,11 @@ async function llmIsleriniBagla(){
 }
 $('psUret').onclick = async () => {
   if(psSuruyor) return;
-  let m = psOtomatikMod();
+  const duzenleAktif = !!$('uretimPromptDuzenle').checked;
+  let m = duzenleAktif ? 'duzenle' : psOtomatikMod();
   const seciliProfil = $('psPromptProfile').value || 'auto';
-  if(videoMu() || seciliProfil === 'minimaxh3') m = 'video';
-  const profile = psProfilIcin(m);
+  if(!duzenleAktif && (videoMu() || seciliProfil === 'minimaxh3')) m = 'video';
+  const profile = duzenleAktif ? 'general' : psProfilIcin(m);
   if(m === 'video' && !['minimaxh3','general'].includes(profile)){
     $('psDurum').textContent = 'Video promptu için MiniMax H3 veya Genel profilini seç.';
     return;
@@ -3766,6 +3793,7 @@ $('psUret').onclick = async () => {
   if((m === 'gorsel') && !psB64_1){ $('psDurum').textContent = 'HATA: 1. görseli seç.'; return; }
   if((m === 'gorsel') && !$('psMetin').value.trim()){ $('psDurum').textContent = 'HATA: görselde ne değişiklik yapmak istediğinizi yazın.'; return; }
   if((m === 'birlestir') && (!psB64_1 || !psB64_2)){ $('psDurum').textContent = 'HATA: iki görseli de seç.'; return; }
+  if(duzenleAktif && !$('prompt').value.trim()){ $('psDurum').textContent = 'HATA: düzenlenecek üretim promptu boş.'; return; }
   if((m === 'fikir' || m === 'ceviri' || m === 'video') && !$('psMetin').value.trim()){ $('psDurum').textContent = m === 'video' ? 'HATA: video isteğini yaz.' : 'HATA: metin yaz.'; return; }
    psSuruyor = true; $('psUret').disabled = true; $('psDurdur').disabled = true;
    $('psPromptProfile').disabled = true; $('psFlux3BboxMode').disabled = true;
@@ -3773,12 +3801,12 @@ $('psUret').onclick = async () => {
    psCanliCiz(null);
    $('psDurum').textContent = 'LLM kuyruğuna ekleniyor...';
   const gorseller = [];
-  if(psB64_1) gorseller.push({mime: psMime1 || 'image/jpeg', veri: psB64_1});
-  if(psB64_2) gorseller.push({mime: psMime2 || 'image/jpeg', veri: psB64_2});
+  if(!duzenleAktif && psB64_1) gorseller.push({mime: psMime1 || 'image/jpeg', veri: psB64_1});
+  if(!duzenleAktif && psB64_2) gorseller.push({mime: psMime2 || 'image/jpeg', veri: psB64_2});
   try{
     const r = await fetch('/api/prompt-uret', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({mod: m, metin: $('psMetin').value, dil: $('psDil').value,
+    body: JSON.stringify({mod: m, metin: duzenleAktif ? ('Mevcut promptu kullanıcının isteğine göre düzenle.\n\nMevcut prompt:\n'+$('prompt').value+'\n\nDüzenleme isteği:\n'+$('psMetin').value+'\n\nÖnceki düzenleme bağlamı:\n'+psDuzenlemeBaglam) : $('psMetin').value, dil: $('psDil').value,
         yaraticilik: +$('psYaraticilik').value,
         gorseller, model_prompt_profile: profile,
         llm_model: RUNPOD_WEBUI && $('psLlmModel') ? $('psLlmModel').value : undefined,
@@ -5629,6 +5657,17 @@ window.addEventListener('scroll',()=>{
   else ust.classList.remove('gizli');
   sonScrollY=y;
 },{passive:true});
+$('backupExport').onclick=async()=>{
+  const button=$('backupExport'),status=$('backupExportStatus');button.disabled=true;status.textContent='Kasa şifrelenip yedekleniyor…';
+  try{
+    const response=await fetch('/api/backup-export',{cache:'no-store'});
+    if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.hata||'HTTP '+response.status);}
+    const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='webui-vault.wui.gpg';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+    status.textContent='AES-256 şifreli yedek indirildi.';
+  }catch(error){status.textContent='Yedek alınamadı: '+error.message;}
+  finally{button.disabled=false;}
+};
 parolaGozleri(); cozunurlukGorunumu(); oranKilitGuncelle(); uretimIcGorunum(); uretimModGuncelle(); gecGorunumUygula(); lbUstOlustur(); sinemaTemasiIzlemeyiBaslat();
 $('baslangicYenidenDene').onclick = boot;
 boot();

@@ -42,8 +42,23 @@ assert.match(source, /illustrious:\s*\{steps:\s*28,\s*sampler:\s*'euler_ancestra
   'Illustrious uses the checkpoint-specific 28-step, CFG 5 profile');
 assert.match(source, /\/api\/arsiv\/sil-coklu/,
   'Archive selection uses the protected bulk-delete endpoint');
+assert.match(source, /classList\.toggle\('arsiv-secim-modu',arsivSecimAktif\)/,
+  'archive selection state enables the stylesheet selector for delete buttons');
 assert.match(source, /k\.silinebilir\s*\?\s*'<div class="satir"><div><button id="arsivSil"/,
   'Archive delete action is only shown for imported copies');
 assert.match(mainHtml, /id="arsivSecimBar"/,
   'Archive exposes its multi-select controls');
+assert.match(mainHtml, /id="uretimPromptDuzenle"/,
+  'production settings expose prompt edit mode');
+assert.match(mainHtml, /id="psDefaultsSave"/,
+  'Prompt Studio exposes editable quick-generation defaults');
+assert.match(source, /psDuzenlemeBaglam/,
+  'prompt edit context is carried forward between Studio edits');
+assert.match(source, /$('prompt')\.value = s\.positive \|\| ''/,
+  'prompt editing updates the active production prompt');
+assert.match(source, /uretim_prompt_duzenle/,
+  'prompt edit mode is persisted with user generation settings');
+const styles = fs.readFileSync('webui_flux2/static/app.css', 'utf8');
+assert.match(styles, /#arsivIzgara\{display:grid!important;grid-template-columns:/,
+  'archive cards keep a responsive grid instead of overlapping');
 console.log('RunPod model selection defers Flux 3 and ignores retired Anima preferences');

@@ -12,6 +12,7 @@ import llm
 
 
 def main():
+    assert "duzenle" in llm.MOD_TALIMATI
     profiles = llm.model_profilleri()
     assert profiles and all(item.get("id") for item in profiles), profiles
     assert {item["id"] for item in profiles} == {"llm_26b", "llm_qwen27b"}, profiles

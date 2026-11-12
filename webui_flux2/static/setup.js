@@ -86,8 +86,31 @@ function switchView(id) {
   for(const view of ['downloadsView','settingsView']) $(view).hidden=view!==id;
   document.querySelectorAll('.setup-tabs button').forEach(button=>
     button.classList.toggle('active',button.dataset.view===id));
-  if(id==='settingsView') loadSystemSettings();
+  if(id==='settingsView') { loadSystemSettings(); loadBackupUsers(); }
 }
+async function loadBackupUsers(){
+  const select=$('backupTargetUser'); if(!select||!currentUser)return;
+  try{
+    const data=await api('/api/backup-users');
+    select.replaceChildren();
+    for(const user of data.users||[]){const option=document.createElement('option');option.value=user;option.textContent=user;select.append(option);}
+    if(!select.options.length) throw new Error('Hesap bulunamadı.');
+  }catch(error){$('backupImportStatus').textContent=error.message;}
+}
+$('backupImportForm')?.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const file=$('backupFile').files?.[0], user=$('backupTargetUser').value, password=$('backupPassword').value;
+  if(!file||!user||!password)return;
+  if(!window.confirm(`${user} hesabının kasası bu yedekle değiştirilsin mi?`))return;
+  const status=$('backupImportStatus'), button=event.currentTarget.querySelector('button[type="submit"]');
+  status.textContent='Şifreli yedek doğrulanıyor…';button.disabled=true;
+  try{
+    await api('/api/backup-import',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Backup-User':user,'X-Backup-Password':password},body:file});
+    $('backupPassword').value='';$('backupFile').value='';
+    status.textContent='Yedek içe aktarıldı. Kullanıcı WebUI’den kasasını açabilir.';
+  }catch(error){status.textContent='İçe aktarma başarısız: '+error.message;}
+  finally{button.disabled=false;}
+});
 function drawVariantFiles(data) {
   const root=$('modelVariantFiles'); if(!root) return;
   const family=$('modelFamily').value;

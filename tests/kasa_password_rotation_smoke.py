@@ -49,6 +49,22 @@ def main():
         assert kasa._deneme_cozum(str(previous), bytearray(new.encode("utf-8")))
         assert not kasa._deneme_cozum(str(previous), bytearray(old.encode("utf-8")))
 
+        # The downloadable recovery file is a verified GPG archive, and import
+        # restores only the chosen synthetic user's encrypted vault.
+        (work / "backup-marker.txt").write_text("keep from backup", encoding="utf-8")
+        backup = Path(kasa.yedek_uret(user))
+        assert backup.is_file() and backup.stat().st_size > 0
+        assert kasa._deneme_cozum(str(backup), bytearray(new.encode("utf-8")))
+        kasa.kapat(user)
+        kasa.ac(user, new)
+        (work / "backup-marker.txt").write_text("replace me", encoding="utf-8")
+        kasa.kapat(user)
+        kasa.yedek_ice_aktar(user, str(backup), new)
+        assert not backup.exists()
+        kasa.ac(user, new)
+        assert (work / "backup-marker.txt").read_text(encoding="utf-8") == "keep from backup"
+        (work / "backup-marker.txt").write_text("keep from backup", encoding="utf-8")
+
         kasa.kapanis_iptal(user)
         kasa.kapat(user)
         try:

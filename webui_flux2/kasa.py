@@ -211,6 +211,76 @@ def _arsiv_sifrele(kaynak, cikti, parola):
         return tar.returncode == 0 and gpg.wait() == 0
 
 
+def yedek_uret(kullanici):
+    """Create a password-encrypted snapshot of the currently open user vault."""
+    _kullanici_dogrula(kullanici)
+    with _kilit:
+        kayit = _acik.get(kullanici)
+        if kayit is None or kayit["kapaniyor"]:
+            raise KasaHatasi("yedek için kasanın açık olması gerekir")
+        parola = bytearray(kayit["parola"])
+    fd, hedef = _tempfile.mkstemp(prefix="webui-yedek-", suffix=".wui.gpg")
+    _os.close(fd)
+    try:
+        if not _arsiv_sifrele(_calisma(kullanici), hedef, parola):
+            raise KasaHatasi("şifreli yedek oluşturulamadı")
+        if not _deneme_cozum(hedef, parola):
+            raise KasaHatasi("şifreli yedek doğrulanamadı")
+        return hedef
+    except Exception:
+        try:
+            _os.remove(hedef)
+        except OSError:
+            pass
+        raise
+    finally:
+        _sifirla(parola)
+
+
+@_profil_gecisi
+def yedek_ice_aktar(kullanici, sifreli_dosya, parola):
+    """Validate an encrypted vault archive and atomically install it for a user."""
+    _kullanici_dogrula(kullanici)
+    hazir = _parola_hazirla(parola)
+    gecici = _kasa_dosya(kullanici) + ".import"
+    eski = _kasa_dosya(kullanici) + ".import-old"
+    try:
+        with _kilit:
+            if kullanici in _acik or kullanici in _muhur_suren:
+                raise KasaHatasi("hedef kasayı içe aktarmadan önce kapat")
+        if not _deneme_cozum(sifreli_dosya, hazir):
+            raise KasaHatasi(GENEL_HATA)
+        _os.makedirs(KASALAR_DIR, exist_ok=True)
+        _os.replace(sifreli_dosya, gecici)
+        if _os.path.isfile(_kasa_dosya(kullanici)):
+            _os.replace(_kasa_dosya(kullanici), eski)
+        try:
+            _os.replace(gecici, _kasa_dosya(kullanici))
+            gizle(_kasa_dosya(kullanici))
+            if not _deneme_cozum(_kasa_dosya(kullanici), hazir):
+                raise KasaHatasi("yedek hedefe yazıldıktan sonra doğrulanamadı")
+        except Exception:
+            try:
+                _os.remove(_kasa_dosya(kullanici))
+            except OSError:
+                pass
+            if _os.path.isfile(eski):
+                _os.replace(eski, _kasa_dosya(kullanici))
+            raise
+        try:
+            _os.remove(eski)
+        except OSError:
+            pass
+        return {"aktarildi": True}
+    finally:
+        _sifirla(hazir)
+        for path in (gecici, eski):
+            try:
+                _os.remove(path)
+            except OSError:
+                pass
+
+
 def _arsiv_yeniden_sifrele(kaynak, cikti, eski_parola, yeni_parola):
     """Mevcut şifreli tar arşivini diske açmadan başka parolayla şifrele."""
     cozen = None

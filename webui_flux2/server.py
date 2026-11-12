@@ -22,6 +22,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -739,6 +740,10 @@ def _ayar_degisikliklerini_uygula(ayar, req):
         if not isinstance(req.get("uretim_prompt_ceviri"), bool):
             raise ValueError("uretim_prompt_ceviri boolean olmalı")
         ayar["uretim_prompt_ceviri"] = req["uretim_prompt_ceviri"]
+    if "uretim_prompt_duzenle" in req:
+        if not isinstance(req.get("uretim_prompt_duzenle"), bool):
+            raise ValueError("uretim_prompt_duzenle boolean olmalı")
+        ayar["uretim_prompt_duzenle"] = req["uretim_prompt_duzenle"]
     if (ayar.get("uretim_prompt_ceviri")
             and ayar.get("uretim_prompt_destek")):
         raise ValueError(
@@ -3218,6 +3223,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, path, filename, ctype="application/octet-stream"):
+        size = os.path.getsize(path)
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", filename)
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Disposition", 'attachment; filename="%s"' % safe)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        with open(path, "rb") as stream:
+            shutil.copyfileobj(stream, self.wfile, length=1024 * 1024)
+
     # --- Auth guard'lari: tum veri/is endpoint'leri buradan gecer ---
     def _cerez_token(self):
         try:
@@ -3397,6 +3414,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._send(200, json.dumps(pod_setup.system_settings(), ensure_ascii=False))
             return
+        if parsed.path == "/api/backup-users":
+            if not self._setup_yetkili():
+                return
+            self._send(200, json.dumps({"users": [x["kullanici"] for x in _auth_store.liste()]}, ensure_ascii=False))
+            return
         if parsed.path == "/api/loras" and RUNPOD_MODE:
             if self._auth_gerekli() is None:
                 return
@@ -3427,6 +3449,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if not pod_setup.is_ready():
             self._send(503, '{"hata":"Sistem hazırlanıyor."}')
+            return
+        if parsed.path == "/api/backup-import":
+            if not self._setup_yetkili():
+                return
+            kullanici = (self.headers.get("X-Backup-User") or "").strip()
+            parola = self.headers.get("X-Backup-Password") or ""
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+            except (TypeError, ValueError):
+                length = 0
+            if length <= 0 or length > 20 * 1024 * 1024 * 1024:
+                self._send(413, '{"hata":"Yedek boş veya 20 GiB sınırını aşıyor."}')
+                return
+            if _auth_store.rol(kullanici) is None:
+                self._send(404, '{"hata":"Hedef kullanıcı bulunamadı."}')
+                return
+            os.makedirs(kasa.KASALAR_DIR, exist_ok=True)
+            fd, temp = tempfile.mkstemp(prefix="vault-import-", suffix=".wui.gpg",
+                                        dir=kasa.KASALAR_DIR)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    remaining = length
+                    while remaining:
+                        block = self.rfile.read(min(1024 * 1024, remaining))
+                        if not block:
+                            raise OSError("Yedek aktarımı yarıda kesildi.")
+                        stream.write(block)
+                        remaining -= len(block)
+                kasa.yedek_ice_aktar(kullanici, temp, parola)
+                if RUNPOD_MODE:
+                    pod_setup.checkpoint()
+                self._send(200, '{"aktarildi":true}')
+            except (kasa.KasaHatasi, OSError, RuntimeError) as exc:
+                self._send(400, json.dumps({"hata": str(exc)}, ensure_ascii=False))
+            finally:
+                try:
+                    os.remove(temp)
+                except OSError:
+                    pass
             return
         if parsed.path == "/api/giris":
             if self._setup_parolasiz():
@@ -3692,6 +3753,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if kullanici is None:
                 return
             self._send(200, json.dumps(_kasa_durum_bilgi(kullanici), ensure_ascii=False))
+        elif parsed.path == "/api/backup-export":
+            kullanici = self._auth_gerekli()
+            if kullanici is None or self._kasa_gerekli(kullanici) is None:
+                return
+            path = None
+            try:
+                path = kasa.yedek_uret(kullanici)
+                self._send_file(path, "webui-%s.wui.gpg" % kullanici)
+            except (kasa.KasaHatasi, OSError):
+                self._send(409, '{"hata":"Şifreli yedek oluşturulamadı."}')
+            finally:
+                if path:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
         elif parsed.path == "/api/kullanicilar":
             if self._admin_gerekli() is None:
                 return
@@ -3965,6 +4042,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ayar.setdefault("uretim_varsayilan_max_side", 1536)
             ayar.setdefault("uretim_prompt_destek", False)
             ayar.setdefault("uretim_prompt_ceviri", False)
+            ayar.setdefault("uretim_prompt_duzenle", False)
             llm_varsayilanlar = {
                 "sistem": llm.VARSAYILAN_SISTEM_PROMPTU,
                 "sohbet": llm.VARSAYILAN_SOHBET_SISTEM_PROMPTU,

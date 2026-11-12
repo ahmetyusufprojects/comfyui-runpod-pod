@@ -466,6 +466,11 @@ details.dusunme-kutu pre{margin:6px 0 0;max-height:200px;overflow:auto;font-size
 .lib-kart-bilgi{display:flex;flex-direction:column;gap:4px;min-width:0;padding:9px 10px 10px}
 .lib-kart-ad{overflow:hidden;color:var(--text);font-size:11px;font-weight:650;text-overflow:ellipsis;white-space:nowrap}
 .lib-kart-meta{color:var(--faint);font-size:10px;font-weight:450}
+#arsivIzgara{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));align-items:start;gap:12px;width:100%;min-width:0}
+#arsivIzgara>.arsiv-sec-kart{width:auto;min-width:0;max-width:100%;align-self:start}
+#arsivIzgara>.arsiv-sec-kart>.lib-kart{width:100%;min-width:0}
+#arsivIzgara.akis{display:flex!important;flex-direction:column;align-items:stretch}
+#arsivIzgara.akis>.arsiv-sec-kart{width:100%}
 .arsiv-secim-bar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:-4px 0 14px;padding:10px 12px;border:1px solid rgba(117,153,209,.25);border-radius:11px;background:linear-gradient(110deg,rgba(41,73,119,.16),rgba(9,14,22,.5));color:var(--text);font-size:11px}
 .arsiv-secim-bar[hidden]{display:none}
 .arsiv-secim-bar>span:first-child{font-weight:750;white-space:nowrap}

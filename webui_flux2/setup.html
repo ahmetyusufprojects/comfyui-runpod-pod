@@ -56,6 +56,16 @@
       </div>
       <div id="settingsView" hidden>
         <section class="panel settings-card">
+          <div class="section-title"><div><p class="eyebrow">KULLANICI YEDEĞİ</p><h2>Şifreli yedeği içe aktar</h2></div></div>
+          <p class="muted">WebUI Ayarları bölümünden alınmış `.wui.gpg` dosyasını seç. Yalnızca dosyanın kasasını açan parola çözebilir; mevcut hedef kasanın üzerine yazılır ve doğrulanır.</p>
+          <form id="backupImportForm" class="model-form">
+            <label>Hedef kullanıcı<select id="backupTargetUser" required></select></label>
+            <label>Kasa parolası<input id="backupPassword" type="password" autocomplete="current-password" required></label>
+            <label>Şifreli yedek<input id="backupFile" type="file" accept=".gpg,.wui.gpg,application/octet-stream" required></label>
+            <button type="submit">Yedeği doğrula ve içe aktar</button><span id="backupImportStatus" class="muted" role="status"></span>
+          </form>
+        </section>
+        <section class="panel settings-card">
           <div class="section-title"><div><p class="eyebrow">UYGULAMA SÜRÜMÜ</p><h2>Uygulamayı güncelle</h2></div></div>
           <p class="muted">Başarılı son sürüm indirilir. İşler tamamlanmış olmalıdır. Açık kasalar mühürlenir ve uygulama kısa süreliğine yeniden açılır; indirilen modeller korunur. Temel imaj değişiklikleri yeni Pod gerektirir.</p>
           <div class="actions"><button id="updateApp" type="button">Güncellemeyi başlat</button><span id="updateAppStatus" class="muted" role="status"></span></div>
