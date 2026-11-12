@@ -1154,7 +1154,7 @@ def clear_rebuildable_storage():
         process = _comfy_process
 
     root = ROOT.resolve()
-    protected = {root}
+    protected = set()
     data_root = Path(os.environ.get("WEBUI_DATA_ROOT", str(root / "user-data"))).resolve()
     volume = Path(os.environ.get("POD_VOLUME_MOUNT", "/workspace")).resolve()
     protected.update((data_root, volume))
@@ -1166,7 +1166,7 @@ def clear_rebuildable_storage():
 
     external_model_root = (model_root if model_root not in (root, Path("/"))
                            and not any(overlaps(model_root, item)
-                                       for item in protected)
+                                       for item in (root, *protected))
                            else None)
 
     candidates = [COMFY, root / "comfy-venv", root / "bin", root / "llama",
