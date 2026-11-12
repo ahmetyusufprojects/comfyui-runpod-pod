@@ -14,11 +14,13 @@ import llm
 def main():
     profiles = llm.model_profilleri()
     assert profiles and all(item.get("id") for item in profiles), profiles
-    assert {item["id"] for item in profiles} == {"llm_26b", "llm_qwen9b"}, profiles
+    assert {item["id"] for item in profiles} == {"llm_26b", "llm_qwen27b"}, profiles
     configured = llm._load_runpod_profiles()
-    assert configured["llm_qwen9b"]["reasoning"] == "off", configured
-    assert configured["llm_qwen9b"]["mmproj"] is None, configured
-    assert configured["llm_qwen9b"]["mtp"] is None, configured
+    assert configured["llm_qwen27b"]["reasoning"] == "off", configured
+    assert configured["llm_qwen27b"]["mmproj"].endswith("mmproj-F16.gguf"), configured
+    assert configured["llm_qwen27b"]["mtp"] is None, configured
+    assert configured["llm_qwen27b"]["mtp_embedded"] is True, configured
+    assert llm._profil_ayar_varsayilanlari("llm_qwen27b")["use_mtp"] is True
     assert not any(item in pod_setup.WORKFLOWS for item in ("llama", "llm_12b"))
 
     # A custom text-only model can omit both sidecar components. Its profile

@@ -74,13 +74,15 @@
       "gpu_layers": "all",
       "context": 8192
     },
-    "llm_qwen9b": {
-      "group": "llm_qwen9b",
-      "model_file": "Qwen3.5-9B-abliterated-Q4_K_M.gguf",
+    "llm_qwen27b": {
+      "group": "llm_qwen27b",
+      "model_file": "Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q4_K_M.gguf",
+      "mmproj_file": "mmproj-F16.gguf",
       "gpu_device": "CUDA0",
       "gpu_layers": "all",
       "context": 8192,
-      "reasoning": "off"
+      "reasoning": "off",
+      "mtp_embedded": true
     },
     "translation": {
       "group": "translation",
@@ -149,11 +151,12 @@
         {"repo":"HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP","revision":"f9093662a2e7ae0503f637088bc96f77a1a70c83","path":"mtp-gemma-4-26B-A4B-it.gguf","dir":"llm","name":"mtp-gemma-4-26B-A4B-it.gguf","size":251937728,"sha256":"62bd3af7f66c9308de9a5454233852f8c7324c93767e8dfb824ed45b9179864a","optional":true}
       ]
     },
-    "llm_qwen9b": {
-      "label": "Qwen 3.5 9B Abliterated · Q4_K_M",
+    "llm_qwen27b": {
+      "label": "Qwen 3.8 27B Uncensored · MTP Q4_K_M",
       "engine": "llama",
       "files": [
-        {"repo":"electricpipelines/Qwen3.5-9B-abliterated-GGUF","revision":"e74ee2fa196dab259ea1c61f008ba2434f0c5e87","path":"Qwen3.5-9B-abliterated-Q4_K_M.gguf","dir":"llm","name":"Qwen3.5-9B-abliterated-Q4_K_M.gguf","size":5627044704,"sha256":"dba64d0e5cce0739e27535ee0a6b75249eb8006ce8b2d6c060e20750035c4695"}
+        {"repo":"DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF","revision":"e2d64985a4a5de0ff2ba67bc8a026f9531689c75","path":"Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q4_K_M.gguf","dir":"llm","name":"Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q4_K_M.gguf","size":18498573856,"sha256":"bc7a6cf2bcc78d1190aaf04d1ab1c5cb845b6ff23aa0e7d24fe0d2ea6d3a7c7c"},
+        {"repo":"DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF","revision":"e2d64985a4a5de0ff2ba67bc8a026f9531689c75","path":"mmproj-F16.gguf","dir":"llm","name":"mmproj-F16.gguf","size":927606976,"sha256":"82e620db8cb83267e9775e5aad3e8d8aa5af7ace825e94c52d3d730eb35af88a","optional":true}
       ]
     },
     "video": {
