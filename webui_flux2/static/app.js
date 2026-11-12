@@ -582,6 +582,14 @@ async function boot(){
       const k = await kurulumYaniti.json();
       if(!k){ girisEkraniAc(); bootCalisiyor = false; return; }
       RUNPOD_WEBUI = k.runpod === true;
+      const storageNote=$('firstRunStorageNote');
+      if(storageNote){
+        const ephemeral=RUNPOD_WEBUI&&k.storage_mode==='ephemeral';
+        storageNote.hidden=!ephemeral;
+        storageNote.textContent=ephemeral
+          ?'Kalıcı volume bağlı değil. İlk kurulum çalışır; ancak Pod silinirse kullanıcı verileri ve ayarlar kaybolur. Kalıcılık için küçük bir volume bağlayın.'
+          :'';
+      }
       for(const id of ['sohbetLlmModel','psLlmModel','uretimLlmModel']){
         const field=$(id);
         const wrapper=id==='sohbetLlmModel'||id==='uretimLlmModel'?

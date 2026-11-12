@@ -3345,17 +3345,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if parsed.path in ("/api/sunucu-hazir", "/api/setup-state"):
             ready = pod_setup.is_ready()
+            storage = pod_setup.storage_status()
             self._send(200, json.dumps({"hazir": ready,
                                        "hata": bool(_startup_error),
-                                       "parolasiz": self._setup_parolasiz()},
+                                       "parolasiz": self._setup_parolasiz(),
+                                       **storage},
                                   ensure_ascii=False))
             return
         if parsed.path == "/api/kurulum-durumu":
             if not pod_setup.is_ready():
                 self._send(503, '{"hata":"Sistem hazırlanıyor."}')
             else:
+                storage = pod_setup.storage_status()
                 self._send(200, json.dumps({"kurulu": _auth_store.kurulu_mu(),
-                                           "runpod": True}))
+                                           "runpod": True, **storage}))
             return
         if not pod_setup.is_ready():
             self._send(503, '{"hata":"Sistem hazırlanıyor."}')
@@ -3667,8 +3670,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if RUNPOD_MODE and not pod_setup.is_ready():
                 self._send(503, json.dumps({"hata": "Sistem hazırlanıyor."}))
             else:
+                storage = pod_setup.storage_status() if RUNPOD_MODE else {}
                 self._send(200, json.dumps({"kurulu": _auth_store.kurulu_mu(),
-                                           "runpod": RUNPOD_MODE}))
+                                           "runpod": RUNPOD_MODE, **storage}))
         elif parsed.path == "/api/ben":
             kullanici = self._oturum_kullanici()
             if kullanici is None:
@@ -4073,6 +4077,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             tasinan = _ilk_migrasyon(bilgi["kullanici"])
             toplam, silinen = _zararli_prompt_temizle(bilgi["kullanici"])
+            if RUNPOD_MODE:
+                try:
+                    pod_setup.checkpoint()
+                except Exception as exc:
+                    print("İlk hesap için kalıcı kopya yazılamadı (%s)." %
+                          type(exc).__name__, flush=True)
             self._send(200, json.dumps({"kullanici": bilgi["kullanici"],
                                         "rol": bilgi["rol"],
                                         "tasinan": tasinan,

@@ -33,7 +33,95 @@ def check_installer_routes():
     assert status == 400, (status, data)
     status, data = http_json("http://127.0.0.1:8189/api/ben")
     assert status == 401, (status, data)
+    status, setup = http_json("http://127.0.0.1:8189/api/kurulum-durumu")
+    assert status == 200 and setup.get("runpod") is True, (status, setup)
+    assert setup.get("kurulu") is False, setup
+    assert setup.get("storage_mode") == "ephemeral", setup
     print("passwordless installer is limited to port 8192; main WebUI still requires login")
+
+
+def check_volume_optional_first_run():
+    import pod_setup
+
+    class EmptyAccounts:
+        def __init__(self, path):
+            self.dosya = str(path)
+
+        def kurulu_mu(self):
+            return False
+
+        def ilk_admin(self, *_args):
+            raise AssertionError("first admin must be created through the WebUI")
+
+    keys = ("POD_VOLUME_MOUNT", "POD_ALLOW_EPHEMERAL_DATA", "POD_FLEX_PREFIX",
+            "WEBUI_AUTO_DOWNLOAD")
+    old_env = {key: os.environ.get(key) for key in keys}
+    names = ("ROOT", "COMFY", "_data_lock", "_flex", "_ready",
+             "_system_settings_path", "_storage_mode", "validate_mount")
+    old_state = {name: getattr(pod_setup, name) for name in names}
+
+    def close_lock():
+        lock = getattr(pod_setup, "_data_lock", None)
+        if lock is not None:
+            try:
+                lock.close()
+            except OSError:
+                pass
+        pod_setup._data_lock = None
+
+    try:
+        os.environ["POD_ALLOW_EPHEMERAL_DATA"] = "1"
+        os.environ["POD_FLEX_PREFIX"] = "gallery-webui"
+        os.environ["WEBUI_AUTO_DOWNLOAD"] = "0"
+        with tempfile.TemporaryDirectory(prefix="gallery-volume-check-") as temporary:
+            base = Path(temporary)
+            runtime = base / "runtime"
+            user_data = runtime / "user-data"
+            missing_volume = base / "volume-not-attached"
+            pod_setup.ROOT = runtime
+            pod_setup.COMFY = runtime / "ComfyUI"
+            pod_setup._flex = None
+            pod_setup._ready = False
+            pod_setup._system_settings_path = None
+            pod_setup._storage_mode = "unknown"
+            pod_setup._data_lock = None
+            os.environ["POD_VOLUME_MOUNT"] = str(missing_volume)
+
+            no_volume_account = EmptyAccounts(user_data / "kullanicilar.json")
+            pod_setup.prepare_data(str(user_data), no_volume_account)
+            assert pod_setup.storage_status() == {
+                "storage_mode": "ephemeral", "storage_persistent": False}
+            assert pod_setup.is_ready()
+            assert not Path(no_volume_account.dosya).exists()
+            assert pod_setup._flex is None
+            assert (user_data / "system-settings.json").is_file()
+            close_lock()
+
+            volume = base / "empty-volume"
+            volume.mkdir()
+            os.environ["POD_VOLUME_MOUNT"] = str(volume)
+            pod_setup.validate_mount = lambda: volume  # simulate an attached empty mount
+            pod_setup._ready = False
+            pod_setup._system_settings_path = None
+            pod_setup._storage_mode = "unknown"
+            mounted_account = EmptyAccounts(user_data / "kullanicilar.json")
+            pod_setup.prepare_data(str(user_data), mounted_account)
+            assert pod_setup.storage_status() == {
+                "storage_mode": "persistent", "storage_persistent": True}
+            assert not Path(mounted_account.dosya).exists()
+            assert pod_setup._flex is not None
+            assert (volume / "gallery-webui" / "system-settings.json").is_file()
+            close_lock()
+    finally:
+        close_lock()
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        for name, value in old_state.items():
+            setattr(pod_setup, name, value)
+    print("no-volume and empty-volume startup both remain ready for first-account creation")
 
 
 def check_storage_clean_allowlist():
@@ -140,5 +228,6 @@ def check_archive_deletion():
 
 if __name__ == "__main__":
     check_installer_routes()
+    check_volume_optional_first_run()
     check_storage_clean_allowlist()
     check_archive_deletion()

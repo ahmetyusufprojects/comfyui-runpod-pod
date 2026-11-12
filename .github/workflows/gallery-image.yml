@@ -58,36 +58,59 @@ jobs:
           PY
       - name: Build Linux image
         run: docker build -f docker/Dockerfile.gallery -t webui-gallery .
-      - name: Verify mount guard and gallery HTTP start
+      - name: Verify no-volume first run and gallery HTTP start
         run: |
           set -eu
-          if docker run --rm webui-gallery; then
-            echo 'Unexpected startup without a persistent mount'
-            exit 1
-          fi
           python3 - <<'PY'
-          import os, secrets, subprocess, time, urllib.request
-          env = dict(os.environ, WEBUI_BOOTSTRAP_PASSWORD=secrets.token_urlsafe(32),
-                     POD_FLEX_PREFIX="gallery-check")
+          import http.cookiejar, json, secrets, subprocess, time, urllib.request
           subprocess.run(["docker", "run", "-d", "--name", "gallery-check",
-                          "--tmpfs", "/workspace", "--tmpfs", "/opt/runtime",
-                          "--mount", "type=volume,destination=/opt/webui_flux2", "-e", "WEBUI_BOOTSTRAP_PASSWORD",
-                          "-e", "POD_FLEX_PREFIX=gallery-check",
+                          "-e", "WEBUI_AUTO_DOWNLOAD=0",
                           "-p", "127.0.0.1:8189:8189", "-p", "127.0.0.1:8192:8192", "webui-gallery"],
-                         check=True, env=env, stdout=subprocess.DEVNULL)
+                         check=True, stdout=subprocess.DEVNULL)
+          state = None
           for _ in range(40):
               try:
-                  setup = urllib.request.urlopen("http://127.0.0.1:8192/", timeout=2).read()
-                  assert b"Model kurulumu" in setup
-                  assert "Model ekle veya adını değiştir" in setup.decode("utf-8")
-                  assert urllib.request.urlopen("http://127.0.0.1:8189/api/sunucu-hazir").status == 200
-                  assert b"podKurulum" in urllib.request.urlopen("http://127.0.0.1:8189/").read()
-                  break
-              except OSError:
+                  state = json.load(urllib.request.urlopen(
+                      "http://127.0.0.1:8192/api/setup-state", timeout=2))
+                  if state.get("hazir"):
+                      break
                   time.sleep(0.5)
-          else:
+              except (OSError, ValueError):
+                  time.sleep(0.5)
+          if not state or not state.get("hazir"):
               subprocess.run(["docker", "logs", "gallery-check"], check=False)
-              raise SystemExit("Gallery did not start")
+              raise SystemExit("Gallery did not start correctly without a volume")
+          assert state["storage_mode"] == "ephemeral", state
+          setup = urllib.request.urlopen("http://127.0.0.1:8192/", timeout=2).read()
+          assert b"Model kurulumu" in setup
+          assert "Model ekle veya adını değiştir" in setup.decode("utf-8")
+          first_run = json.load(urllib.request.urlopen(
+              "http://127.0.0.1:8189/api/kurulum-durumu", timeout=2))
+          assert first_run == {"kurulu": False, "runpod": True,
+                               "storage_mode": "ephemeral",
+                               "storage_persistent": False}, first_run
+          installer = json.load(urllib.request.urlopen(
+              "http://127.0.0.1:8192/api/pod-kurulum", timeout=2))
+          assert installer["hazir"] is True and installer["storage_mode"] == "ephemeral", installer
+          password = secrets.token_urlsafe(18)
+          payload = json.dumps({"kullanici": "synthetic", "sifre": password}).encode()
+          request = urllib.request.Request("http://127.0.0.1:8189/api/kurulum",
+              data=payload, headers={"Content-Type": "application/json"}, method="POST")
+          created = json.load(urllib.request.urlopen(request, timeout=10))
+          assert created["kullanici"] == "synthetic" and created["rol"] == "admin", created
+          opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(
+              http.cookiejar.CookieJar()))
+          login = urllib.request.Request("http://127.0.0.1:8189/api/giris",
+              data=payload, headers={"Content-Type": "application/json"}, method="POST")
+          logged_in = json.load(opener.open(login, timeout=10))
+          assert logged_in["rol"] == "admin", logged_in
+          me = json.load(opener.open("http://127.0.0.1:8189/api/ben", timeout=5))
+          assert me["kullanici"] == "synthetic" and me["rol"] == "admin", me
+          installed = json.load(urllib.request.urlopen(
+              "http://127.0.0.1:8189/api/kurulum-durumu", timeout=2))
+          assert installed["kurulu"] is True and installed["storage_mode"] == "ephemeral", installed
+          assert b"podKurulum" in urllib.request.urlopen("http://127.0.0.1:8189/").read()
+          print("gallery starts with no volume; setup, first admin, login, and installer work")
           PY
       - name: Verify model download and cancellation workers
         run: |

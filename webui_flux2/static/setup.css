@@ -38,3 +38,4 @@
 @media(max-width:700px){.model-instance-row,.model-form{grid-template-columns:1fr}.model-variant-files{grid-template-columns:1fr}.model-form>span{grid-column:auto}}
 
 .clean-storage-card{border-color:rgba(220,112,102,.36);background:linear-gradient(145deg,rgba(75,35,38,.25),#111923 55%)}.clean-storage-card .eyebrow{color:#ffaaa1}.clean-storage-note{margin:11px 0 14px;padding:10px 12px;border-left:2px solid #d8786d;border-radius:0 8px 8px 0;background:rgba(20,14,17,.45);color:#c8b8bb;font-size:12px}.danger-button{background:#743a3b;border-color:#a65a58}.danger-button:hover{background:#884444}
+.storage-mode{flex:none;padding:6px 9px;border:1px solid rgba(240,183,111,.3);border-radius:999px;background:rgba(131,86,34,.16);color:#f2c382;font-size:10px;white-space:nowrap}

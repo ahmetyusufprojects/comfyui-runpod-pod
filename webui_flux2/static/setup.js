@@ -286,6 +286,13 @@ async function refresh() {
   try {
     const readiness=await api('/api/setup-state');
     $('connection').textContent=readiness.hazir?'Bağlı · kurulum hazır':'Bağlı · hazırlanıyor';
+    const storage=$('storageMode');
+    if(storage){
+      const storageKnown=['ephemeral','persistent'].includes(readiness.storage_mode);
+      storage.hidden=!storageKnown;
+      storage.textContent=readiness.storage_persistent?'Kalıcı volume bağlı':'Volume yok · geçici disk';
+      storage.title=readiness.storage_persistent?'Genel ayarlar ve doğrulanmış kasa kopyaları volume üzerinde saklanır.':'Bu Pod silinirse kullanıcı verileri ve ayarlar kaybolur.';
+    }
     const noPassword=readiness.parolasiz===true;
     if(noPassword!==passwordlessInstaller){passwordlessInstaller=noPassword;currentUser=null;}
     $('logout').hidden=passwordlessInstaller;

@@ -57,6 +57,7 @@ _data_lock = None
 _flex = None
 _ready = False
 _system_settings_path = None
+_storage_mode = "unknown"
 _system_settings_lock = threading.RLock()
 _SYSTEM_SETTINGS_DEFAULT = {
     "schema": 1,
@@ -284,7 +285,7 @@ def _system_settings_versions():
 
 def _system_settings_write(settings):
     if _system_settings_path is None:
-        raise RuntimeError("Kalıcı sistem ayarları için Flex dizini hazır değil.")
+        raise RuntimeError("Sistem ayarlarının kaydedileceği depolama hazır değil.")
     payload = json.dumps(settings, ensure_ascii=False, indent=2).encode("utf-8")
     digest = hashlib.sha256(payload).hexdigest()
     timestamp = time.time_ns()
@@ -1046,12 +1047,15 @@ def ensure_loras(model, selected=None, job=None):
 
 
 def prepare_data(data_root, accounts):
-    """Use one writer and require a mounted, explicitly selected data path."""
-    global _data_lock, _flex, _ready, _system_settings_path
+    """Use a mounted volume, or keep the app on container disk if absent."""
+    global _data_lock, _flex, _ready, _system_settings_path, _storage_mode
+    requested_mount = Path(os.environ.get("POD_VOLUME_MOUNT", "/workspace")).resolve()
     mount = validate_mount()
     target = Path(data_root).resolve()
+    volume_attached = mount == requested_mount and mount != Path("/")
+    _flex = None
     flex_prefix = os.environ.get("POD_FLEX_PREFIX")
-    if flex_prefix:
+    if volume_attached and flex_prefix:
         from flex_store import FlexStore
 
         if not flex_prefix.isascii() or not flex_prefix.replace("-", "").isalnum():
@@ -1064,23 +1068,26 @@ def prepare_data(data_root, accounts):
         snapshots.mkdir(mode=0o700, parents=True, exist_ok=True)
         _system_settings_path = snapshots / "system-settings.json"
         _flex = FlexStore(target, snapshots)
-    elif not target.is_relative_to(mount) or target == mount:
-        raise RuntimeError("Kullanıcı dizini kalıcı diskin altında olmalı.")
+    elif volume_attached:
+        if not target.is_relative_to(mount) or target == mount:
+            raise RuntimeError("Kullanıcı dizini kalıcı diskin altında olmalı.")
+        _system_settings_path = target / "system-settings.json"
+    else:
+        if not target.is_relative_to(ROOT) or target == ROOT:
+            raise RuntimeError("Volume yokken kullanıcı verileri container diskinde olmalı.")
+        _system_settings_path = target / "system-settings.json"
+        print("Kalıcı volume bağlı değil; kullanıcı verileri ve genel ayarlar container diskinde.",
+              flush=True)
+    _storage_mode = "persistent" if volume_attached else "ephemeral"
     target.mkdir(mode=0o700, parents=True, exist_ok=True)
     _data_lock = (target / ".webui.lock").open("a")
     fcntl.flock(_data_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     if _flex is not None and not Path(accounts.dosya).exists():
         _flex.restore()
-    password = os.environ.pop("WEBUI_BOOTSTRAP_PASSWORD", "")
-    if not accounts.kurulu_mu():
-        if Path(accounts.dosya).exists():
-            raise RuntimeError("Kullanıcı kaydı boş veya okunamıyor; yeni hesap oluşturulmadı.")
-        if not password:
-            raise RuntimeError("Hesap kaydı bulunamadı. İlk kurulumda bu Pod'a WEBUI_BOOTSTRAP_PASSWORD Secret'ı ekleyin; mevcut hesap bekliyorsanız Flex seçimini kontrol edin.")
-        if password.startswith("{{") and password.endswith("}}"):
-            raise RuntimeError("Başlangıç parolası için RunPod Secret çözülemedi; Secret adını kontrol edin.")
-        accounts.ilk_admin(os.environ.get("WEBUI_BOOTSTRAP_USER", "user"), password)
-        checkpoint()
+    if not accounts.kurulu_mu() and Path(accounts.dosya).exists():
+        raise RuntimeError("Kullanıcı kaydı boş veya okunamıyor; yeni hesap oluşturulmadı.")
+    # No account is a normal first-run state. The WebUI asks the owner to
+    # create the first administrator instead of relying on a shared password.
     settings = _system_settings_read()
     _model_instances_apply(settings)
     _register_lora_groups(settings)
@@ -1105,14 +1112,21 @@ def prepare_data(data_root, accounts):
 def validate_mount():
     mount = Path(os.environ.get("POD_VOLUME_MOUNT", "/workspace")).resolve()
     mounts = Path("/proc/self/mountinfo").read_text().splitlines()
-    if not any(line.split()[4] == str(mount) for line in mounts):
-        raise RuntimeError("Kalıcı disk bağlı değil.")
-    return mount
+    if mount != Path("/") and any(line.split()[4] == str(mount) for line in mounts):
+        return mount
+    if os.environ.get("POD_ALLOW_EPHEMERAL_DATA", "1") == "1":
+        return Path("/")
+    raise RuntimeError("Kalıcı volume bağlı değil.")
 
 
 def checkpoint():
     if _flex is not None:
         _flex.save()
+
+
+def storage_status():
+    return {"storage_mode": _storage_mode,
+            "storage_persistent": _storage_mode == "persistent"}
 
 
 def status():
@@ -1138,7 +1152,8 @@ def status():
                                         for file in item["files"]],
                            "bagimliliklar": list(item.get("depends_on", []))})
         return {"gruplar": groups, "aktif": _active, "sirada": list(_queue),
-                "ilerleme": dict(_active_progress), "hazir": _ready}
+                "ilerleme": dict(_active_progress), "hazir": _ready,
+                **storage_status()}
 
 
 def clear_rebuildable_storage():

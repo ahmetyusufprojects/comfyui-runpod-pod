@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV WEBUI_RUNPOD=1 WEBUI_SETUP_PASSWORDLESS=1 PYTHONUNBUFFERED=1 \
     POD_RUNTIME_ROOT=/opt/runtime POD_VOLUME_MOUNT=/workspace POD_MODEL_STORAGE=/models \
+    POD_ALLOW_EPHEMERAL_DATA=1 \
     POD_MODEL_CATALOG=/opt/pod/models.json \
     WEBUI_DATA_ROOT=/opt/runtime/user-data \
     GPG_HOME=/opt/runtime/gnupg GPG_PATH=/usr/bin/gpg \
