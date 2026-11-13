@@ -3322,6 +3322,12 @@ def _medyayi_iyilestir(job):
                     with open(frame_path, "wb") as frame_file:
                         frame_file.write(blob)
                     output_index += 1
+            if temporal_video and fps_multiplier > 1 and output_index:
+                last_frame = os.path.join(temp_root, "processed_%08d.png" % (output_index - 1))
+                for _ in range(fps_multiplier - 1):
+                    shutil.copyfile(last_frame, os.path.join(
+                        temp_root, "processed_%08d.png" % output_index))
+                    output_index += 1
             if temporal_video and output_index != frame_count * fps_multiplier:
                 raise RuntimeError("SeedVR2 kare sayısı beklenen sonuçla uyuşmadı (%d/%d)." %
                                    (output_index, frame_count * fps_multiplier))

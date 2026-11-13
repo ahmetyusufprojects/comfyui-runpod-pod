@@ -148,8 +148,8 @@ jobs:
               assert sum(count - (1 if start else 0)
                          for start, count in chunks) == frame_count
               for multiplier in (1, 2, 3, 4):
-                  output_count = sum((count - 1) * multiplier + 1 - (1 if start else 0)
-                                     for start, count in chunks)
+                  output_count = (sum((count - 1) * multiplier + 1 - (1 if start else 0)
+                                      for start, count in chunks) + multiplier - 1)
                   assert output_count == frame_count * multiplier
           assert catalog['llm_default'] == 'llm_26b'
           assert 'llama' not in catalog['workflows']
