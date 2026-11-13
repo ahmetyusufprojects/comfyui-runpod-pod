@@ -91,6 +91,16 @@ def _validate_catalog():
             raise RuntimeError(f"{group}: desteklenmeyen çalışma ortamı.")
         if not isinstance(item.get("label"), str) or not item.get("label"):
             raise RuntimeError(f"{group}: görünen ad eksik.")
+        custom_nodes = item.get("custom_nodes") or []
+        if not isinstance(custom_nodes, list):
+            raise RuntimeError(f"{group}: eklenti listesi geçersiz.")
+        for node in custom_nodes:
+            if (not isinstance(node, dict)
+                    or not re.fullmatch(r"[a-z0-9_-]{1,64}", str(node.get("name") or ""))
+                    or not re.fullmatch(r"[0-9a-f]{40}", str(node.get("revision") or ""))
+                    or not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?",
+                                        str(node.get("repo") or ""))):
+                raise RuntimeError(f"{group}: eklenti kaynağı geçersiz.")
         files = item.get("files")
         if not isinstance(files, list) or not files:
             raise RuntimeError(f"{group}: dosya listesi boş.")
@@ -1589,6 +1599,63 @@ def _progress(group, stage, *, name=None, downloaded=None, total=None, rate=None
         print(" · ".join(parts), flush=True)
 
 
+def _install_custom_nodes(group, cancel):
+    """Install pinned optional ComfyUI nodes only when their model group is requested."""
+    global _comfy_process
+    item = CATALOG[group]
+    for node in item.get("custom_nodes", []) or []:
+        name = node["name"]
+        revision = node["revision"]
+        destination = COMFY / "custom_nodes" / name
+        marker = destination / ".pod-revision"
+        try:
+            installed_revision = marker.read_text(encoding="ascii").strip()
+        except OSError:
+            installed_revision = ""
+        if installed_revision == revision:
+            continue
+        process = _comfy_process
+        was_running = process is not None and process.poll() is None
+        if process is not None and process.poll() is None:
+            _stop_process(process)
+            _comfy_process = None
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not (destination / ".git").is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+                _command(["git", "init", str(destination)],
+                         name + " eklentisi hazırlanıyor", cancel=cancel)
+                _command(["git", "-C", str(destination), "remote", "add", "origin", node["repo"]],
+                         name + " kaynak adresi", cancel=cancel)
+            _command(["git", "-C", str(destination), "fetch", "--depth", "1",
+                      "origin", revision], name + " eklentisi indiriliyor", cancel=cancel)
+            _command(["git", "-C", str(destination), "checkout", "--detach", "FETCH_HEAD"],
+                     name + " eklentisi sürümü", cancel=cancel)
+            requirements = destination / "requirements.txt"
+            if requirements.is_file():
+                # Reuse ComfyUI's installed CUDA torch stack; installing an add-on's
+                # unpinned torch/torchvision requirements can replace the GPU build.
+                safe_requirements = destination / ".pod-requirements.txt"
+                lines = requirements.read_text(encoding="utf-8").splitlines()
+                safe_requirements.write_text("\n".join(
+                    line for line in lines
+                    if line.strip() and not re.match(
+                        r"^(torch|torchvision|numpy)(?:[<=>!~;\[]|$)", line.strip(), re.I)
+                ) + "\n", encoding="utf-8")
+                uv = os.environ.get("UV_BIN", "uv")
+                _command([uv, "pip", "install", "--python", str(ROOT / "comfy-venv/bin/python"),
+                          "-r", str(safe_requirements)],
+                         name + " Python paketleri", cancel=cancel, timeout=1800)
+            marker.write_text(revision, encoding="ascii")
+        except Exception:
+            if was_running:
+                try:
+                    _launch_comfy()
+                except Exception:
+                    pass
+            raise
+
+
 def _run():
     global _active, _thread, _active_cancel, _active_process
     while True:
@@ -1609,6 +1676,7 @@ def _run():
             if item["engine"] == "comfy":
                 _progress(group, "ComfyUI bağımlılıkları hazırlanıyor")
                 _install_comfy(cancel_event)
+                _install_custom_nodes(group, cancel_event)
                 if cancel_event.is_set():
                     raise DownloadCancelled("ComfyUI hazırlığı iptal edildi.")
                 _progress(group, "ComfyUI başlatılıyor")

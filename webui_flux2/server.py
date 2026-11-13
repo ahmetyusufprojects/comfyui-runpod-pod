@@ -52,8 +52,10 @@ from image_graphs import (DIFFUSION_FILE, TEXT_ENCODER_FILE, VAE_FILE,
 from image_utils import (exif_duzelt as _exif_duzelt,
                          fotograf_hazirla as _fotograf_hazirla,
                          scale_to_max_side)
-from enhancement_graphs import (IMAGE_PRESETS, build_image_enhancement,
-                                build_video_enhancement)
+from enhancement_graphs import (IMAGE_PRESETS, VIDEO_PRESETS, build_image_enhancement,
+                                build_video_enhancement,
+                                build_seedvr2_video_enhancement,
+                                seedvr2_video_chunks)
 
 _AYARLAR_KILIT = threading.RLock()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -3087,7 +3089,8 @@ def _iyilestirme_istegi_dogrula(kullanici, req):
         secim = _iyilestirme_kaydi(kullanici, req)
         if secim["video"] != (tur == "video"):
             raise ValueError("Seçilen dosya ile iyileştirme türü eşleşmiyor.")
-        if req.get("enhance_preset") not in IMAGE_PRESETS:
+        preset = req.get("enhance_preset")
+        if preset not in IMAGE_PRESETS and not (tur == "video" and preset in VIDEO_PRESETS):
             raise ValueError("Görüntü iyileştirme seçeneği geçersiz.")
         scale = float(req.get("scale", 2))
         if scale not in (1.0, 1.5, 2.0, 3.0, 4.0):
@@ -3195,9 +3198,10 @@ def _medyayi_iyilestir(job):
     preset = req["enhance_preset"]
     scale = float(req.get("scale", 2))
     fps_multiplier = int(req.get("fps_multiplier", 1)) if selected["video"] else 1
-    choice = IMAGE_PRESETS[preset]
-    groups = [choice["group"]]
-    if preset == "skin" and scale > 1:
+    temporal_video = selected["video"] and preset in VIDEO_PRESETS
+    choice = IMAGE_PRESETS.get(preset)
+    groups = [VIDEO_PRESETS[preset]["group"]] if temporal_video else [choice["group"]]
+    if not temporal_video and preset == "skin" and scale > 1:
         groups.append(IMAGE_PRESETS["photo"]["group"])
     if selected["video"] and fps_multiplier > 1:
         groups.append("enhance_rife")
@@ -3242,20 +3246,28 @@ def _medyayi_iyilestir(job):
                 raise RuntimeError("FPS artırımı için videoda en az iki kare olmalı.")
             if frame_count * fps_multiplier > 7200:
                 raise RuntimeError("Video çok uzun; FPS artırımı sonrası kare sayısı fazla.")
-            model_scale = choice["model_scale"]
-            per_frame = max(1, src_w * src_h * 12 * (fps_multiplier + model_scale ** 2))
-            try:
-                import psutil
-                available = int(psutil.virtual_memory().available * 0.2)
-            except Exception:
-                available = 2 * 1024 ** 3
-            batch_size = max(2 if fps_multiplier > 1 else 1,
-                             min(4, available // per_frame))
-            step = max(1, batch_size - 1) if fps_multiplier > 1 else batch_size
-            starts = list(range(0, frame_count, step))
-            if fps_multiplier > 1 and len(starts) > 1 and frame_count - starts[-1] < 2:
-                starts.pop()
+            if temporal_video:
+                batch_size, step = 5, 4
+                chunks = seedvr2_video_chunks(frame_count)
+                starts = [start for start, _ in chunks]
+                target_short = max(16, min(4096, int(round(min(src_w, src_h) * scale))))
+                target_short -= target_short % 2
+            else:
+                model_scale = choice["model_scale"]
+                per_frame = max(1, src_w * src_h * 12 * (fps_multiplier + model_scale ** 2))
+                try:
+                    import psutil
+                    available = int(psutil.virtual_memory().available * 0.2)
+                except Exception:
+                    available = 2 * 1024 ** 3
+                batch_size = max(2 if fps_multiplier > 1 else 1,
+                                 min(4, available // per_frame))
+                step = max(1, batch_size - 1) if fps_multiplier > 1 else batch_size
+                starts = list(range(0, frame_count, step))
+                if fps_multiplier > 1 and len(starts) > 1 and frame_count - starts[-1] < 2:
+                    starts.pop()
             output_index = 0
+            video_output_size = None
             batches = len(starts)
             for batch_index, start_index in enumerate(starts):
                 if job.get("iptal"):
@@ -3266,10 +3278,18 @@ def _medyayi_iyilestir(job):
                     for name in source_files[start_index:end_index]]
                 if not frame_names:
                     continue
-                graph, _ = build_video_enhancement(frame_names, preset, scale,
-                                                    fps_multiplier, src_fps)
+                actual_count = len(frame_names)
+                if temporal_video:
+                    frame_names.extend([frame_names[-1]] * (5 - len(frame_names)))
+                    graph = build_seedvr2_video_enhancement(
+                        frame_names, target_short, fps_multiplier,
+                        seed=int(time.time_ns() % (2 ** 32)),
+                        model_file=VIDEO_PRESETS[preset]["file"])
+                else:
+                    graph, _ = build_video_enhancement(frame_names, preset, scale,
+                                                        fps_multiplier, src_fps)
                 job["ilerleme"] = {"asama": "video",
-                                   "calisan": "Video kareleri iyileştiriliyor (%d/%d); ses korunacak" %
+                                   "calisan": ("SeedVR2 videoyu birlikte iyileştiriyor (%d/%d); ses korunacak" if temporal_video else "Video kareleri iyileştiriliyor (%d/%d); ses korunacak") %
                                               (batch_index + 1, batches),
                                    "oran": 0.1 + 0.8 * batch_index / max(1, batches)}
                 entry = _iyilestirme_comfy_isini_yurut(job, graph)
@@ -3282,13 +3302,29 @@ def _medyayi_iyilestir(job):
                                 images.append(blob)
                         finally:
                             _iyilestirme_cikti_temizle(image)
-                if fps_multiplier > 1 and start_index > 0 and images:
+                if temporal_video:
+                    expected = (actual_count - 1) * fps_multiplier + 1
+                    images = images[:expected]
+                    if start_index > 0 and images:
+                        images = images[1:]
+                elif fps_multiplier > 1 and start_index > 0 and images:
                     images = images[1:]
                 for blob in images:
+                    if video_output_size is None:
+                        try:
+                            from io import BytesIO
+                            from PIL import Image
+                            with Image.open(BytesIO(blob)) as first_frame:
+                                video_output_size = first_frame.size
+                        except Exception:
+                            pass
                     frame_path = os.path.join(temp_root, "processed_%08d.png" % output_index)
                     with open(frame_path, "wb") as frame_file:
                         frame_file.write(blob)
                     output_index += 1
+            if temporal_video and output_index != frame_count * fps_multiplier:
+                raise RuntimeError("SeedVR2 kare sayısı beklenen sonuçla uyuşmadı (%d/%d)." %
+                                   (output_index, frame_count * fps_multiplier))
             if not output_index:
                 raise RuntimeError("İyileştirilmiş video kareleri kaydedilemedi.")
             output_path = os.path.join(temp_root, "result.mp4")
@@ -3328,7 +3364,8 @@ def _medyayi_iyilestir(job):
                                "enhance_preset": preset, "enhance_scale": scale,
                                "fps_multiplier": fps_multiplier,
                                "source_fps": src_fps, "fps": output_fps,
-                               "width": round(src_w * scale), "height": round(src_h * scale),
+                               "width": (video_output_size[0] if video_output_size else round(src_w * scale)),
+                               "height": (video_output_size[1] if video_output_size else round(src_h * scale)),
                                "generation_ms": round((time.perf_counter() - started) * 1000)})
             history_id, files = gecmise_kaydet(owner, [output_video], video_meta,
                                                video=True, poster_blob=poster)

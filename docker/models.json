@@ -261,6 +261,26 @@
         {"repo":"Comfy-Org/Frame-Interpolation","revision":"26b94f115bd210318f20d1f7b1d257c1b3a37db1","path":"frame_interpolation/rife_v4.26.safetensors","dir":"frame_interpolation","name":"rife_v4.26.safetensors","size":22674688,"sha256":"151874592c877740e5db11522f4514df569eeafb0a0fcb2696f16e9e8d317c94"}
       ]
     },
+    "enhance_seedvr2": {
+      "label":"Zamansal video iyileştirme · SeedVR2 3B FP16", "engine":"comfy",
+      "custom_nodes":[
+        {"name":"seedvr2_videoupscaler","repo":"https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git","revision":"4490bd1f482e026674543386bb2a4d176da245b9"}
+      ],
+      "files":[
+        {"repo":"numz/SeedVR2_comfyUI","revision":"09ced71023636e9bc8cdf9cdecfb2625d1e691e8","path":"seedvr2_ema_3b_fp16.safetensors","dir":"diffusion_models","name":"seedvr2_ema_3b_fp16.safetensors","size":6783018808,"sha256":"2fd0e03a3dad24e07086750360727ca437de4ecd456f769856e960ae93e2b304"},
+        {"repo":"numz/SeedVR2_comfyUI","revision":"09ced71023636e9bc8cdf9cdecfb2625d1e691e8","path":"ema_vae_fp16.safetensors","dir":"vae","name":"ema_vae_fp16.safetensors","size":501324814,"sha256":"20678548f420d98d26f11442d3528f8b8c94e57ee046ef93dbb7633da8612ca1"}
+      ]
+    },
+    "enhance_seedvr2_fp8": {
+      "label":"Zamansal video iyileştirme · SeedVR2 3B FP8", "engine":"comfy",
+      "custom_nodes":[
+        {"name":"seedvr2_videoupscaler","repo":"https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git","revision":"4490bd1f482e026674543386bb2a4d176da245b9"}
+      ],
+      "files":[
+        {"repo":"numz/SeedVR2_comfyUI","revision":"09ced71023636e9bc8cdf9cdecfb2625d1e691e8","path":"seedvr2_ema_3b_fp8_e4m3fn.safetensors","dir":"diffusion_models","name":"seedvr2_ema_3b_fp8_e4m3fn.safetensors","size":3391544696,"sha256":"3bf1e43ebedd570e7e7a0b1b60d6a02e105978f505c8128a241cde99a8240cff"},
+        {"repo":"numz/SeedVR2_comfyUI","revision":"09ced71023636e9bc8cdf9cdecfb2625d1e691e8","path":"ema_vae_fp16.safetensors","dir":"vae","name":"ema_vae_fp16.safetensors","size":501324814,"sha256":"20678548f420d98d26f11442d3528f8b8c94e57ee046ef93dbb7633da8612ca1"}
+      ]
+    },
     "translation": {
       "label": "OPUS-MT Türkçe-İngilizce",
       "engine": "translation",

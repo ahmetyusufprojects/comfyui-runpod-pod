@@ -2411,10 +2411,13 @@ function gecmisKaydiGoster(k, meta, i, albumIndex, medyayiKoru){
     '</div>' :
     '<div class="uretim-detay-prompt-metni">' + escHtml(meta.prompt || k.prompt || '') + '</div>';
   const gorselKaydi = k.tur !== 'video';
+  const iyilestirmeSecenekleri = gorselKaydi ?
+    '<option value="skin">Ten dokusu · ince ayrıntı</option><option value="photo">Doğal fotoğraf · ClearReality</option><option value="realesrgan">Genel · Real-ESRGAN</option>' :
+    '<option value="seedvr2">SeedVR2 3B FP16 · yüksek kalite</option><option value="seedvr2_fp8">SeedVR2 3B FP8 · daha az VRAM</option>';
   const iyilestirmeKontrolleri = RUNPOD_WEBUI ?
     '<div class="gec-iyilestirme"><b>' + (gorselKaydi ? 'Görsel iyileştirme' : 'Video iyileştirme') + '</b>' +
     '<div class="gec-iyilestirme-kontroller"><label>İşlem<select id="gecIyilestirmeModel">' +
-      '<option value="skin">Ten dokusu · ince ayrıntı</option><option value="photo">Doğal fotoğraf · ClearReality</option><option value="realesrgan">Genel · Real-ESRGAN</option></select></label>' +
+      iyilestirmeSecenekleri + '</select></label>' +
       '<label>Büyütme<select id="gecIyilestirmeOlcek"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option></select></label>' +
       (!gorselKaydi ? '<label>FPS<select id="gecIyilestirmeFps"><option value="1">Olduğu gibi</option><option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option></select></label>' : '') +
       '<button id="gecIyilestirmeBaslat" class="hayalet kucukbtn" type="button">İyileştir</button></div>' +

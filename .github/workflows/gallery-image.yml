@@ -34,7 +34,9 @@ jobs:
           import json, runpy, sys
           from pathlib import Path
           sys.path.insert(0, 'webui_flux2')
-          from enhancement_graphs import IMAGE_PRESETS, build_image_enhancement, build_video_enhancement
+          from enhancement_graphs import (IMAGE_PRESETS, VIDEO_PRESETS, build_image_enhancement,
+                                          build_video_enhancement, build_seedvr2_video_enhancement,
+                                          seedvr2_video_chunks)
           catalog = json.loads(Path('docker/models.json').read_text())
           assert catalog['schema'] == 2
           assert catalog['groups']['flux3']['enabled'] is True
@@ -94,6 +96,16 @@ jobs:
           assert real_esrgan['name'] == 'RealESRGAN_x4plus.pth'
           assert real_esrgan['revision'] == 'd7502a0856e12112164d0bcf18e67dd952105de2'
           assert catalog['groups']['enhance_rife']['files'][0]['name'] == 'rife_v4.26.safetensors'
+          seedvr = catalog['groups']['enhance_seedvr2']
+          assert seedvr['engine'] == 'comfy'
+          assert seedvr['custom_nodes'][0]['revision'] == '4490bd1f482e026674543386bb2a4d176da245b9'
+          assert seedvr['files'][0]['repo'] == 'numz/SeedVR2_comfyUI'
+          assert seedvr['files'][0]['name'] == 'seedvr2_ema_3b_fp16.safetensors'
+          assert seedvr['files'][0]['size'] == 6783018808
+          assert seedvr['files'][1]['name'] == 'ema_vae_fp16.safetensors'
+          seedvr_fp8 = catalog['groups']['enhance_seedvr2_fp8']
+          assert seedvr_fp8['files'][0]['name'] == 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'
+          assert seedvr_fp8['files'][0]['size'] == 3391544696
           for preset in IMAGE_PRESETS:
               image_graph, _ = build_image_enhancement('sample.png', preset, 2)
               video_graph, _ = build_video_enhancement(
@@ -106,6 +118,37 @@ jobs:
                               assert value[0] in graph
               assert any(node['class_type'] == 'FrameInterpolate'
                          for node in video_graph.values())
+          seedvr_graph = build_seedvr2_video_enhancement(
+              ['f1.png', 'f2.png', 'f3.png', 'f4.png', 'f5.png'], 1440, 2)
+          assert seedvr_graph['1000']['class_type'] == 'SeedVR2LoadDiTModel'
+          assert seedvr_graph['1001']['class_type'] == 'SeedVR2LoadVAEModel'
+          seedvr_node = next(node for node in seedvr_graph.values()
+                             if node['class_type'] == 'SeedVR2VideoUpscaler')
+          assert seedvr_node['inputs']['resolution'] == 1440
+          assert seedvr_node['inputs']['model'] == VIDEO_PRESETS['seedvr2']['file']
+          assert any(node['class_type'] == 'FrameInterpolationModelLoader'
+                     for node in seedvr_graph.values())
+          assert any(node['class_type'] == 'FrameInterpolate'
+                     for node in seedvr_graph.values())
+          seedvr_fp8_graph = build_seedvr2_video_enhancement(
+              ['f1.png', 'f2.png', 'f3.png', 'f4.png', 'f5.png'],
+              1440, 1, model_file=VIDEO_PRESETS['seedvr2_fp8']['file'])
+          assert next(node for node in seedvr_fp8_graph.values()
+                      if node['class_type'] == 'SeedVR2VideoUpscaler')['inputs']['model'] == \
+                 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'
+          for node in seedvr_graph.values():
+              for value in (node.get('inputs') or {}).values():
+                  if (isinstance(value, list) and len(value) == 2
+                          and isinstance(value[0], str) and value[0].isdigit()):
+                      assert value[0] in seedvr_graph
+          for frame_count in (1, 2, 5, 6, 9, 10, 31):
+              chunks = seedvr2_video_chunks(frame_count)
+              assert sum(count - (1 if start else 0)
+                         for start, count in chunks) == frame_count
+              for multiplier in (1, 2, 3, 4):
+                  output_count = sum((count - 1) * multiplier + 1 - (1 if start else 0)
+                                     for start, count in chunks)
+                  assert output_count == frame_count * multiplier
           assert catalog['llm_default'] == 'llm_26b'
           assert 'llama' not in catalog['workflows']
           assert 'llm_12b' not in catalog['workflows']
