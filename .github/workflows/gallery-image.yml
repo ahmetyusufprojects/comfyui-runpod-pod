@@ -125,7 +125,9 @@ jobs:
           seedvr_node = next(node for node in seedvr_graph.values()
                              if node['class_type'] == 'SeedVR2VideoUpscaler')
           assert seedvr_node['inputs']['resolution'] == 1440
-          assert seedvr_node['inputs']['model'] == VIDEO_PRESETS['seedvr2']['file']
+          seedvr_loader = next(node for node in seedvr_graph.values()
+                               if node['class_type'] == 'SeedVR2LoadDiTModel')
+          assert seedvr_loader['inputs']['model'] == VIDEO_PRESETS['seedvr2']['file']
           assert any(node['class_type'] == 'FrameInterpolationModelLoader'
                      for node in seedvr_graph.values())
           assert any(node['class_type'] == 'FrameInterpolate'
@@ -134,7 +136,7 @@ jobs:
               ['f1.png', 'f2.png', 'f3.png', 'f4.png', 'f5.png'],
               1440, 1, model_file=VIDEO_PRESETS['seedvr2_fp8']['file'])
           assert next(node for node in seedvr_fp8_graph.values()
-                      if node['class_type'] == 'SeedVR2VideoUpscaler')['inputs']['model'] == \
+                      if node['class_type'] == 'SeedVR2LoadDiTModel')['inputs']['model'] == \
                  'seedvr2_ema_3b_fp8_e4m3fn.safetensors'
           for node in seedvr_graph.values():
               for value in (node.get('inputs') or {}).values():
