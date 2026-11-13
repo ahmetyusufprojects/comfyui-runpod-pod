@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/gallery-image.yml'
+      - 'docker/stable-image.txt'
       - 'docker/Dockerfile.gallery'
       - 'docker/models.json'
       - 'docker/supervisor.py'
@@ -184,3 +185,17 @@ jobs:
           docker push "$versioned_image"
           docker push "$current_image"
           docker push "$beta_image"
+      - name: Promote the selected image to stable
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          source_tag="$(tr -d '\r\n' < docker/stable-image.txt)"
+          printf '%s' "$source_tag" | grep -Eq '^gallery-[0-9a-f]{40}$'
+          source_image="${repository}:${source_tag}"
+          stable_image="${repository}:stable"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools inspect "$source_image"
+          docker buildx imagetools create --tag "$stable_image" "$source_image"
+          docker buildx imagetools inspect "$stable_image"
