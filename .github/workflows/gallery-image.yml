@@ -78,6 +78,7 @@ jobs:
               'ghcr.io/ahmetyusufprojects/comfyui-runpod-pod:latest'
           publish = Path('.github/workflows/gallery-image.yml').read_text()
           assert 'current_image="${repository}:latest"' in publish
+          assert 'beta_image="${repository}:beta"' in publish
           assert 'versioned_image="${repository}:gallery-${GITHUB_SHA}"' in publish
           print('model catalog checks passed')
           PY
@@ -175,8 +176,11 @@ jobs:
           repository="ghcr.io/${GITHUB_REPOSITORY,,}"
           versioned_image="${repository}:gallery-${GITHUB_SHA}"
           current_image="${repository}:latest"
+          beta_image="${repository}:beta"
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           docker tag webui-gallery "$versioned_image"
           docker tag webui-gallery "$current_image"
+          docker tag webui-gallery "$beta_image"
           docker push "$versioned_image"
           docker push "$current_image"
+          docker push "$beta_image"
