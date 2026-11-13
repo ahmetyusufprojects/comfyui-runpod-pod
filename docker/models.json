@@ -87,6 +87,16 @@
       },
       "default_profile": "quality"
     },
+    "wan22": {
+      "group": "video_wan22",
+      "checkpoint_file": "wan2.2-rapid-mega-aio-nsfw-v12.2.safetensors",
+      "text_encoder_file": "nsfw_wan_umt5-xxl_fp8_scaled.safetensors",
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler": "dpmpp_sde",
+      "scheduler": "beta",
+      "shift": 8
+    },
     "llm_26b": {
       "group": "llm_26b",
       "model_file": "Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf",
@@ -217,6 +227,14 @@
       "depends_on": ["video"],
       "files": [
         {"repo":"lightx2v/Minimax-h3-Turbo","revision":"30f485ed874aa44c8183348ad361c5eabad318da","path":"minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors","dir":"loras","name":"minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors","size":1956193000,"sha256":"6a56f41ab4229c9dd845b9501bbd475ee57e112d846cf2e819d534a1ae928c5a"}
+      ]
+    },
+    "video_wan22": {
+      "label": "Wan 2.2 · 14B Rapid AIO NSFW + UMT5 encoder",
+      "engine": "comfy",
+      "files": [
+        {"repo":"Phr00t/WAN2.2-14B-Rapid-AllInOne","revision":"30e803babc766d791f140b197aa7bf7f18f6e36d","path":"Mega-v12/wan2.2-rapid-mega-aio-nsfw-v12.2.safetensors","dir":"checkpoints","name":"wan2.2-rapid-mega-aio-nsfw-v12.2.safetensors","size":23284018448,"sha256":"97c9f3f993c463e22497a6f85bc428dda047bd2d381383a8e77e26ded6312b1e"},
+        {"repo":"NSFW-API/NSFW-Wan-UMT5-XXL","revision":"9202c70dd998d183f3dd58276d06689eeab9a174","path":"nsfw_wan_umt5-xxl_fp8_scaled.safetensors","dir":"text_encoders","name":"nsfw_wan_umt5-xxl_fp8_scaled.safetensors","size":6735887993,"sha256":"a484bb9739a8d4020ca6f072b5b7329cf13e352b06985497c1f7f81ea98a45c5"}
       ]
     },
     "translation": {

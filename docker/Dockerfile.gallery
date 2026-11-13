@@ -18,7 +18,7 @@ ENV WEBUI_RUNPOD=1 WEBUI_SETUP_PASSWORDLESS=1 PYTHONUNBUFFERED=1 \
     LLAMA_SERVER_PATH=/opt/runtime/bin/llama-server \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/flex_store.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/app_update.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/server.py webui_flux2/video_r2v_api.json /opt/webui_flux2/
+COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/flex_store.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/app_update.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/server.py webui_flux2/video_r2v_api.json webui_flux2/video_wan22_api.json /opt/webui_flux2/
 COPY webui_flux2/static/app.css webui_flux2/static/app.js /opt/webui_flux2/static/
 COPY webui_flux2/setup.html /opt/webui_flux2/
 COPY webui_flux2/static/setup.css webui_flux2/static/setup.js /opt/webui_flux2/static/

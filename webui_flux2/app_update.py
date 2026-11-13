@@ -51,9 +51,9 @@ def prepare():
     required = ['arsiv.py', 'auth.py', 'comfy_client.py', 'flex_store.py', 'image_graphs.py',
                 'image_utils.py', 'kasa.py', 'llm.py', 'pod_setup.py', 'app_update.py',
                 'prompt_store.py', 'prompt_translation.py', 'server.py', 'index.html',
-                'setup.html', 'video_r2v_api.json', 'static/app.js', 'static/app.css',
+                'setup.html', 'video_r2v_api.json', 'video_wan22_api.json', 'static/app.js', 'static/app.css',
                 'static/setup.js', 'static/setup.css', 'model_prompts/flux.json',
-                'model_prompts/krea2.txt', 'model_prompts/minimaxh3.txt', 'model_prompts/z_image.txt']
+                'model_prompts/krea2.txt', 'model_prompts/minimaxh3.txt', 'model_prompts/wan22.txt', 'model_prompts/z_image.txt']
     if any('webui_flux2/' + name not in members for name in required) or 'docker/models.json' not in members:
         raise RuntimeError('Güncelleme paketi eksik.')
     for relative in required:

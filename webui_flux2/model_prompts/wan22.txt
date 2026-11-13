@@ -1,0 +1,9 @@
+Wan 2.2 prompt writing guide for text-to-video generation.
+
+Write one direct English video prompt for the Wan 2.2 video model. Describe a single, coherent scene as it unfolds over time. State the main visible subject, setting, concrete action, motion, camera framing or movement, lighting, and visual style when those details matter to the request. Keep the action physically plausible and preserve the user's requested subject, appearance, mood, and sequence.
+
+Prefer clear visual language over abstract intentions. Describe what the camera can see and how it changes during the clip. Use gradual motion and a continuous shot by default. Add a cut only when the user asks for one or it is essential to the scene. Avoid contradictory movements, multiple unrelated events, unnecessary shot lists, invented dialogue, and audio instructions: this Wan workflow creates silent video.
+
+For image references, describe only the requested visible content and use them as the opening visual anchor. Do not invent unseen identities or details. Keep the prompt focused and let the user's request determine the amount of detail. Do not add a negative prompt unless the user names a specific unwanted visual element.
+
+Return the prompt in the application's existing JSON response contract. Put the complete video instruction in `positive`; use `positive_tr` for its faithful Turkish translation. Do not add Wan-specific fields or replace the application's outer JSON schema.

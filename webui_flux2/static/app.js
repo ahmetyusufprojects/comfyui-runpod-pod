@@ -110,6 +110,9 @@ function runpodModelInstanceSecili(){
   if(!RUNPOD_WEBUI||!secim||!secim.value||secim.value==='auto') return null;
   return secim.value;
 }
+function runpodVideoModelSecili(){
+  return RUNPOD_WEBUI && $('videoModel') ? ($('videoModel').value || 'wan22') : 'video';
+}
 function runpodModelListesiGuncelle(data){
   if(!RUNPOD_WEBUI) return;
   const select=$('runpodImageModel');
@@ -256,7 +259,7 @@ function uretimModGuncelle(){
   otomatikSonModel = model;
   if(modelDegisti) runpodLoraYukle();
   const runpodModelWrap = $('runpodModelWrap');
-  if(runpodModelWrap) runpodModelWrap.hidden = !RUNPOD_WEBUI;
+  if(runpodModelWrap) runpodModelWrap.hidden = !RUNPOD_WEBUI || videoMu();
   const bboxWrap = $('flux3BboxModeWrap');
   if(bboxWrap) bboxWrap.hidden = !RUNPOD_WEBUI || model !== 'flux3';
   const turboQwen = RUNPOD_WEBUI && model === 'qwen_image_edit_turbo';
@@ -283,7 +286,9 @@ function uretimModGuncelle(){
   const bilgi = $('uretimModBilgi');
   if(bilgi){
     if(videoMu()) bilgi.textContent = RUNPOD_WEBUI
-      ? 'MiniMax H3 hızlı taslak: 4 adım, küçük çözünürlük ve kısa klip. Ayrıntılı 8 adım profili ayrıca kurulabilir.'
+      ? (runpodVideoModelSecili() === 'wan22'
+        ? 'Wan 2.2 · büyük 14B NSFW model · metinden videoya · kısa taslak ayarları.'
+        : 'MiniMax H3 · referans fotoğraflı ve sesli video üretimi.')
       : 'Video iş akışı: MiniMax H3; model seçimi bu akışta etkisizdir.';
     else if(RUNPOD_WEBUI && runpodModel) bilgi.textContent =
       (runpodModel === 'flux2' || runpodModel === 'flux3' ? 'Referanslı düzenleme: ' : 'Seçili model: ') +
@@ -303,6 +308,16 @@ function uretimIcGorunum(){
   const vm = videoMu();
   const goster = (id, acik) => { const el = $(id); if(el) el.style.display = acik ? 'block' : 'none'; };
   goster('videoKart', vm);
+  const wan = vm && RUNPOD_WEBUI && runpodVideoModelSecili() === 'wan22';
+  goster('kartRef', !vm || !wan);
+  if($('videoModelWrap')) $('videoModelWrap').hidden = !RUNPOD_WEBUI;
+  if($('videoProfileBlok')) $('videoProfileBlok').hidden = !vm || (RUNPOD_WEBUI && wan);
+  if($('videoKareNotu')) $('videoKareNotu').textContent = wan
+    ? 'Wan 2.2 kare sayısını 4n+1 kuralına göre ayarlar; taslakta 4 örnekleme adımı kullanılır.'
+    : 'Kare sayısı 17k+5 ızgarasına yuvarlanır · tek işçi sırayla çalışır.';
+  if($('videoBilgi')) $('videoBilgi').textContent = wan
+    ? 'Wan 2.2 14B: metinden sessiz kısa video üretir. Modeli önce Kurulum ekranından indirin.'
+    : 'MiniMax H3: en az bir referans fotoğrafıyla sesli video üretir.';
   goster('kartCoz', !vm);
   goster('kartOrn', !vm);
   if($('uretimNegatifPanel')) $('uretimNegatifPanel').hidden = vm;
@@ -614,11 +629,13 @@ async function boot(){
         $('runpodInstallerLink').hidden=!RUNPOD_WEBUI;
         if(RUNPOD_WEBUI) $('runpodInstallerLink').href=runpodKurulumAdres();
       }
-      $('videoProfileBlok').hidden = false;
+      $('videoProfileBlok').hidden = !RUNPOD_WEBUI;
+      if($('videoModelWrap')) $('videoModelWrap').hidden = !RUNPOD_WEBUI;
+      if($('videoModel') && RUNPOD_WEBUI) $('videoModel').value = 'wan22';
       if(RUNPOD_WEBUI){
         $('vsure').value = '0.5'; $('vfps').value = '8'; $('vmax').value = '320';
         $('videoSureLabel').textContent = 'Taslak klip süresi (sn)';
-        $('videoBilgi').textContent = 'Hızlı önizleme varsayılanı: 320 px, 5 kareye yuvarlanan kısa klip. Ayrıntılı sonuç için süreyi/çözünürlüğü artırın. Model 17k+5 kare kuralını uygular.';
+        $('videoBilgi').textContent = 'Wan 2.2 metinden sessiz kısa video üretir; MiniMax H3 referans fotoğrafından sesli video üretir.';
       }
       if(!k.kurulu){ gorunum('kurulum'); bootCalisiyor = false; return; }
       const ben = await _fetch('/api/ben');
@@ -961,13 +978,16 @@ if(wfEl) wfEl.onchange = e => {
   $('uretimGorselMod').classList.toggle('aktif', !video);
   $('uretimVideoMod').classList.toggle('aktif', video);
   $('wfAciklama').textContent = video ?
-    'Referans fotoğraftan sesli video üretir (en az 1 referans). Ölçü en uzun kenara göre alınır.' :
+    (RUNPOD_WEBUI ? 'Video modelini aşağıdan seç. Wan 2.2 metinden, MiniMax H3 referans fotoğrafından üretir.' : 'Referans fotoğraftan sesli video üretir (en az 1 referans). Ölçü en uzun kenara göre alınır.') :
     (RUNPOD_WEBUI ? 'Modeli aşağıdan seçebilirsin. Qwen Image 2.1 ve Flux 2 referanslı düzenlemeyi destekler.' :
      'Model otomatik seçilir: referans varsa Flux2 Klein düzenleme; yoksa Z-Image Turbo veya Anima modeli.');
   uretimIcGorunum();
   uretimModGuncelle();
   formKaydet();
 };
+if($('videoModel')) $('videoModel').addEventListener('change', () => {
+  uretimIcGorunum(); uretimModGuncelle(); formKaydet();
+});
 if($('runpodImageModel')) $('runpodImageModel').addEventListener('change', () => {
   const previous = RUNPOD_IMAGE_DEFAULTS[otomatikSonModel];
   const next = RUNPOD_IMAGE_DEFAULTS[otomatikModel()];
@@ -1156,6 +1176,7 @@ function formVerisi(istekSecenekleri){
     max_side: +$('maxside').value, max_olcek: $('maxolcek').checked,
     video_max_side: vm ? +($('vmax') ? $('vmax').value : (RUNPOD_WEBUI ? 320 : 1344)) : 0,
     video_profile: vm && $('videoProfile') ? ($('videoProfile').value || 'quality') : 'quality',
+    video_model_instance: vm ? runpodVideoModelSecili() : null,
     steps: +$('steps').value, cfg: +$('cfg').value,
     sampler: $('sampler').value, seed: +$('seed').value,
     workflow: otomatikWorkflow(), image_base64: fotoB64, image2_base64: fotoB64_2,
@@ -3141,6 +3162,8 @@ function formUygulaKayitli(f){
   koy('vmax', f.video_max_side); koy('steps', f.steps); koy('seed', f.seed);
   koy('vsure', f.suresn); koy('vfps', f.fps);
   koy('videoProfile', f.video_profile === 'fast' ? 'quality' : f.video_profile);
+  if($('videoModel') && ['wan22','video'].includes(f.video_model_instance))
+    $('videoModel').value = f.video_model_instance;
   if(f.workflow && $('wf')){ $('wf').value = f.workflow === 'video' ? 'video' : 'otomatik'; try{ $('wf').onchange({target: $('wf')}); }catch(e){} }
   if(f.width != null && f.height != null && $('preset')){
     const hedef = f.width + 'x' + f.height;
@@ -3164,7 +3187,7 @@ function formPaketle(){
     max_side: v.max_side, max_olcek: v.max_olcek, video_max_side: v.video_max_side,
     steps: v.steps, cfg: v.cfg, sampler: v.sampler, seed: v.seed,
     workflow: v.workflow, suresn: v.suresn, fps: v.fps,
-    video_profile: v.video_profile, loras: v.loras,
+    video_profile: v.video_profile, video_model_instance: v.video_model_instance, loras: v.loras,
     aspect_ratio: kilitOran};
 }
 async function formSimdiKaydet(){
@@ -3393,7 +3416,7 @@ ayariDegisinceKaydet(['llmSistem','llmSistemSohbet','llmModFikir',
   'llmModGorsel','llmModBirlestir','llmModCeviri','llmModSohbet',
   'llmStreaming','llmLowBandwidth'], 'llmSistemKaydet');
 /* Form kaliciligi: her degisimde (gecikmeli) sunucuya yazilir. */
-['prompt','negatif','w','h','maxside','maxolcek','vmax','vsure','vfps','videoProfile','steps','cfg','seed','wf','preset','sampler'].forEach(id => {
+['prompt','negatif','w','h','maxside','maxolcek','vmax','vsure','vfps','videoProfile','videoModel','steps','cfg','seed','wf','preset','sampler'].forEach(id => {
   const el = $(id);
   if(!el) return;
   el.addEventListener('input', formKaydet);
@@ -3409,11 +3432,11 @@ function psOtomatikMod(){
   const n = psReferansSayisi();
   return n === 2 ? 'birlestir' : (n === 1 ? 'gorsel' : 'fikir');
 }
-const PS_PROFIL_ADLARI = {auto:'Otomatik', general:'Genel', z_image:'Z-Image', flux3:'Flux 3 Klein', krea2:'Krea 2', illustrious:'Illustrious', minimaxh3:'MiniMax H3'};
+const PS_PROFIL_ADLARI = {auto:'Otomatik', general:'Genel', z_image:'Z-Image', flux3:'Flux 3 Klein', krea2:'Krea 2', illustrious:'Illustrious', minimaxh3:'MiniMax H3', wan22:'Wan 2.2'};
 function psProfilIcin(mod){
   const secili = $('psPromptProfile')?.value || 'auto';
   if(secili !== 'auto') return secili;
-  if(mod === 'video') return 'minimaxh3';
+  if(mod === 'video') return RUNPOD_WEBUI && typeof runpodVideoModelSecili === 'function' && runpodVideoModelSecili() === 'wan22' ? 'wan22' : 'minimaxh3';
   if(RUNPOD_WEBUI){
     const model = typeof runpodModelSecili === 'function' ? runpodModelSecili() : null;
     if(!model) return psReferansSayisi() ? 'general' : 'z_image';
@@ -3424,7 +3447,7 @@ function psProfilIcin(mod){
 }
 function psModGuncelle(){
   let m = psOtomatikMod();
-  if(videoMu() || $('psPromptProfile')?.value === 'minimaxh3') m = 'video';
+  if(videoMu() || ['minimaxh3','wan22'].includes($('psPromptProfile')?.value)) m = 'video';
   const bilgi = $('psModBilgi');
   if(bilgi){
     bilgi.textContent = m === 'video' ? 'Video · hareket, kamera ve zaman akışı promptu üretilir' :
@@ -3445,7 +3468,8 @@ function psModGuncelle(){
     flux3: 'Flux 3 için metinden görsel, referanslı düzenleme ve isteğe bağlı bbox tablosu.',
     krea2: 'Krea 2 için karakterleri ve aralarındaki konumu ayrı ayrı kuran prompt.',
     illustrious: 'Illustrious için özne ve sahne bilgisini kısa, modelin etiket stiline uygun prompta çevirir.',
-    minimaxh3: 'MiniMax H3 için kesintisiz video akışı, referans rolleri ve ses bölümleri.'
+    minimaxh3: 'MiniMax H3 için kesintisiz video akışı, referans rolleri ve ses bölümleri.',
+    wan22: 'Wan 2.2 için tek planlı, sessiz ve hareket odaklı video promptu.'
   };
   if(bilgiMetin){
     const temel = aciklamalar[$('psPromptProfile')?.value || 'auto'] || aciklamalar.auto;
@@ -3798,10 +3822,10 @@ $('psUret').onclick = async () => {
   const duzenleAktif = !!$('uretimPromptDuzenle').checked;
   let m = duzenleAktif ? 'duzenle' : psOtomatikMod();
   const seciliProfil = $('psPromptProfile').value || 'auto';
-  if(!duzenleAktif && (videoMu() || seciliProfil === 'minimaxh3')) m = 'video';
+  if(!duzenleAktif && (videoMu() || ['minimaxh3','wan22'].includes(seciliProfil))) m = 'video';
   const profile = duzenleAktif ? 'general' : psProfilIcin(m);
-  if(m === 'video' && !['minimaxh3','general'].includes(profile)){
-    $('psDurum').textContent = 'Video promptu için MiniMax H3 veya Genel profilini seç.';
+  if(m === 'video' && !['minimaxh3','wan22','general'].includes(profile)){
+    $('psDurum').textContent = 'Video promptu için seçili video modelinin profilini veya Genel profilini seç.';
     return;
   }
   if((m === 'gorsel') && !psB64_1){ $('psDurum').textContent = 'HATA: 1. görseli seç.'; return; }

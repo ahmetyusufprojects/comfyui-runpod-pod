@@ -264,6 +264,7 @@ IS_TIPLERI = (IS_TIPI_GORUNTU, IS_TIPI_DUZENLEME, IS_TIPI_VIDEO)
 # --- Video (MiniMax H3 referans-video): sablon + sinirlar ---
 # Sablon, UI workflow'una dokunulmadan video_r2v_api.json'dan okunur.
 VIDEO_SABLON_DOSYA = os.path.join(BASE_DIR, "video_r2v_api.json")
+WAN22_VIDEO_SABLON_DOSYA = os.path.join(BASE_DIR, "video_wan22_api.json")
 VIDEO_SURESN_MIN, VIDEO_SURESN_MAX = (0.25 if RUNPOD_MODE else 1), 10
 VIDEO_FPSLER = (8, 12, 24)
 VIDEO_MAX_KENAR = 1344  # en uzun kenar; 32'nin kati (dugum semasi adim=32)
@@ -432,7 +433,7 @@ _FORM_SAYI = {"width": (64, 4096), "height": (64, 4096),
 _UI_ENUM = {
     "ps_length": ("kisa", "orta", "uzun"),
     "ps_language": ("en", "tr"),
-    "ps_prompt_profile": ("auto", "general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3"),
+    "ps_prompt_profile": ("auto", "general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3", "wan22"),
     "history_view": ("izgara", "akis"),
     "log_source": ("llama", "comfy", "webui", "setup"),
     "cinematic_mode": ("off", "soft", "vivid"),
@@ -869,6 +870,16 @@ def _video_kare_sayisi(suresn, fps):
     return n
 
 
+def _wan22_kare_sayisi(suresn, fps):
+    """Wan video latent length follows 4n+1 frames (ComfyUI Wan workflow)."""
+    try:
+        n = max(5, int(round(float(suresn) * float(fps))))
+    except Exception:
+        n = 5
+    n = max(5, min(3600, n))
+    return n + ((1 - n) % 4)
+
+
 def _video_boyut(w, h, max_kenar=VIDEO_MAX_KENAR):
     """En uzun kenari max_kenar'a esitle (oran korunur, 32'nin kati)."""
     try:
@@ -916,6 +927,22 @@ def _video_sablon_yukle(profile_name=None):
     return {k: v for k, v in ham.items() if not k.startswith("_")}
 
 
+def _wan22_video_sablon_yukle():
+    if not RUNPOD_MODE or not pod_setup.workflow_ready("wan22"):
+        raise RuntimeError("Wan 2.2 modeli hazır değil. Önce Kurulum ekranından Wan 2.2 grubunu indirin.")
+    workflow = pod_setup.workflow("wan22")
+    with open(WAN22_VIDEO_SABLON_DOSYA, "r", encoding="utf-8") as stream:
+        ham = json.load(stream)
+    ham["1"]["inputs"]["ckpt_name"] = workflow.get("checkpoint_file")
+    ham["2"]["inputs"]["clip_name"] = workflow.get("text_encoder_file")
+    ham["6"]["inputs"]["shift"] = float(workflow.get("shift", 8))
+    ham["7"]["inputs"]["steps"] = int(workflow.get("steps", 4))
+    ham["7"]["inputs"]["cfg"] = float(workflow.get("cfg", 1))
+    ham["7"]["inputs"]["sampler_name"] = workflow.get("sampler", "sa_solver")
+    ham["7"]["inputs"]["scheduler"] = workflow.get("scheduler", "beta")
+    return {key: value for key, value in ham.items() if not key.startswith("_")}
+
+
 # Video dugum sinifi -> Turkce asama adi. Yalniz video islerinde, _aktif["nodlar"]
 # kurulurken uygulanir; goruntu hattinin metinleri aynen kalir.
 _VIDEO_ASAMA = {
@@ -925,6 +952,9 @@ _VIDEO_ASAMA = {
     "VAELoader": "VAE yukleniyor",
     "LoraLoaderModelOnly": "LoRA yukleniyor",
     "MiniMaxH3ReferenceToVideo": "Referanslar isleniyor",
+    "WanVaceToVideo": "Wan video alanı hazırlanıyor",
+    "ModelSamplingSD3": "Wan zamanlama ayarı yükleniyor",
+    "KSampler": "Video örnekleniyor",
     "KSamplerSelect": "Ornekleyici hazirlaniyor",
     "BasicScheduler": "Zamanlama kuruluyor",
     "RandomNoise": "Gurultu hazirlaniyor",
@@ -947,8 +977,9 @@ def _video_diskten_bul(sonrasi_sn):
     klasor = os.path.join(COMFY_KOK, "output", "video")
     try:
         adaylar = []
+        prefixes = ("MiniMax_H3", "Wan22")
         for ad in os.listdir(klasor):
-            if not ad.startswith("MiniMax_H3") or not ad.lower().endswith(".mp4"):
+            if not ad.startswith(prefixes) or not ad.lower().endswith(".mp4"):
                 continue
             yol = os.path.join(klasor, ad)
             try:
@@ -971,6 +1002,8 @@ def _video_uret(job, req):
     Goruntu govdesine dokunmaz; hata/kota durumunda yari dosya birakmaz."""
     sahip = job.get("sahip")
     try:
+        video_model = req.get("video_model_instance") or ("wan22" if RUNPOD_MODE else "video")
+        is_wan22 = RUNPOD_MODE and video_model == "wan22"
         vid = video_parametreleri(req)
         try:
             default_duration = 0.5 if RUNPOD_MODE else 5
@@ -993,7 +1026,7 @@ def _video_uret(job, req):
             vmax = VIDEO_MAX_KENAR
         vmax = max(320, min(VIDEO_MAX_KENAR, vmax))
         w, h = _video_boyut(w0, h0, vmax)
-        frames = _video_kare_sayisi(suresn, fps)
+        frames = _wan22_kare_sayisi(suresn, fps) if is_wan22 else _video_kare_sayisi(suresn, fps)
         gercek_suresn = round(frames / fps, 3)
         try:
             seed = int(req.get("seed", -1))
@@ -1020,31 +1053,40 @@ def _video_uret(job, req):
             up = upload_image_to_comfy(hazir, fn)
             yuklenen.append(up.get("name", fn))
             kutular.append((ham, hazir))
-        if not yuklenen:
+        if not yuklenen and not is_wan22:
             job["durum"] = "hata"
             job["hata"] = "video-uretim icin en az 1 referans fotograf gerekli"
             job["bitis"] = time.time()
             return
-        if RUNPOD_MODE and kaynak_boyutu:
+        if RUNPOD_MODE and kaynak_boyutu and not is_wan22:
             # H3 çıktısını referans fotoğrafın en-boy oranında tut; kare 1344 px
             # varsayılanı gereksiz yere çok daha fazla GPU belleği ve hesap ister.
             w0, h0 = kaynak_boyutu
             w, h = _video_boyut(w0, h0, vmax)
-        profile_name = req.get("video_profile") or "quality"
-        sablon = _video_sablon_yukle(profile_name)
-        g = sablon["136"]["inputs"]
-        g["prompt"] = prompt
-        g["width"] = w
-        g["height"] = h
-        g["length"] = frames
-        sablon["129"]["inputs"]["noise_seed"] = seed
-        sablon["130"]["inputs"]["fps"] = fps
-        sablon["137"]["inputs"]["image"] = yuklenen[0]
-        if len(yuklenen) > 1:
-            sablon["139"]["inputs"]["image"] = yuklenen[1]
+        if is_wan22:
+            if yuklenen:
+                raise RuntimeError("Wan 2.2 şu an metinden video üretir; referans fotoğrafını kaldırın veya MiniMax H3 seçin.")
+            sablon = _wan22_video_sablon_yukle()
+            sablon["3"]["inputs"]["text"] = prompt
+            sablon["5"]["inputs"].update({"width": w, "height": h, "length": frames})
+            sablon["7"]["inputs"]["seed"] = seed
+            sablon["9"]["inputs"]["fps"] = fps
         else:
-            sablon.pop("139", None)
-            g.pop("ref_images.ref_image_1", None)
+            profile_name = req.get("video_profile") or "quality"
+            sablon = _video_sablon_yukle(profile_name)
+            g = sablon["136"]["inputs"]
+            g["prompt"] = prompt
+            g["width"] = w
+            g["height"] = h
+            g["length"] = frames
+            sablon["129"]["inputs"]["noise_seed"] = seed
+            sablon["130"]["inputs"]["fps"] = fps
+            sablon["137"]["inputs"]["image"] = yuklenen[0]
+            if len(yuklenen) > 1:
+                sablon["139"]["inputs"]["image"] = yuklenen[1]
+            else:
+                sablon.pop("139", None)
+                g.pop("ref_images.ref_image_1", None)
         cid = uuid.uuid4().hex
         if job["iptal"]:
             raise RuntimeError("İş durduruldu")
@@ -1123,8 +1165,9 @@ def _video_uret(job, req):
         try:
             meta = {"prompt": prompt, "width": w, "height": h, "seed": seed,
                     "frames": frames, "suresn": gercek_suresn, "istenen_suresn": suresn, "fps": fps,
-                    "mod": "referans-video", "is_tipi": IS_TIPI_VIDEO,
+                    "mod": "metinden-video" if is_wan22 else "referans-video", "is_tipi": IS_TIPI_VIDEO,
                     "workflow": "video",
+                    "video_model": video_model,
                     "foto_kutuphane": kut1, "foto_kutuphane2": kut2}
             video_poster = _video_kapak_uret(mp4)
             gecmis_kayit, gecmis_dosyalar = gecmise_kaydet(
@@ -1138,7 +1181,8 @@ def _video_uret(job, req):
                             if gecmis_kayit and video_poster else None),
                         "seed": seed, "width": w, "height": h,
                         "frames": frames, "suresn": gercek_suresn, "istenen_suresn": suresn, "fps": fps,
-                        "mod": "referans-video", "is_tipi": IS_TIPI_VIDEO,
+                        "mod": "metinden-video" if is_wan22 else "referans-video", "is_tipi": IS_TIPI_VIDEO,
+                        "video_model": video_model,
                         "kutuphane": kut1, "kutuphane2": kut2,
                         "gecmis": gecmis_kayit,
                         "gecmis_dosyalar": gecmis_dosyalar,
@@ -1198,10 +1242,17 @@ def _is_dogrula(req):
         if req.get("prompt_ceviri"):
             return {"hata": "Prompt çevirisi yalnızca görsel üretiminde kullanılabilir",
                     "is_tipi": IS_TIPI_VIDEO}
-        # Referanssiz metinden-video bu planda yok; aralik disi sure/fps
-        # reddedilmez, uretimde en yakin degere duzeltilir (3. bolum).
-        if n_ref == 0:
+        video_model = req.get("video_model_instance") or ("wan22" if RUNPOD_MODE else "video")
+        if video_model not in ("video", "wan22") or (video_model == "wan22" and not RUNPOD_MODE):
+            return {"hata": "Seçilen video modeli tanınmıyor.", "is_tipi": IS_TIPI_VIDEO}
+        if video_model == "wan22" and n_ref:
+            return {"hata": "Wan 2.2 şu an metinden video üretir. Referans fotoğrafı kaldırın veya MiniMax H3 seçin.",
+                    "is_tipi": IS_TIPI_VIDEO}
+        if video_model == "video" and n_ref == 0:
             return {"hata": "video-uretim icin en az 1 referans fotograf gerekli",
+                    "is_tipi": IS_TIPI_VIDEO}
+        if video_model == "wan22" and not pod_setup.workflow_ready("wan22"):
+            return {"hata": "Wan 2.2 hazır değil. Kurulum ekranında Wan 2.2 grubunu indirin.",
                     "is_tipi": IS_TIPI_VIDEO}
         return None
     model = req.get("model", MODEL_FLUX2)
@@ -1345,7 +1396,7 @@ def _llm_istek_baglami(ayar, tur, req):
     if not RUNPOD_MODE:
         return context
     video_prompt = (tur == "llm_prompt"
-                    and (req.get("model_prompt_profile") == "minimaxh3"
+                    and (req.get("model_prompt_profile") in ("minimaxh3", "wan22")
                          or req.get("mod") == "video"))
     if tur == "goruntu" and req.get("prompt_destek"):
         references = int(bool(req.get("image_base64"))) + int(bool(req.get("image2_base64")))
@@ -1421,7 +1472,7 @@ def _llm_kuyruk_isini_calistir(job):
                              mod_ozel=(ayar.get("llm_mod") or {}).get(req.get("mod")),
                              model_prompt_profile=(req.get("model_prompt_profile")
                                                    if req.get("model_prompt_profile") in
-                                                   ("general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3") else None),
+                                                   ("general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3", "wan22") else None),
                              bbox_mode=bool(req.get("bbox_mode")),
                              gpu_hazirla=gpu_hazirla)
             _is_sonucu_baslat(job)
@@ -1451,7 +1502,7 @@ def _llm_kuyruk_isini_calistir(job):
                 mod_ozel=(ayar.get("llm_mod") or {}).get(mod),
                 gpu_hazirla=gpu_hazirla,
                 model_prompt_profile=(
-                    "minimaxh3" if is_video else
+                    ("wan22" if req.get("video_model_instance") == "wan22" else "minimaxh3") if is_video else
                     (req.get("model") if req.get("model") in
                      ("z_image", "flux3", "krea2", "illustrious") else None)),
                 bbox_mode=bool(req.get("flux3_bbox_mode")))
@@ -5106,7 +5157,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(400, '{"hata":"Seçilen LLM modeli bulunamadı."}')
                 return
             profile = req.get("model_prompt_profile", "auto")
-            if profile not in ("auto", "general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3"):
+            if profile not in ("auto", "general", "z_image", "flux3", "krea2", "illustrious", "minimaxh3", "wan22"):
                 self._send(400, '{"hata":"gecersiz prompt profili"}')
                 return
             if "bbox_mode" in req and not isinstance(req.get("bbox_mode"), bool):
@@ -5115,10 +5166,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if req.get("bbox_mode") and profile != "flux3":
                 self._send(400, '{"hata":"bbox modu Flux 3 prompt profili gerektirir"}')
                 return
-            if (profile == "minimaxh3" and req.get("mod") != "video") or (
+            if (profile in ("minimaxh3", "wan22") and req.get("mod") != "video") or (
                     req.get("mod") == "video" and profile not in
-                    ("auto", "general", "minimaxh3")):
-                self._send(400, '{"hata":"video promptu için MiniMax H3 veya Genel profilini seç"}')
+                    ("auto", "general", "minimaxh3", "wan22")):
+                self._send(400, '{"hata":"video promptu için seçili video modeli veya Genel profilini seç"}')
                 return
             job, sira = _kuyruga_ekle(req, kullanici, tur="llm_prompt")
             if job is None:

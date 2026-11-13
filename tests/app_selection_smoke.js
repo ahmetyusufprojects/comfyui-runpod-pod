@@ -38,6 +38,14 @@ const imageSelector = mainHtml.match(/<select id="runpodImageModel">([\s\S]*?)<\
 assert.ok(imageSelector, 'RunPod image model selector is present');
 assert.match(imageSelector[1], /<option[^>]*value="flux3"[^>]*>Flux 3 Klein/,
   'enabled Flux 3 is offered in the production selector');
+const videoSelector = mainHtml.match(/<select id="videoModel">([\s\S]*?)<\/select>/);
+assert.ok(videoSelector, 'RunPod video model selector is present');
+assert.match(videoSelector[1], /value="wan22"[^>]*>Wan 2\.2/,
+  'large Wan 2.2 video model is selectable');
+assert.match(source, /runpodModelWrap\.hidden = !RUNPOD_WEBUI \|\| videoMu\(\)/,
+  'video mode hides the image-model selector');
+assert.match(source, /video_model_instance: vm \? runpodVideoModelSecili\(\) : null/,
+  'selected video model is sent with generation requests');
 assert.doesNotMatch(imageSelector[1], /<option[^>]*value="flux3"[^>]*disabled/,
   'Flux 3 is not disabled in the production selector');
 assert.match(source, /illustrious:\s*\{steps:\s*28,\s*sampler:\s*'euler_ancestral',\s*cfg:\s*5\}/,

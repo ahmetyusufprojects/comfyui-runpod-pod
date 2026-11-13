@@ -242,6 +242,7 @@ MODEL_PROMPT_DOSYALARI = {
     "krea2": "krea2.txt",
     "illustrious": "illustrious.txt",
     "minimaxh3": "minimaxh3.txt",
+    "wan22": "wan22.txt",
 }
 MODEL_PROMPT_PROFILLERI = frozenset(("general", *MODEL_PROMPT_DOSYALARI))
 

@@ -47,6 +47,17 @@ jobs:
           assert catalog['workflows']['illustrious']['lora_group'] == 'anime_desire_lora'
           assert catalog['workflows']['illustrious']['steps'] == 28
           assert catalog['workflows']['illustrious']['cfg'] == 5.0
+          wan = catalog['groups']['video_wan22']
+          assert catalog['workflows']['wan22']['group'] == 'video_wan22'
+          assert catalog['workflows']['wan22']['steps'] == 4
+          assert wan['files'][0]['repo'] == 'Phr00t/WAN2.2-14B-Rapid-AllInOne'
+          assert '5B' not in wan['label'] and 'nsfw' in wan['files'][0]['name']
+          assert wan['files'][1]['repo'] == 'NSFW-API/NSFW-Wan-UMT5-XXL'
+          wan_graph = json.loads(Path('webui_flux2/video_wan22_api.json').read_text())
+          assert wan_graph['1']['class_type'] == 'CheckpointLoaderSimple'
+          assert wan_graph['2']['class_type'] == 'CLIPLoader'
+          assert wan_graph['7']['inputs']['steps'] == 4
+          assert Path('webui_flux2/model_prompts/wan22.txt').is_file()
           qwen_edit = catalog['groups']['qwen_image_edit']
           qwen_turbo = catalog['groups']['qwen_image_edit_turbo']
           assert qwen_edit['enabled'] is True
