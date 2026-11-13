@@ -638,6 +638,7 @@ async function boot(){
         $('vsure').value = '0.5'; $('vfps').value = '8'; $('vmax').value = '320';
         $('videoSureLabel').textContent = 'Taslak klip süresi (sn)';
         $('videoBilgi').textContent = 'Wan 2.2 metinden sessiz kısa video üretir; MiniMax H3 referans fotoğrafından sesli video üretir.';
+        $('uretimGoruntuBos').textContent = 'Geçmişten bir görsel veya video seç. Yükseltme seçenekleri, seçtiğin sonucun hemen altında görünür.';
       }
       if(!k.kurulu){ gorunum('kurulum'); bootCalisiyor = false; return; }
       const ben = await _fetch('/api/ben');
@@ -2420,16 +2421,17 @@ function gecmisKaydiGoster(k, meta, i, albumIndex, medyayiKoru){
       iyilestirmeSecenekleri + '</select></label>' +
       '<label>Büyütme<select id="gecIyilestirmeOlcek"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option></select></label>' +
       (!gorselKaydi ? '<label>FPS<select id="gecIyilestirmeFps"><option value="1">Olduğu gibi</option><option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option></select></label>' : '') +
-      '<button id="gecIyilestirmeBaslat" class="hayalet kucukbtn" type="button">İyileştir</button></div>' +
+      '<button id="gecIyilestirmeBaslat" class="gec-iyilestirme-baslat" type="button">' +
+        (gorselKaydi ? 'Görseli yükselt' : 'Videoyu iyileştir') + '</button></div>' +
       '<div id="gecIyilestirmeBilgi" class="kucuk" role="status">Yeni bir sonuç oluşturur; asıl dosyan korunur.</div></div>' : '';
   const tekrarPromptu = meta.prompt_en || meta.prompt || k.prompt || '';
   $('uretimSeciliBilgi').innerHTML =
     '<div class="uretim-detay-ust"><b>' + escHtml(detay.join(' · ') || k.kayit || 'Üretim') + '</b>' +
     '<div class="uretim-detay-aksiyon"><button id="uretimAyniAyar" class="hayalet kucukbtn" type="button">Ayarları yükle</button>' +
     '<button id="uretimSil" class="hayalet kucukbtn" type="button">Sil</button></div></div>' +
+    iyilestirmeKontrolleri +
     (olcumler.length ? '<div class="uretim-detay-olcum">' + olcumler.map(escHtml).join(' · ') + '</div>' : '') +
     promptBilgisi +
-    iyilestirmeKontrolleri +
     '<div class="uretim-detay-yeniden">' +
     '<button id="uretimReferansYukle" class="hayalet kucukbtn" type="button"' +
       (gorselKaydi ? '' : ' disabled') + '>Görseli referans olarak yükle</button>' +
