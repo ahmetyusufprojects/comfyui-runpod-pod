@@ -61,7 +61,10 @@ jobs:
           assert wan_graph['1']['class_type'] == 'CheckpointLoaderSimple'
           assert wan_graph['2']['class_type'] == 'CLIPLoader'
           assert wan_graph['7']['inputs']['steps'] == 4
-          assert Path('webui_flux2/model_prompts/wan22.txt').is_file()
+          wan_prompt = Path('webui_flux2/model_prompts/wan22.txt').read_text().lower()
+          assert 'text-to-video only' in wan_prompt
+          assert 'positive_tr' in wan_prompt and 'positive' in wan_prompt
+          assert 'image references' not in wan_prompt
           qwen_edit = catalog['groups']['qwen_image_edit']
           qwen_turbo = catalog['groups']['qwen_image_edit_turbo']
           assert qwen_edit['enabled'] is True
