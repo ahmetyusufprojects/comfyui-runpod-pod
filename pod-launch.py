@@ -122,7 +122,7 @@ def main():
         raise RuntimeError("Fiyat sınırı içinde boş ve uyumlu GPU bulunamadı.")
     env = {"POD_FLEX_PREFIX": NAME, "WEBUI_DATA_ROOT": DATA_PATH,
            "WEBUI_BOOTSTRAP_USER": "user",
-           "HF_TOKEN": "{{ RUNPOD_SECRET_hf_token }}"}
+           "HF_TOKEN": "{{ RUNPOD_SECRET_HfToken2 }}"}
     if not options.restore:
         password = getpass.getpass("İlk kullanım için WebUI parolası (en az 8 karakter): ")
         if len(password) < 8:

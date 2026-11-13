@@ -36,8 +36,10 @@ assert.match(source, /flux3:\s*\{steps:\s*16,\s*sampler:\s*'euler',\s*cfg:\s*1\}
 const mainHtml = fs.readFileSync('webui_flux2/index.html', 'utf8');
 const imageSelector = mainHtml.match(/<select id="runpodImageModel">([\s\S]*?)<\/select>/);
 assert.ok(imageSelector, 'RunPod image model selector is present');
-assert.doesNotMatch(imageSelector[1], /<option[^>]*value="flux3"/,
-  'disabled Flux 3 is not offered in the production selector');
+assert.match(imageSelector[1], /<option[^>]*value="flux3"[^>]*>Flux 3 Klein/,
+  'enabled Flux 3 is offered in the production selector');
+assert.doesNotMatch(imageSelector[1], /<option[^>]*value="flux3"[^>]*disabled/,
+  'Flux 3 is not disabled in the production selector');
 assert.match(source, /illustrious:\s*\{steps:\s*28,\s*sampler:\s*'euler_ancestral',\s*cfg:\s*5\}/,
   'Illustrious uses the checkpoint-specific 28-step, CFG 5 profile');
 assert.match(source, /\/api\/arsiv\/sil-coklu/,

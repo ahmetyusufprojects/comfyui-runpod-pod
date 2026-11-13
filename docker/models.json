@@ -102,11 +102,11 @@
     },
     "flux3": {
       "label": "Flux 3 Klein · 16 adım",
-      "enabled": false,
+      "enabled": true,
       "engine": "comfy",
       "files": [
         {"repo":"black-forest-labs/flux-3-image-klein-comfy","revision":"9d36114cf7a2e03a45c28f5cc4987d20ebfdb6c1","path":"diffusion_models/flux3-image-klein-int8-convrot.safetensors","dir":"diffusion_models","name":"flux3-image-klein-int8-convrot.safetensors","size":5827874779,"sha256":"847d8933548afd93df4af2cac2498e70891bf28d9dae06d695f536992e168fe2","gated":true},
-        {"repo":"black-forest-labs/flux-3-image-klein-comfy","revision":"9d36114cf7a2e03a45c28f5cc4987d20ebfdb6c1","path":"text_encoders/qwen3vl_4b_int8_convrot.safetensors","dir":"text_encoders","name":"qwen3vl_4b_int8_convrot.safetensors","size":4858559240,"sha256":"32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c","gated":true},
+        {"repo":"ahmed22xa/Huihui-Qwen3-VL-4B-Instruct-abliterated-comfy","revision":"6d6fc98f9bfa783dfa4f143804525742cb5dad62","path":"Huihui-Qwen3-VL-4B-Instruct-abliterated-int8_convrot.safetensors","dir":"text_encoders","name":"Huihui-Qwen3-VL-4B-Instruct-abliterated-int8_convrot.safetensors","size":5064440625,"sha256":"6a108cd7715c8e1300d4b82b2e671bdedcea65d07406ae454f00720444830209"},
         {"repo":"Comfy-Org/Flux-2-Klein-4B","revision":"5b3abca5c0dc1ecd4eaf3340868d09063fc1c965","path":"split_files/vae/flux2-vae.safetensors","dir":"vae","name":"flux2-vae.safetensors","size":336211292,"sha256":"868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"}
       ]
     },

@@ -42,7 +42,8 @@ ANIMA_VAE_FILE = _model_file("anima", "vae_file", "qwen_image_vae.safetensors")
 FLUX3_DIFFUSION_FILE = _model_file(
     "flux3", "diffusion_file", "flux3-image-klein-int8-convrot.safetensors")
 FLUX3_TEXT_ENCODER_FILE = _model_file(
-    "flux3", "text_encoder_file", "qwen3vl_4b_int8_convrot.safetensors")
+    "flux3", "text_encoder_file",
+    "Huihui-Qwen3-VL-4B-Instruct-abliterated-int8_convrot.safetensors")
 FLUX3_VAE_FILE = _model_file("flux3", "vae_file", "flux2-vae.safetensors")
 KREA2_DIFFUSION_FILE = _model_file(
     "krea2", "diffusion_file", "Moody-Krea-Mix-v7SE_00001__clean_fp8.safetensors")

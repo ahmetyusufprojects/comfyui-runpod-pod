@@ -23,7 +23,7 @@ import fcntl
 ROOT = Path(os.environ["POD_RUNTIME_ROOT"])
 COMFY = Path(os.environ["COMFYUI_ROOT"])
 MODELS = COMFY / "models"
-COMFY_REF = "1332fabfcc507aa7c548cd5152071ed494c207e8"
+COMFY_REF = "8713616fcc321624e306bbd36be5906203dcb0dc"
 _CATALOG_DATA = json.loads(Path(os.environ["POD_MODEL_CATALOG"]).read_text(encoding="utf-8"))
 if _CATALOG_DATA.get("schema") != 2:
     raise RuntimeError("Model listesi desteklenmeyen biçimde.")

@@ -17,9 +17,9 @@ from unittest.mock import patch
 sys.path.insert(0, "/opt/webui_flux2")
 import pod_setup
 
-assert not pod_setup.workflow_enabled("flux3")
+assert pod_setup.workflow_enabled("flux3")
 assert not pod_setup.workflow_ready("flux3")
-assert "flux3" not in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
+assert "flux3" in {group["id"] for group in pod_setup.system_settings()["gruplar"]}
 
 # Civitai page links must preserve the exact model version and work on both
 # official hosts, including the mature-content .red domain.
@@ -41,18 +41,8 @@ model_selector = re.search(
     pathlib.Path("/opt/webui_flux2/index.html").read_text(encoding="utf-8"),
     re.DOTALL,
 )
-assert model_selector and not re.search(
+assert model_selector and re.search(
     r'<option[^>]*value="flux3"', model_selector.group(1))
-saved_ready = pod_setup._ready
-pod_setup._ready = True
-try:
-    pod_setup.start("flux3")
-except ValueError as exc:
-    assert "kapalı" in str(exc)
-else:
-    raise AssertionError("Flux 3 must remain disabled until HF access is resolved")
-finally:
-    pod_setup._ready = saved_ready
 
 try:
     pod_setup.start("flux3-invalid")

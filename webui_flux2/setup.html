@@ -108,7 +108,7 @@
           <p class="muted">LoRA’yı uyumlu görsel modeline bağla. Civitai’de sürümü seçtikten sonra adres çubuğundaki `modelVersionId` bulunan sayfa bağlantısını yapıştırabilirsin. HF veya Civitai bağlantısı kullan; gizli anahtarları bağlantıya yazma.</p>
           <form id="loraForm" class="lora-form">
             <label>LoRA adı<input id="loraName" maxlength="80" required placeholder="Örn. çizgi roman ışığı"></label>
-            <label>Görsel modeli<select id="loraModel"><option value="z_image">Z-Image</option><option value="flux2">Flux 2 Klein</option><option value="flux3" disabled>Flux 3 Klein · şimdilik kapalı</option><option value="krea2">Krea 2</option><option value="illustrious">Illustrious</option></select></label>
+            <label>Görsel modeli<select id="loraModel"><option value="z_image">Z-Image</option><option value="flux2">Flux 2 Klein</option><option value="flux3">Flux 3 Klein</option><option value="krea2">Krea 2</option><option value="illustrious">Illustrious</option></select></label>
             <label class="lora-link">İndirme bağlantısı<input id="loraLink" type="url" required placeholder="Civitai sürüm sayfası?modelVersionId=… veya doğrudan indirme bağlantısı"></label>
             <button type="submit">LoRA ekle</button><span id="loraFormStatus" class="muted" role="status"></span>
           </form>

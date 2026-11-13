@@ -33,9 +33,15 @@ jobs:
           from pathlib import Path
           catalog = json.loads(Path('docker/models.json').read_text())
           assert catalog['schema'] == 2
-          assert catalog['groups']['flux3']['enabled'] is False
+          assert catalog['groups']['flux3']['enabled'] is True
           assert catalog['workflows']['flux3']['steps'] == 16
           assert 'flux3-image-klein-base' not in json.dumps(catalog['groups']['flux3'])
+          flux3_files = catalog['groups']['flux3']['files']
+          assert flux3_files[0]['repo'] == 'black-forest-labs/flux-3-image-klein-comfy'
+          assert flux3_files[1]['repo'] == 'ahmed22xa/Huihui-Qwen3-VL-4B-Instruct-abliterated-comfy'
+          assert flux3_files[1]['name'] == 'Huihui-Qwen3-VL-4B-Instruct-abliterated-int8_convrot.safetensors'
+          assert flux3_files[1]['sha256'] == '6a108cd7715c8e1300d4b82b2e671bdedcea65d07406ae454f00720444830209'
+          assert 'RUNPOD_SECRET_HfToken2' in Path('pod-launch.py').read_text()
           assert catalog['workflows']['illustrious']['lora_group'] == 'anime_desire_lora'
           assert catalog['workflows']['illustrious']['steps'] == 28
           assert catalog['workflows']['illustrious']['cfg'] == 5.0
