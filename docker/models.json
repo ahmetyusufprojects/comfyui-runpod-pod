@@ -146,9 +146,9 @@
       "enabled": true,
       "engine": "comfy",
       "files": [
-        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"diffusion_models/qwen_image_2.1_int8_convrot.safetensors","dir":"diffusion_models","name":"qwen_image_2.1_int8_convrot.safetensors","size":7256783064,"sha256":"4d7d9623b905d39ec965d45d4dccda9d83003382f3da4cad2ff03883e519cc53"},
+        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"diffusion_models/qwen_image_2.1_int8_convrot.safetensors","dir":"diffusion_models","name":"qwen_image_2.1_int8_convrot.safetensors","size":7256783064,"sha256":"cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d"},
         {"repo":"Nic3301/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot","revision":"e99294ec796cc18da63698dafe2da0d33d43f066","path":"qwen3vl_8b_int8_convrot_heretic.safetensors","dir":"text_encoders","name":"qwen3vl_8b_int8_convrot_heretic.safetensors","size":9350828392,"sha256":"f15ce4275428e04f42cdb59e3a253cb290cae5de99259527f01d3d2e51153653"},
-        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"vae/qwen_image_2.1_vae_bf16.safetensors","dir":"vae","name":"qwen_image_2.1_vae_bf16.safetensors","size":675509688,"sha256":"b97c3e7a0e17fcfb434a72ebb75dbfeb5f07e233a98e4a4906ada39ebcd090c9"}
+        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"vae/qwen_image_2.1_vae_bf16.safetensors","dir":"vae","name":"qwen_image_2.1_vae_bf16.safetensors","size":675509688,"sha256":"bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"}
       ]
     },
     "qwen_image_edit_turbo": {
@@ -156,9 +156,9 @@
       "enabled": true,
       "engine": "comfy",
       "files": [
-        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors","dir":"diffusion_models","name":"qwen_image_2.1_turbo_int8_convrot.safetensors","size":7256787829,"sha256":"fef670f4b008bb101c4075aac011c4dd20fdaa54186cf1171b28911ee218f145"},
+        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors","dir":"diffusion_models","name":"qwen_image_2.1_turbo_int8_convrot.safetensors","size":7256787829,"sha256":"8144a0182964aa8403ad6dbc011db837304167d235161b9aabaa8532e967314c"},
         {"repo":"Nic3301/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot","revision":"e99294ec796cc18da63698dafe2da0d33d43f066","path":"qwen3vl_8b_int8_convrot_heretic.safetensors","dir":"text_encoders","name":"qwen3vl_8b_int8_convrot_heretic.safetensors","size":9350828392,"sha256":"f15ce4275428e04f42cdb59e3a253cb290cae5de99259527f01d3d2e51153653"},
-        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"vae/qwen_image_2.1_vae_bf16.safetensors","dir":"vae","name":"qwen_image_2.1_vae_bf16.safetensors","size":675509688,"sha256":"b97c3e7a0e17fcfb434a72ebb75dbfeb5f07e233a98e4a4906ada39ebcd090c9"}
+        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"vae/qwen_image_2.1_vae_bf16.safetensors","dir":"vae","name":"qwen_image_2.1_vae_bf16.safetensors","size":675509688,"sha256":"bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"}
       ]
     },
     "illustrious": {

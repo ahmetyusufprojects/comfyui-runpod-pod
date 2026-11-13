@@ -22,10 +22,13 @@ assert len(turbo_workflow["sigmas"].split(",")) == 9
 normal_diffusion, encoder, vae = normal["files"]
 turbo_diffusion = turbo["files"][0]
 assert normal_diffusion["name"] == "qwen_image_2.1_int8_convrot.safetensors"
+assert normal_diffusion["sha256"] == "cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d"
 assert turbo_diffusion["name"] == "qwen_image_2.1_turbo_int8_convrot.safetensors"
+assert turbo_diffusion["sha256"] == "8144a0182964aa8403ad6dbc011db837304167d235161b9aabaa8532e967314c"
 assert encoder["name"] == "qwen3vl_8b_int8_convrot_heretic.safetensors"
 assert "heretic" in encoder["repo"].lower()
 assert vae["name"] == "qwen_image_2.1_vae_bf16.safetensors"
+assert vae["sha256"] == "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
 assert normal["files"][1:] == turbo["files"][1:]
 
 os.environ["WEBUI_RUNPOD"] = "1"
