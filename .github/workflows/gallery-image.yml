@@ -31,8 +31,10 @@ jobs:
           node tests/app_selection_smoke.js
           python3 tests/qwen_image_edit_smoke.py
           python3 - <<'PY'
-          import json, runpy
+          import json, runpy, sys
           from pathlib import Path
+          sys.path.insert(0, 'webui_flux2')
+          from enhancement_graphs import IMAGE_PRESETS, build_image_enhancement, build_video_enhancement
           catalog = json.loads(Path('docker/models.json').read_text())
           assert catalog['schema'] == 2
           assert catalog['groups']['flux3']['enabled'] is True
@@ -83,6 +85,27 @@ jobs:
           assert 'moody' not in catalog['groups']
           assert 'anima' not in catalog['workflows']
           assert 'moody_anima' not in catalog['workflows']
+          for group in ('enhance_skin', 'enhance_photo', 'enhance_realesrgan', 'enhance_rife'):
+              assert catalog['groups'][group]['engine'] == 'comfy'
+              assert catalog['groups'][group]['files']
+              assert all(len(item.get('sha256', '')) == 64
+                         for item in catalog['groups'][group]['files'])
+          real_esrgan = catalog['groups']['enhance_realesrgan']['files'][0]
+          assert real_esrgan['name'] == 'RealESRGAN_x4plus.pth'
+          assert real_esrgan['revision'] == 'd7502a0856e12112164d0bcf18e67dd952105de2'
+          assert catalog['groups']['enhance_rife']['files'][0]['name'] == 'rife_v4.26.safetensors'
+          for preset in IMAGE_PRESETS:
+              image_graph, _ = build_image_enhancement('sample.png', preset, 2)
+              video_graph, _ = build_video_enhancement(
+                  ['frame1.jpg', 'frame2.jpg', 'frame3.jpg', 'frame4.jpg'], preset, 2, 2)
+              for graph in (image_graph, video_graph):
+                  for node in graph.values():
+                      for value in (node.get('inputs') or {}).values():
+                          if (isinstance(value, list) and len(value) == 2
+                                  and isinstance(value[0], str) and value[0].isdigit()):
+                              assert value[0] in graph
+              assert any(node['class_type'] == 'FrameInterpolate'
+                         for node in video_graph.values())
           assert catalog['llm_default'] == 'llm_26b'
           assert 'llama' not in catalog['workflows']
           assert 'llm_12b' not in catalog['workflows']
@@ -197,6 +220,7 @@ jobs:
           docker push "$current_image"
           docker push "$beta_image"
       - name: Promote the selected image to stable
+        if: github.event_name == 'push' && contains(join(github.event.commits.*.modified, ','), 'docker/stable-image.txt')
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

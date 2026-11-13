@@ -262,6 +262,8 @@ function uretimModGuncelle(){
   if(runpodModelWrap) runpodModelWrap.hidden = !RUNPOD_WEBUI || videoMu();
   const bboxWrap = $('flux3BboxModeWrap');
   if(bboxWrap) bboxWrap.hidden = !RUNPOD_WEBUI || model !== 'flux3';
+  const kreaEditWrap = $('kreaEditStrengthWrap');
+  if(kreaEditWrap) kreaEditWrap.hidden = !RUNPOD_WEBUI || videoMu() || model !== 'krea2' || !refSayisi();
   const turboQwen = RUNPOD_WEBUI && model === 'qwen_image_edit_turbo';
   $('steps').disabled = turboQwen;
   $('steps').title = turboQwen ? 'Turbo, yayımlanan sabit sigmalarla 8 adımda çalışır.' : '';
@@ -273,14 +275,14 @@ function uretimModGuncelle(){
     const names = {z_image:'Moody Pro v13.2',flux2:'Flux 2 Klein',flux3:'Flux 3 Klein · 16 adım',
       krea2:'Moody Krea Mix v7SE',qwen_image_edit:'Qwen Image 2.1 · Düzenleme',
       qwen_image_edit_turbo:'Qwen Image 2.1 · Turbo düzenleme · 8 adım',illustrious:'Illustrious XL'};
-    $('runpodModelInfo').textContent = names[model] + (refSayisi() && model === 'flux2'
+    $('runpodModelInfo').textContent = names[model] + (refSayisi() && (model === 'flux2' || model === 'krea2')
       ? ' · referans düzenleme' : (model === 'qwen_image_edit' || model === 'qwen_image_edit_turbo'
         ? ' · en az bir referans fotoğraf gerekir.'
         : ' · model hazır değilse Kurulum sayfasından ekle.'));
   }
   if(RUNPOD_WEBUI && $('runpodImageModel')){
     for(const option of $('runpodImageModel').options)
-      option.disabled = refSayisi() > 0 && (option.value === 'krea2' || option.value === 'illustrious');
+      option.disabled = refSayisi() > 0 && option.value === 'illustrious';
   }
   $('animaModelSecim').hidden = RUNPOD_WEBUI || !!refSayisi() || videoMu();
   const bilgi = $('uretimModBilgi');
@@ -291,7 +293,7 @@ function uretimModGuncelle(){
         : 'MiniMax H3 · referans fotoğraflı ve sesli video üretimi.')
       : 'Video iş akışı: MiniMax H3; model seçimi bu akışta etkisizdir.';
     else if(RUNPOD_WEBUI && runpodModel) bilgi.textContent =
-      (runpodModel === 'flux2' || runpodModel === 'flux3' ? 'Referanslı düzenleme: ' : 'Seçili model: ') +
+      (refSayisi() && ['flux2','flux3','krea2'].includes(model) ? 'Referanslı düzenleme: ' : 'Seçili model: ') +
       ({z_image:'Z-Image · Moody Pro',flux2:'Flux 2 Klein',flux3:'Flux 3 Klein',krea2:'Krea 2',
         qwen_image_edit:'Qwen Image 2.1 · Düzenleme',
         qwen_image_edit_turbo:'Qwen Image 2.1 · Turbo düzenleme',illustrious:'Illustrious'}[model] || model) +
@@ -1177,6 +1179,7 @@ function formVerisi(istekSecenekleri){
     video_max_side: vm ? +($('vmax') ? $('vmax').value : (RUNPOD_WEBUI ? 320 : 1344)) : 0,
     video_profile: vm && $('videoProfile') ? ($('videoProfile').value || 'quality') : 'quality',
     video_model_instance: vm ? runpodVideoModelSecili() : null,
+    edit_strength: $('kreaEditStrength') ? +$('kreaEditStrength').value : 0.65,
     steps: +$('steps').value, cfg: +$('cfg').value,
     sampler: $('sampler').value, seed: +$('seed').value,
     workflow: otomatikWorkflow(), image_base64: fotoB64, image2_base64: fotoB64_2,
@@ -1206,6 +1209,9 @@ function galeriMedyasiEkle(tur, src, alt, poster){
   $('galeri').appendChild(el);
   return el;
 }
+if($('kreaEditStrength')) $('kreaEditStrength').addEventListener('input', () => {
+  $('kreaEditStrengthValue').textContent = Number($('kreaEditStrength').value).toFixed(2);
+});
 let sonGosterilenSonuc = 0;
 function sonucuGoster(s){
   const sonucNesli = ++sonGosterilenSonuc;
@@ -2405,6 +2411,14 @@ function gecmisKaydiGoster(k, meta, i, albumIndex, medyayiKoru){
     '</div>' :
     '<div class="uretim-detay-prompt-metni">' + escHtml(meta.prompt || k.prompt || '') + '</div>';
   const gorselKaydi = k.tur !== 'video';
+  const iyilestirmeKontrolleri = RUNPOD_WEBUI ?
+    '<div class="gec-iyilestirme"><b>' + (gorselKaydi ? 'Görsel iyileştirme' : 'Video iyileştirme') + '</b>' +
+    '<div class="gec-iyilestirme-kontroller"><label>İşlem<select id="gecIyilestirmeModel">' +
+      '<option value="skin">Ten dokusu · ince ayrıntı</option><option value="photo">Doğal fotoğraf · ClearReality</option><option value="realesrgan">Genel · Real-ESRGAN</option></select></label>' +
+      '<label>Büyütme<select id="gecIyilestirmeOlcek"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option></select></label>' +
+      (!gorselKaydi ? '<label>FPS<select id="gecIyilestirmeFps"><option value="1">Olduğu gibi</option><option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option></select></label>' : '') +
+      '<button id="gecIyilestirmeBaslat" class="hayalet kucukbtn" type="button">İyileştir</button></div>' +
+      '<div id="gecIyilestirmeBilgi" class="kucuk" role="status">Yeni bir sonuç oluşturur; asıl dosyan korunur.</div></div>' : '';
   const tekrarPromptu = meta.prompt_en || meta.prompt || k.prompt || '';
   $('uretimSeciliBilgi').innerHTML =
     '<div class="uretim-detay-ust"><b>' + escHtml(detay.join(' · ') || k.kayit || 'Üretim') + '</b>' +
@@ -2412,6 +2426,7 @@ function gecmisKaydiGoster(k, meta, i, albumIndex, medyayiKoru){
     '<button id="uretimSil" class="hayalet kucukbtn" type="button">Sil</button></div></div>' +
     (olcumler.length ? '<div class="uretim-detay-olcum">' + olcumler.map(escHtml).join(' · ') + '</div>' : '') +
     promptBilgisi +
+    iyilestirmeKontrolleri +
     '<div class="uretim-detay-yeniden">' +
     '<button id="uretimReferansYukle" class="hayalet kucukbtn" type="button"' +
       (gorselKaydi ? '' : ' disabled') + '>Görseli referans olarak yükle</button>' +
@@ -2422,6 +2437,31 @@ function gecmisKaydiGoster(k, meta, i, albumIndex, medyayiKoru){
   $('uretimAyniAyar').onclick = () => {
     formaUygula(meta); if(meta.seed != null) $('seed').value = meta.seed;
     uretimAyarAc();
+  };
+  if(RUNPOD_WEBUI && $('gecIyilestirmeBaslat')) $('gecIyilestirmeBaslat').onclick = async () => {
+    const button = $('gecIyilestirmeBaslat');
+    const info = $('gecIyilestirmeBilgi');
+    if(button.disabled || !uretimSeciliKayit) return;
+    button.disabled = true;
+    info.textContent = 'İyileştirme kuyruğa ekleniyor…';
+    try{
+      const body = {postprocess: gorselKaydi ? 'image' : 'video',
+        is_tipi: gorselKaydi ? 'goruntu-iyilestirme' : 'video-iyilestirme',
+        kayit: k.kayit, dosya: k.dosya,
+        enhance_preset: $('gecIyilestirmeModel').value,
+        scale: +$('gecIyilestirmeOlcek').value,
+        fps_multiplier: !gorselKaydi && $('gecIyilestirmeFps') ?
+          +$('gecIyilestirmeFps').value : 1};
+      const response = await fetch('/api/kuyruk', {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+      const result = await response.json();
+      if(!response.ok || result.hata) throw new Error(result.hata || response.status);
+      info.textContent = 'Kuyruğa eklendi; model gerekirse şimdi indirilecek.';
+      kuyrukYenile(); kuyrukDevamli(); takipEt(result.is_id);
+    }catch(error){
+      info.textContent = 'İyileştirme başlatılamadı: ' + (error.message || error);
+      button.disabled = false;
+    }
   };
   $('uretimReferansYukle').onclick = async () => {
     if(await libAta({url: k.url}, 1)) bilgi('Geçmiş görseli referans olarak yüklendi.');

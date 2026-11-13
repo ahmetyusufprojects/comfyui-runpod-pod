@@ -235,42 +235,6 @@ def build_z_image_prompt(p, image_name=None, image_name2=None):
     else:
         pr["4"] = {"class_type": "CLIPTextEncode",
                    "inputs": {"text": p["prompt"], "clip": ["2", 0]}}
-        if os.environ.get("WEBUI_RUNPOD") == "1":
-            # The provided Z-Image sample uses a partial first pass, latent
-            # upscaling, then a second noisy pass. Use it for text-to-image
-            # only; reference-image editing keeps its existing workflow.
-            steps = max(1, min(50, int(p.get("steps", 9))))
-            if steps >= 5:
-                scale = min(1.7, 4096.0 / max(p["width"], p["height"]))
-                first_end = max(1, min(steps - 1, round(steps * 7 / 9)))
-                second_start = max(0, min(steps - 1, round(steps * 4 / 9)))
-                sampler = p.get("sampler", "dpmpp_2m_sde")
-                pr["8"] = {"class_type": "KSamplerAdvanced", "inputs": {
-                    "model": ["7", 0], "positive": ["4", 0],
-                    "negative": ["5", 0], "latent_image": ["6", 0],
-                    "add_noise": "enable", "noise_seed": seed,
-                    "steps": steps, "cfg": p["cfg"],
-                    "sampler_name": sampler, "scheduler": "beta",
-                    "start_at_step": 0, "end_at_step": first_end,
-                    "return_with_leftover_noise": "enable"}}
-                pr["9"] = {"class_type": "LatentUpscaleBy", "inputs": {
-                    "samples": ["8", 0], "upscale_method": "bislerp",
-                    "scale_by": scale}}
-                pr["10"] = {"class_type": "KSamplerAdvanced", "inputs": {
-                    "model": ["7", 0], "positive": ["4", 0],
-                    "negative": ["5", 0], "latent_image": ["9", 0],
-                    "add_noise": "enable", "noise_seed": seed,
-                    "steps": steps, "cfg": p["cfg"],
-                    "sampler_name": sampler, "scheduler": "sgm_uniform",
-                    "start_at_step": second_start, "end_at_step": steps,
-                    "return_with_leftover_noise": "disable"}}
-                pr["11"] = {"class_type": "VAEDecode", "inputs": {
-                    "samples": ["10", 0], "vae": ["3", 0]}}
-                pr["12"] = {"class_type": "SaveImage", "inputs": {
-                    "images": ["11", 0], "filename_prefix": "webui-z-image"}}
-                actual_scale = scale
-                p["output_width"] = int(round(p["width"] * actual_scale / 8) * 8)
-                p["output_height"] = int(round(p["height"] * actual_scale / 8) * 8)
     return attach_loras(pr, p.get("loras")), seed
 
 
@@ -411,8 +375,8 @@ def _flux3_layout_elements(prompt, width, height):
     return text, []
 
 
-def build_krea2_prompt(p):
-    """ComfyUI stock-node workflow matching the supplied Krea 2 example."""
+def build_krea2_prompt(p, image_name=None):
+    """Krea 2 text-to-image or single-reference edit using stock ComfyUI nodes."""
     seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
     files = p.get("model_files") or {}
     pr = {
@@ -445,6 +409,13 @@ def build_krea2_prompt(p):
         "10": {"class_type": "SaveImage",
                "inputs": {"images": ["9", 0], "filename_prefix": "webui-krea2"}},
     }
+    if image_name:
+        pr["11"] = {"class_type": "LoadImage", "inputs": {"image": image_name}}
+        pr["12"] = {"class_type": "VAEEncode", "inputs": {
+            "pixels": ["11", 0], "vae": ["3", 0]}}
+        pr["8"]["inputs"]["latent_image"] = ["12", 0]
+        pr["8"]["inputs"]["denoise"] = max(
+            0.05, min(1.0, float(p.get("edit_strength", 0.65))))
     return attach_loras(pr, p.get("loras")), seed
 
 

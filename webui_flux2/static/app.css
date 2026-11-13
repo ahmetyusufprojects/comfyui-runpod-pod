@@ -535,6 +535,16 @@ body.uretim-tam-ekran{overflow:hidden}
 .uretim-detay-aksiyon button{min-height:30px;padding:5px 8px;font-size:11px}
 .uretim-detay-yeniden{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .uretim-detay-yeniden button{flex:1 1 190px}
+.gec-iyilestirme{margin-top:9px;padding:9px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.025)}
+.gec-iyilestirme>b{display:block;color:var(--yazi);margin-bottom:6px}
+.gec-iyilestirme-kontroller{display:flex;flex-wrap:wrap;align-items:end;gap:7px}
+.gec-iyilestirme-kontroller label{display:grid;gap:3px;min-width:115px;font-size:10px;color:var(--muted)}
+.gec-iyilestirme-kontroller select{padding:6px 8px;font-size:11px;min-height:32px}
+.gec-iyilestirme-kontroller button{min-height:32px;padding:6px 12px}
+.gec-iyilestirme .kucuk{margin-top:5px}
+.krea-edit-strength{margin-top:8px}
+.krea-edit-strength label{display:flex;justify-content:space-between;max-width:330px}
+.krea-edit-strength input[type=range]{width:min(330px,100%);accent-color:var(--vurgu)}
 .uretim-detay-yardim{margin-top:5px;font-size:11px;line-height:1.4}
 .uretim-detay-olcum{margin:7px 0;line-height:1.5}
 .uretim-detay-promptlar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}

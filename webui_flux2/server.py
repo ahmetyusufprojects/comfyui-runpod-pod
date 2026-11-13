@@ -52,6 +52,8 @@ from image_graphs import (DIFFUSION_FILE, TEXT_ENCODER_FILE, VAE_FILE,
 from image_utils import (exif_duzelt as _exif_duzelt,
                          fotograf_hazirla as _fotograf_hazirla,
                          scale_to_max_side)
+from enhancement_graphs import (IMAGE_PRESETS, build_image_enhancement,
+                                build_video_enhancement)
 
 _AYARLAR_KILIT = threading.RLock()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -259,7 +261,10 @@ MODEL_ILLUSTRIOUS = "illustrious"
 IS_TIPI_GORUNTU = "goruntu-uretim"
 IS_TIPI_DUZENLEME = "goruntu-duzenleme"
 IS_TIPI_VIDEO = "video-uretim"
-IS_TIPLERI = (IS_TIPI_GORUNTU, IS_TIPI_DUZENLEME, IS_TIPI_VIDEO)
+IS_TIPI_GORUNTU_IYILESTIR = "goruntu-iyilestirme"
+IS_TIPI_VIDEO_IYILESTIR = "video-iyilestirme"
+IS_TIPLERI = (IS_TIPI_GORUNTU, IS_TIPI_DUZENLEME, IS_TIPI_VIDEO,
+              IS_TIPI_GORUNTU_IYILESTIR, IS_TIPI_VIDEO_IYILESTIR)
 
 # --- Video (MiniMax H3 referans-video): sablon + sinirlar ---
 # Sablon, UI workflow'una dokunulmadan video_r2v_api.json'dan okunur.
@@ -1263,8 +1268,15 @@ def _is_dogrula(req):
                      MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO,
                      MODEL_ILLUSTRIOUS):
         return {"hata": "Görsel modeli tanınmadı."}
-    if model in (MODEL_KREA2, MODEL_ILLUSTRIOUS) and n_ref:
-        return {"hata": "Seçilen model şu anda yalnızca sıfırdan görsel üretir. Referansla Flux 2 kullan."}
+    if model == MODEL_ILLUSTRIOUS and n_ref:
+        return {"hata": "Illustrious şu anda yalnızca sıfırdan görsel üretir. Referansla başka bir görsel modeli seç."}
+    if model == MODEL_KREA2:
+        try:
+            edit_strength = float(req.get("edit_strength", 0.65))
+        except (TypeError, ValueError, OverflowError):
+            return {"hata": "Krea 2 düzenleme gücü sayı olmalı."}
+        if not 0.05 <= edit_strength <= 1.0:
+            return {"hata": "Krea 2 düzenleme gücü 0.05 ile 1 arasında olmalı."}
     if model in (MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO) and not n_ref:
         return {"hata": "Qwen Image 2.1 düzenleme modeli için en az bir referans görsel ekle."}
     if req.get("flux3_bbox_mode") and model != MODEL_FLUX3:
@@ -1698,16 +1710,18 @@ def _gpu_isini_calistir(job):
 
     if llm.durum()["canli"]:
         req = job.get("istek") or {}
-        model = req.get("model") or req.get("image_model")
+        model = "enhance" if req.get("postprocess") in ("image", "video") else (
+            req.get("model") or req.get("image_model"))
         if model in (None, "auto"):
             refs = bool(req.get("image_base64") or req.get("image2_base64"))
             model = MODEL_FLUX2 if refs else MODEL_Z_IMAGE
-        model = "video" if is_tipini_belirle(
-            req, int(bool(req.get("image_base64"))) +
-            int(bool(req.get("image2_base64")))) == IS_TIPI_VIDEO else model
+        if is_tipini_belirle(
+                req, int(bool(req.get("image_base64"))) +
+                int(bool(req.get("image2_base64")))) == IS_TIPI_VIDEO:
+            model = "video"
         vram_bos = _vram_bos_mb()
         gerekli_gorsel = RUNPOD_GORSEL_VRAM_MB.get(
-            model, RUNPOD_GORSEL_VRAM_MB["z_image"])
+            model, RUNPOD_GORSEL_VRAM_MB.get("z_image", 12000))
         # LLM GPU'da kalırken görsel modelin de açılabileceği ölçülüyorsa
         # gereksiz yeniden yüklemeyi önle. Ölçüm yoksa güvenli tarafta kal.
         llama_kalabilir = (RUNPOD_MODE and vram_bos is not None
@@ -2037,7 +2051,7 @@ LLM_VRAM_GEREK_MB = 9000 if RUNPOD_MODE else 2600
 RUNPOD_GORSEL_VRAM_MB = {"z_image": 10000, "flux2": 16500, "flux3": 12500,
                          "krea2": 22500, "qwen_image_edit": 23000,
                          "qwen_image_edit_turbo": 23000,
-                         "illustrious": 10500, "video": 26000}
+                         "illustrious": 10500, "video": 26000, "enhance": 8000}
 GPU_BOSALTMA_TAVAN_SN = 20
 GPU_BOSALTMA_BEKLE = 0.25   # nvidia-smi tek cagri ~80ms; sik poll yuklemeyi hizlandirir
 LLM_KAPATMA_BEKLE_SN = 30  # llama durmazsa goruntu isi bu kadar bekler
@@ -3035,6 +3049,357 @@ def _imge_modeli_isitme_karari(model, llama_canliydi):
     return yol
 
 
+def _iyilestirme_kaydi(kullanici, req):
+    """Resolve a media file only from the signed-in user's own history record."""
+    kayit = _guvenli_dosya_adi(req.get("kayit"))
+    dosya = _guvenli_dosya_adi(req.get("dosya"))
+    if not kayit or not kayit.endswith(".json") or not dosya:
+        raise ValueError("İyileştirilecek kayıt bulunamadı.")
+    klasor = os.path.realpath(_kullanici_gecmis(kullanici))
+    meta_yolu = os.path.realpath(os.path.join(klasor, kayit))
+    if not meta_yolu.startswith(klasor + os.sep) or not os.path.isfile(meta_yolu):
+        raise ValueError("Bu geçmiş kaydı bulunamadı.")
+    try:
+        with open(meta_yolu, "r", encoding="utf-8") as kaynak:
+            meta = json.load(kaynak)
+    except (OSError, ValueError):
+        raise ValueError("Geçmiş kaydı okunamadı.") from None
+    if dosya not in (meta.get("dosyalar") or []):
+        raise ValueError("Bu dosya seçilen geçmiş kaydına ait değil.")
+    yol = os.path.realpath(os.path.join(klasor, dosya))
+    if not yol.startswith(klasor + os.sep) or not os.path.isfile(yol):
+        raise ValueError("İyileştirilecek dosya bulunamadı.")
+    uzanti = os.path.splitext(dosya)[1].lower()
+    video = uzanti in (".mp4", ".webm", ".mov", ".m4v")
+    if not video and uzanti not in (".png", ".jpg", ".jpeg", ".webp"):
+        raise ValueError("Bu dosya türü iyileştirilemiyor.")
+    return {"record": kayit, "file": dosya, "path": yol,
+            "meta": meta, "video": video}
+
+
+def _iyilestirme_istegi_dogrula(kullanici, req):
+    if not RUNPOD_MODE:
+        return {"hata": "Bağımsız medya iyileştirme yalnızca RunPod kurulumunda kullanılabilir."}
+    tur = req.get("postprocess")
+    if tur not in ("image", "video"):
+        return {"hata": "İyileştirme türü geçersiz."}
+    try:
+        secim = _iyilestirme_kaydi(kullanici, req)
+        if secim["video"] != (tur == "video"):
+            raise ValueError("Seçilen dosya ile iyileştirme türü eşleşmiyor.")
+        if req.get("enhance_preset") not in IMAGE_PRESETS:
+            raise ValueError("Görüntü iyileştirme seçeneği geçersiz.")
+        scale = float(req.get("scale", 2))
+        if scale not in (1.0, 1.5, 2.0, 3.0, 4.0):
+            raise ValueError("Büyütme katsayısı 1, 1.5, 2, 3 veya 4 olmalı.")
+        fps_multiplier = int(req.get("fps_multiplier", 1))
+        if fps_multiplier not in (1, 2, 3, 4):
+            raise ValueError("FPS artırma 1x, 2x, 3x veya 4x olmalı.")
+        if os.path.getsize(secim["path"]) > 1024 * 1024 * 1024:
+            raise ValueError("1 GB üzerindeki dosyalar şu anda iyileştirilemiyor.")
+    except (TypeError, ValueError, OverflowError, OSError) as exc:
+        return {"hata": str(exc) or "İstek geçersiz."}
+    return None
+
+
+def _iyilestirme_modelini_hazirla(group, job):
+    item = pod_setup.CATALOG.get(group)
+    if not item:
+        raise RuntimeError("İyileştirme modeli katalogda bulunamadı.")
+    pod_setup.start(group)
+    deadline = time.monotonic() + 3600
+    while time.monotonic() < deadline:
+        if job.get("iptal"):
+            raise RuntimeError("İş durduruldu.")
+        status = pod_setup.status()
+        state_row = next((row for row in status["gruplar"] if row["id"] == group), {})
+        state = state_row.get("durum", "idle")
+        if state == "error":
+            raise RuntimeError("İyileştirme modeli indirilemedi: " +
+                               str(state_row.get("ayrinti") or "bilinmeyen hata")[:300])
+        files = item.get("files") or []
+        if files and all(pod_setup._model_verified(
+                pod_setup.MODELS / f["dir"] / f["name"], f)
+                for f in files if not f.get("optional")):
+            return files
+        job["ilerleme"] = {"asama": "model", "calisan":
+                            (state_row.get("ayrinti") or "İyileştirme modeli hazırlanıyor"),
+                            "oran": 0.05}
+        time.sleep(0.5)
+    raise TimeoutError("İyileştirme modeli 60 dakika içinde hazırlanamadı.")
+
+
+def _iyilestirme_ffprobe(path):
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height,r_frame_rate,avg_frame_rate:format=duration",
+             "-of", "json", path], stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=20, check=True, text=True)
+        info = json.loads(result.stdout)
+        stream = (info.get("streams") or [])[0]
+        frame_rate = stream.get("avg_frame_rate") or stream.get("r_frame_rate") or "24/1"
+        n, _, d = str(frame_rate).partition("/")
+        fps = float(n) / max(1.0, float(d or 1))
+        duration = float((info.get("format") or {}).get("duration", 0) or 0)
+        return int(stream["width"]), int(stream["height"]), fps, duration
+    except Exception:
+        return 0, 0, 24.0, 0.0
+
+
+def _iyilestirme_cikti_temizle(image):
+    if not isinstance(image, dict) or image.get("type", "output") != "output":
+        return
+    filename = _guvenli_dosya_adi(image.get("filename"))
+    subfolder = str(image.get("subfolder") or "")
+    root = os.path.realpath(os.path.join(COMFY_KOK, "output"))
+    path = os.path.realpath(os.path.join(root, subfolder, filename or ""))
+    if filename and path.startswith(root + os.sep):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _iyilestirme_comfy_isini_yurut(job, graph):
+    cid = uuid.uuid4().hex
+    response = comfy_post_json("/prompt", {"prompt": graph, "client_id": cid})
+    if response.get("node_errors"):
+        raise RuntimeError("İyileştirme akışında bir adım başlatılamadı: " +
+                           json.dumps(response["node_errors"], ensure_ascii=False)[:500])
+    prompt_id = response["prompt_id"]
+    job["prompt_id"] = prompt_id
+    _aktif["prompt_id"] = prompt_id
+    _aktif["sahip"] = job.get("sahip")
+    _aktif["baslangic"] = time.time()
+    _aktif["ilerleme"] = {"kuyrukta": True, "oran": 0.0}
+    _aktif["nodlar"] = {node_id: node.get("class_type", node_id)
+                        for node_id, node in graph.items()}
+    threading.Thread(target=_ws_ilerleme_dinle,
+                     args=(prompt_id, cid, _aktif["nodlar"]), daemon=True).start()
+    try:
+        if job.get("iptal"):
+            _comfy_isini_kes(prompt_id)
+        return wait_result(prompt_id, job=job)
+    finally:
+        if _aktif.get("prompt_id") == prompt_id:
+            _aktif["prompt_id"] = None
+            _aktif["sahip"] = None
+        job.pop("prompt_id", None)
+
+
+def _medyayi_iyilestir(job):
+    req = job.get("istek") or {}
+    owner = job.get("sahip")
+    selected = _iyilestirme_kaydi(owner, req)
+    preset = req["enhance_preset"]
+    scale = float(req.get("scale", 2))
+    fps_multiplier = int(req.get("fps_multiplier", 1)) if selected["video"] else 1
+    choice = IMAGE_PRESETS[preset]
+    groups = [choice["group"]]
+    if preset == "skin" and scale > 1:
+        groups.append(IMAGE_PRESETS["photo"]["group"])
+    if selected["video"] and fps_multiplier > 1:
+        groups.append("enhance_rife")
+    for group in groups:
+        _iyilestirme_modelini_hazirla(group, job)
+    if job.get("iptal"):
+        raise RuntimeError("İş durduruldu.")
+
+    temp_root = None
+    uploaded_path = None
+    started = time.perf_counter()
+    output_blobs = []
+    try:
+        if selected["video"]:
+            input_dir = os.path.join(COMFY_KOK, "input")
+            os.makedirs(input_dir, exist_ok=True)
+            temp_root = tempfile.mkdtemp(prefix="webui_enhance_", dir=input_dir)
+            src_w, src_h, src_fps, duration = _iyilestirme_ffprobe(selected["path"])
+            if not src_w or not src_h or src_fps <= 0:
+                raise RuntimeError("Video ölçüleri veya kare hızı okunamadı.")
+            if duration > 120:
+                raise RuntimeError("Şu anda 2 dakikadan uzun videolar iyileştirilemiyor.")
+            output_fps = src_fps * fps_multiplier
+            if output_fps > 120:
+                raise RuntimeError("FPS artırımı 120 FPS sınırını aşamaz.")
+            if duration and duration * src_fps * fps_multiplier > 7200:
+                raise RuntimeError("Video çok uzun; FPS artırımı sonrası kare sayısı fazla.")
+            source_pattern = os.path.join(temp_root, "source_%08d.jpg")
+            extract = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", selected["path"],
+                 "-map", "0:v:0", "-vsync", "0", "-q:v", "2", source_pattern, "-y"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=900, check=False)
+            if extract.returncode:
+                raise RuntimeError("Videodan kareler alınamadı: " +
+                                   extract.stderr.decode("utf-8", "replace")[-400:])
+            source_files = sorted((name for name in os.listdir(temp_root)
+                                   if name.startswith("source_") and name.endswith(".jpg")))
+            if not source_files:
+                raise RuntimeError("Videoda işlenecek kare bulunamadı.")
+            frame_count = len(source_files)
+            if frame_count < 2 and fps_multiplier > 1:
+                raise RuntimeError("FPS artırımı için videoda en az iki kare olmalı.")
+            if frame_count * fps_multiplier > 7200:
+                raise RuntimeError("Video çok uzun; FPS artırımı sonrası kare sayısı fazla.")
+            model_scale = choice["model_scale"]
+            per_frame = max(1, src_w * src_h * 12 * (fps_multiplier + model_scale ** 2))
+            try:
+                import psutil
+                available = int(psutil.virtual_memory().available * 0.2)
+            except Exception:
+                available = 2 * 1024 ** 3
+            batch_size = max(2 if fps_multiplier > 1 else 1,
+                             min(4, available // per_frame))
+            step = max(1, batch_size - 1) if fps_multiplier > 1 else batch_size
+            starts = list(range(0, frame_count, step))
+            if fps_multiplier > 1 and len(starts) > 1 and frame_count - starts[-1] < 2:
+                starts.pop()
+            output_index = 0
+            batches = len(starts)
+            for batch_index, start_index in enumerate(starts):
+                if job.get("iptal"):
+                    raise RuntimeError("İş durduruldu.")
+                end_index = min(frame_count, start_index + batch_size)
+                frame_names = [os.path.relpath(
+                    os.path.join(temp_root, name), input_dir).replace(os.sep, "/")
+                    for name in source_files[start_index:end_index]]
+                if not frame_names:
+                    continue
+                graph, _ = build_video_enhancement(frame_names, preset, scale,
+                                                    fps_multiplier, src_fps)
+                job["ilerleme"] = {"asama": "video",
+                                   "calisan": "Video kareleri iyileştiriliyor (%d/%d); ses korunacak" %
+                                              (batch_index + 1, batches),
+                                   "oran": 0.1 + 0.8 * batch_index / max(1, batches)}
+                entry = _iyilestirme_comfy_isini_yurut(job, graph)
+                images = []
+                for output in (entry.get("outputs") or {}).values():
+                    for image in output.get("images", []) or []:
+                        try:
+                            blob = fetch_view_image(image)
+                            if blob:
+                                images.append(blob)
+                        finally:
+                            _iyilestirme_cikti_temizle(image)
+                if fps_multiplier > 1 and start_index > 0 and images:
+                    images = images[1:]
+                for blob in images:
+                    frame_path = os.path.join(temp_root, "processed_%08d.png" % output_index)
+                    with open(frame_path, "wb") as frame_file:
+                        frame_file.write(blob)
+                    output_index += 1
+            if not output_index:
+                raise RuntimeError("İyileştirilmiş video kareleri kaydedilemedi.")
+            output_path = os.path.join(temp_root, "result.mp4")
+            encode_base = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                 "-framerate", "%.6f" % output_fps,
+                 "-i", os.path.join(temp_root, "processed_%08d.png"),
+                 "-i", selected["path"], "-map", "0:v:0", "-map", "1:a?",
+                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                 "-pix_fmt", "yuv420p", "-t", "%.6f" % (frame_count / src_fps),
+                 "-movflags", "+faststart"]
+            encode = subprocess.run(
+                encode_base + ["-c:a", "copy", output_path],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                timeout=1200, check=False)
+            if encode.returncode:
+                encode = subprocess.run(
+                    encode_base + ["-c:a", "aac", "-b:a", "192k", output_path],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    timeout=1200, check=False)
+            if encode.returncode or not os.path.isfile(output_path):
+                raise RuntimeError("Video ve ses birleştirilemedi: " +
+                                   encode.stderr.decode("utf-8", "replace")[-400:])
+            if os.path.getsize(output_path) > 1024 ** 3:
+                raise RuntimeError("İyileştirilmiş video 1 GB sınırını aşıyor; daha düşük büyütme seç.")
+            with open(output_path, "rb") as output_file:
+                output_video = output_file.read()
+            quota_error = _kota_kontrol(owner, yeni_bayt=len(output_video), yeni_kayit=1)
+            if quota_error:
+                raise RuntimeError(quota_error)
+            _is_sonucu_baslat(job)
+            poster = _video_kapak_uret(output_video)
+            video_meta = dict(selected["meta"])
+            for key in ("dosyalar", "poster_file", "dosya_bayt", "tarih", "yildiz"):
+                video_meta.pop(key, None)
+            video_meta.update({"parent_kayit": selected["record"], "workflow": "enhancement",
+                               "is_tipi": IS_TIPI_VIDEO_IYILESTIR,
+                               "enhance_preset": preset, "enhance_scale": scale,
+                               "fps_multiplier": fps_multiplier,
+                               "source_fps": src_fps, "fps": output_fps,
+                               "width": round(src_w * scale), "height": round(src_h * scale),
+                               "generation_ms": round((time.perf_counter() - started) * 1000)})
+            history_id, files = gecmise_kaydet(owner, [output_video], video_meta,
+                                               video=True, poster_blob=poster)
+            job["sonuc"] = {"video_url": "/gecmis/%s" % urllib.parse.quote(files[0]),
+                            "video_poster_url": "/gecmis/%s" % urllib.parse.quote(history_id + "_poster.jpg") if poster else None,
+                            "prompt": video_meta.get("prompt", ""), "width": video_meta["width"],
+                            "height": video_meta["height"], "fps": output_fps,
+                            "suresn": video_meta.get("suresn"), "is_tipi": IS_TIPI_VIDEO_IYILESTIR,
+                            "gecmis": history_id, "gecmis_dosyalar": files, "is_id": job["is_id"]}
+        else:
+            with open(selected["path"], "rb") as image_file:
+                image_bytes = image_file.read()
+            uploaded = upload_image_to_comfy(
+                image_bytes, "webui_enhance_%s.png" % uuid.uuid4().hex[:10])
+            uploaded_path = os.path.join(COMFY_KOK, "input", uploaded.get("name", ""))
+            graph, _ = build_image_enhancement(uploaded.get("name"), preset, scale)
+            job["ilerleme"] = {"asama": "goruntu", "calisan": "Görsel iyileştiriliyor", "oran": 0.1}
+            entry = _iyilestirme_comfy_isini_yurut(job, graph)
+            for output in (entry.get("outputs") or {}).values():
+                for image in output.get("images", []) or []:
+                    try:
+                        blob = fetch_view_image(image)
+                        if blob:
+                            output_blobs.append(blob)
+                    finally:
+                        _iyilestirme_cikti_temizle(image)
+            if not output_blobs:
+                raise RuntimeError("İyileştirilmiş görsel bulunamadı.")
+            quota_error = _kota_kontrol(owner, yeni_bayt=sum(map(len, output_blobs)),
+                                        yeni_kayit=len(output_blobs))
+            if quota_error:
+                raise RuntimeError(quota_error)
+            _is_sonucu_baslat(job)
+            image_meta = dict(selected["meta"])
+            for key in ("dosyalar", "poster_file", "dosya_bayt", "tarih", "yildiz"):
+                image_meta.pop(key, None)
+            image_meta.update({"parent_kayit": selected["record"], "workflow": "enhancement",
+                               "is_tipi": IS_TIPI_GORUNTU_IYILESTIR,
+                               "enhance_preset": preset, "enhance_scale": scale,
+                               "generation_ms": round((time.perf_counter() - started) * 1000)})
+            try:
+                from io import BytesIO
+                from PIL import Image
+                with Image.open(BytesIO(output_blobs[0])) as image:
+                    image_meta["width"], image_meta["height"] = image.size
+            except Exception:
+                image_meta["width"] = round(float(image_meta.get("width") or 0) * scale)
+                image_meta["height"] = round(float(image_meta.get("height") or 0) * scale)
+            history_id, files = gecmise_kaydet(owner, output_blobs, image_meta)
+            job["sonuc"] = {"gorseller": ["data:image/png;base64," + base64.b64encode(blob).decode("ascii")
+                                            for blob in output_blobs],
+                            "prompt": image_meta.get("prompt", ""), "model": image_meta.get("model"),
+                            "width": image_meta.get("width"), "height": image_meta.get("height"),
+                            "is_tipi": IS_TIPI_GORUNTU_IYILESTIR,
+                            "gecmis": history_id, "gecmis_dosyalar": files, "is_id": job["is_id"]}
+        job["ilerleme"] = {"bitti": True, "oran": 1.0}
+        job["durum"] = "bitti"
+        job["bitis"] = time.time()
+    finally:
+        if uploaded_path:
+            try:
+                os.remove(uploaded_path)
+            except OSError:
+                pass
+        if temp_root:
+            try:
+                shutil.rmtree(temp_root, ignore_errors=True)
+            except OSError:
+                pass
+
+
 def _isi_calistir(job):
     """Kuyruk iscisi tek uretimi bastan sona yurutur (eski /api/uret govdesi).
     Istemci baglantiyi kesse bile devam eder; sonuc is kaydinda + gecmiste durur."""
@@ -3043,6 +3408,9 @@ def _isi_calistir(job):
     if not req.get("prompt_destek") and not job.get("baslangic"):
         job["baslangic"] = time.time()
     try:
+        if req.get("postprocess") in ("image", "video"):
+            _medyayi_iyilestir(job)
+            return
         hata = _is_dogrula(req)
         if hata:
             job["durum"] = "hata"
@@ -3123,6 +3491,7 @@ def _isi_calistir(job):
              "steps": max(1, min(50, int(req.get("steps", default_steps)))),
              "cfg": float(req.get("cfg", default_cfg)),
              "sampler": req.get("sampler", default_sampler),
+             "edit_strength": float(req.get("edit_strength", 0.65)),
              "flux3_bbox_mode": bool(req.get("flux3_bbox_mode"))}
         if RUNPOD_MODE:
             workflow_key = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
@@ -3160,7 +3529,7 @@ def _isi_calistir(job):
         elif model == MODEL_FLUX3:
             prompt, seed = build_flux3_prompt(p, image_name, image_name2)
         elif model == MODEL_KREA2:
-            prompt, seed = build_krea2_prompt(p)
+            prompt, seed = build_krea2_prompt(p, image_name)
         elif model in (MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO):
             prompt, seed = build_qwen_image_edit_prompt(
                 p, image_name, image_name2,
@@ -3170,9 +3539,6 @@ def _isi_calistir(job):
         else:
             prompt_builder = build_z_image_prompt if model == MODEL_Z_IMAGE else build_prompt
             prompt, seed = prompt_builder(p, image_name, image_name2)
-        if (model == MODEL_Z_IMAGE and not image_name and not image_name2
-                and p.get("output_width") and p.get("output_height")):
-            w, h = p["output_width"], p["output_height"]
         cid = uuid.uuid4().hex
         isitma_yolu = _imge_modeli_isitme_karari(
             model, bool(job.get("_llama_canliydi")))
@@ -4825,7 +5191,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if "prompt_destek" in req and not isinstance(req.get("prompt_destek"), bool):
                 self._send(400, '{"hata":"prompt_destek boolean olmali"}')
                 return
-            hata = _is_dogrula(req)
+            if "postprocess" in req:
+                hata = _iyilestirme_istegi_dogrula(kullanici, req)
+            else:
+                hata = _is_dogrula(req)
             if hata:
                 self._send(400, json.dumps(hata))
                 return

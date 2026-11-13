@@ -237,6 +237,30 @@
         {"repo":"NSFW-API/NSFW-Wan-UMT5-XXL","revision":"9202c70dd998d183f3dd58276d06689eeab9a174","path":"nsfw_wan_umt5-xxl_fp8_scaled.safetensors","dir":"text_encoders","name":"nsfw_wan_umt5-xxl_fp8_scaled.safetensors","size":6735887993,"sha256":"a484bb9739a8d4020ca6f072b5b7329cf13e352b06985497c1f7f81ea98a45c5"}
       ]
     },
+    "enhance_skin": {
+      "label":"Ten dokusu \u00b7 1xSkinContrast", "engine":"comfy",
+      "files":[
+        {"repo":"notkenski/upscalers","revision":"b7da2e9be0d6ebb304e12ac3995c4606a5f71ea4","path":"1xSkinContrast-High-SuperUltraCompact.pth","dir":"upscale_models","name":"1xSkinContrast-High-SuperUltraCompact.pth","size":181474,"sha256":"7bbea62563203f099ea1cf60ce483ac60d22eb93d30f11be4cb1a229e3585e9e"}
+      ]
+    },
+    "enhance_photo": {
+      "label":"Do\u011fal foto\u011fraf \u00b7 ClearReality 4x", "engine":"comfy",
+      "files":[
+        {"repo":"Kim2091/ClearRealityV1","revision":"6bfd32e08342ad5d8ae5ac2fd6629a72d525c76e","path":"4x-ClearRealityV1.safetensors","dir":"upscale_models","name":"4x-ClearRealityV1.safetensors","size":4492232,"sha256":"83a9c8e279e3d07548e2b0d736dc2c73c1736a07072a748ed4fafbba99b44693"}
+      ]
+    },
+    "enhance_realesrgan": {
+      "label":"Genel fotoğraf · Real-ESRGAN x4", "engine":"comfy",
+      "files":[
+        {"repo":"Sean-Bradley/ComfyUI","revision":"d7502a0856e12112164d0bcf18e67dd952105de2","path":"models/upscale_models/RealESRGAN_x4plus.pth","dir":"upscale_models","name":"RealESRGAN_x4plus.pth","size":67040989,"sha256":"4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1"}
+      ]
+    },
+    "enhance_rife": {
+      "label":"Video FPS art\u0131rma \u00b7 RIFE v4.26", "engine":"comfy",
+      "files":[
+        {"repo":"Comfy-Org/Frame-Interpolation","revision":"26b94f115bd210318f20d1f7b1d257c1b3a37db1","path":"frame_interpolation/rife_v4.26.safetensors","dir":"frame_interpolation","name":"rife_v4.26.safetensors","size":22674688,"sha256":"151874592c877740e5db11522f4514df569eeafb0a0fcb2696f16e9e8d317c94"}
+      ]
+    },
     "translation": {
       "label": "OPUS-MT Türkçe-İngilizce",
       "engine": "translation",
