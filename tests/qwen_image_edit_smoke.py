@@ -52,8 +52,8 @@ for is_turbo in (False, True):
     assert graph["3"]["inputs"]["type"] == "qwen_image"
     assert graph["5"]["class_type"] == "TextEncodeQwenImage21"
     assert graph["5"]["inputs"]["negative_prompt"] == "blurry"
-    assert graph["5"]["inputs"]["image_1"] == ["31", 0]
-    assert graph["5"]["inputs"]["image_2"] == ["32", 0]
+    assert graph["5"]["inputs"]["images.image_1"] == ["31", 0]
+    assert graph["5"]["inputs"]["images.image_2"] == ["32", 0]
     if is_turbo:
         assert graph["7"]["inputs"]["cfg"] == 1.0
         assert graph["9"]["inputs"]["sigmas"] == turbo_workflow["sigmas"]

@@ -480,7 +480,9 @@ def build_qwen_image_edit_prompt(p, image_name=None, image_name2=None,
     if len(refs) > 1:
         pr["32"] = {"class_type": "LoadImage", "inputs": {"image": refs[1]}}
     for index, node_id in enumerate(("31", "32")[:len(refs)], 1):
-        pr["5"]["inputs"][f"image_{index}"] = [node_id, 0]
+        # ComfyUI's Autogrow schema is exposed by the API as flattened
+        # dynamic paths (e.g. "images.image_1"), not as Python kwargs.
+        pr["5"]["inputs"][f"images.image_{index}"] = [node_id, 0]
     if turbo:
         pr.update({
             "6": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
