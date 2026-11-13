@@ -45,9 +45,10 @@ def build_image_enhancement(image_name, preset, scale):
     if abs(scale / model_scale - 1.0) < 0.001:
         output["5"]["inputs"]["images"] = image_ref
     else:
-        output["5"] = {"class_type": "ImageScaleBy", "inputs": {
+        output["7"] = {"class_type": "ImageScaleBy", "inputs": {
             "image": image_ref, "upscale_method": "lanczos",
             "scale_by": scale / model_scale}}
+        output["5"]["inputs"]["images"] = ["7", 0]
     return output, choice
 
 
