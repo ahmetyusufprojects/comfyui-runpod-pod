@@ -19,7 +19,7 @@
     "flux3": {
       "group": "flux3",
       "diffusion_file": "flux3-image-klein-int8-convrot.safetensors",
-      "text_encoder_file": "qwen3vl_4b_int8_convrot.safetensors",
+      "text_encoder_file": "Huihui-Qwen3-VL-4B-Instruct-abliterated-int8_convrot.safetensors",
       "vae_file": "flux2-vae.safetensors",
       "steps": 16,
       "cfg": 1.0,
