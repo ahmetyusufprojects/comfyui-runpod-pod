@@ -1215,7 +1215,7 @@ def _is_dogrula(req):
     if model in (MODEL_KREA2, MODEL_ILLUSTRIOUS) and n_ref:
         return {"hata": "Seçilen model şu anda yalnızca sıfırdan görsel üretir. Referansla Flux 2 kullan."}
     if model in (MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO) and not n_ref:
-        return {"hata": "Qwen Image Edit 2511 düzenleme modeli için en az bir referans görsel ekle."}
+        return {"hata": "Qwen Image 2.1 düzenleme modeli için en az bir referans görsel ekle."}
     if req.get("flux3_bbox_mode") and model != MODEL_FLUX3:
         return {"hata": "Kutu yerleşimi yalnızca Flux 3 Klein ile kullanılabilir."}
     runpod_workflow = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
@@ -3086,8 +3086,6 @@ def _isi_calistir(job):
                     "text_encoder": workflow.get("text_encoder_file"),
                     "vae": workflow.get("vae_file"),
                 }
-                if model == MODEL_QWEN_IMAGE_EDIT_TURBO:
-                    p["model_files"]["lora"] = workflow.get("lora_file")
             elif model == MODEL_ILLUSTRIOUS:
                 p["model_files"] = {"checkpoint": workflow.get("checkpoint_file")}
             p["loras"] = pod_setup.ensure_loras(

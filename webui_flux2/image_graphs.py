@@ -52,15 +52,15 @@ KREA2_TEXT_ENCODER_FILE = _model_file(
 KREA2_VAE_FILE = _model_file("krea2", "vae_file", "qwen_image_vae.safetensors")
 QWEN_IMAGE_EDIT_DIFFUSION_FILE = _model_file(
     "qwen_image_edit", "diffusion_file",
-    "qwen_image_edit_2511_int8_convrot.safetensors")
+    "qwen_image_2.1_int8_convrot.safetensors")
 QWEN_IMAGE_EDIT_TEXT_ENCODER_FILE = _model_file(
     "qwen_image_edit", "text_encoder_file",
-    "qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors")
+    "qwen3vl_8b_int8_convrot_heretic.safetensors")
 QWEN_IMAGE_EDIT_VAE_FILE = _model_file(
-    "qwen_image_edit", "vae_file", "qwen_image_vae.safetensors")
-QWEN_IMAGE_EDIT_TURBO_LORA_FILE = _model_file(
-    "qwen_image_edit_turbo", "lora_file",
-    "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors")
+    "qwen_image_edit", "vae_file", "qwen_image_2.1_vae_bf16.safetensors")
+QWEN_IMAGE_EDIT_TURBO_DIFFUSION_FILE = _model_file(
+    "qwen_image_edit_turbo", "diffusion_file",
+    "qwen_image_2.1_turbo_int8_convrot.safetensors")
 ILLUSTRIOUS_CHECKPOINT_FILE = _model_file(
     "illustrious", "checkpoint_file",
     "WAI-NSFW-illustrious-SDXL-V14.0-V-Prediction.safetensors")
@@ -450,56 +450,69 @@ def build_krea2_prompt(p):
 
 def build_qwen_image_edit_prompt(p, image_name=None, image_name2=None,
                                  turbo=False):
-    """Qwen Image Edit 2511 graph with optional 4-step Lightning LoRA."""
+    """Qwen Image 2.1 edit graph; Turbo uses its published 8-step sigmas."""
     seed = p["seed"] if p["seed"] >= 0 else random.randint(0, 2 ** 31 - 1)
     files = p.get("model_files") or {}
-    diffusion = files.get("diffusion", QWEN_IMAGE_EDIT_DIFFUSION_FILE)
+    diffusion = files.get(
+        "diffusion", QWEN_IMAGE_EDIT_TURBO_DIFFUSION_FILE if turbo
+        else QWEN_IMAGE_EDIT_DIFFUSION_FILE)
     encoder = files.get("text_encoder", QWEN_IMAGE_EDIT_TEXT_ENCODER_FILE)
     vae = files.get("vae", QWEN_IMAGE_EDIT_VAE_FILE)
-    lora = files.get("lora", QWEN_IMAGE_EDIT_TURBO_LORA_FILE)
     refs = [ref for ref in (image_name, image_name2) if ref]
     if not refs:
-        raise ValueError("Qwen Image Edit 2511 için en az bir referans görsel gerekli.")
+        raise ValueError("Qwen Image 2.1 düzenlemesi için en az bir referans görsel gerekli.")
+    workflow = RUNPOD_WORKFLOWS.get(
+        "qwen_image_edit_turbo" if turbo else "qwen_image_edit", {})
     pr = {
         "1": {"class_type": "UNETLoader", "inputs": {
             "unet_name": diffusion, "weight_dtype": "default"}},
-        "2": {"class_type": "ModelSamplingAuraFlow", "inputs": {
-            "model": ["1", 0], "shift": 3.1}},
-        "3": {"class_type": "CFGNorm", "inputs": {
-            "model": ["2", 0], "strength": 1.0}},
-        "4": {"class_type": "CLIPLoader", "inputs": {
+        "2": {"class_type": "QwenImage21Cache", "inputs": {
+            "model": ["1", 0], "device": "auto", "dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {
             "clip_name": encoder, "type": "qwen_image", "device": "default"}},
-        "5": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
-        "6": {"class_type": "FluxKontextImageScale", "inputs": {
-            "image": ["31", 0]}},
-        "7": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
-            "clip": ["4", 0], "prompt": str(p.get("prompt") or ""),
-            "vae": ["5", 0], "image1": ["6", 0]}},
-        "8": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
-            "clip": ["4", 0], "prompt": str(p.get("negative") or ""),
-            "vae": ["5", 0], "image1": ["6", 0]}},
-        "9": {"class_type": "VAEEncode", "inputs": {
-            "pixels": ["6", 0], "vae": ["5", 0]}},
-        "10": {"class_type": "KSampler", "inputs": {
-            "model": ["3", 0], "positive": ["7", 0], "negative": ["8", 0],
-            "latent_image": ["9", 0], "seed": seed,
-            "steps": 4 if turbo else max(1, min(60, int(p.get("steps", 40)))),
-            "cfg": 1.0 if turbo else float(p.get("cfg", 4.0)),
-            "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
-        "11": {"class_type": "VAEDecode", "inputs": {
-            "samples": ["10", 0], "vae": ["5", 0]}},
-        "12": {"class_type": "SaveImage", "inputs": {
-            "images": ["11", 0], "filename_prefix": "webui-qwen-image-edit-2511"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
+        "5": {"class_type": "TextEncodeQwenImage21", "inputs": {
+            "clip": ["3", 0], "prompt": str(p.get("prompt") or ""),
+            "negative_prompt": str(p.get("negative") or ""), "vae": ["4", 0],
+            "resolution": 0}},
         "31": {"class_type": "LoadImage", "inputs": {"image": refs[0]}},
     }
     if len(refs) > 1:
         pr["32"] = {"class_type": "LoadImage", "inputs": {"image": refs[1]}}
-        pr["7"]["inputs"]["image2"] = ["32", 0]
-        pr["8"]["inputs"]["image2"] = ["32", 0]
+    for index, node_id in enumerate(("31", "32")[:len(refs)], 1):
+        pr["5"]["inputs"][f"image_{index}"] = [node_id, 0]
     if turbo:
-        pr["13"] = {"class_type": "LoraLoaderModelOnly", "inputs": {
-            "model": ["3", 0], "lora_name": lora, "strength_model": 1.0}}
-        pr["10"]["inputs"]["model"] = ["13", 0]
+        pr.update({
+            "6": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
+            "7": {"class_type": "CFGGuider", "inputs": {
+                "model": ["2", 0], "positive": ["5", 0],
+                "negative": ["5", 1], "cfg": 1.0}},
+            "8": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+            "9": {"class_type": "ManualSigmas", "inputs": {
+                "sigmas": workflow.get("sigmas", "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0")}},
+            "10": {"class_type": "SamplerCustomAdvanced", "inputs": {
+                "noise": ["6", 0], "guider": ["7", 0], "sampler": ["8", 0],
+                "sigmas": ["9", 0], "latent_image": ["5", 2]}},
+            "11": {"class_type": "VAEDecode", "inputs": {
+                "samples": ["10", 0], "vae": ["4", 0]}},
+            "12": {"class_type": "SaveImage", "inputs": {
+                "images": ["11", 0], "filename_prefix": "webui-qwen-image-2.1-turbo-edit"}},
+        })
+    else:
+        pr.update({
+            "6": {"class_type": "KSampler", "inputs": {
+                "model": ["2", 0], "positive": ["5", 0], "negative": ["5", 1],
+                "latent_image": ["5", 2], "seed": seed,
+                "steps": max(1, min(60, int(p.get("steps", workflow.get("steps", 25))))),
+                "cfg": float(p.get("cfg", workflow.get("cfg", 1.0))),
+                "sampler_name": p.get("sampler", workflow.get("sampler", "euler")),
+                "scheduler": p.get("scheduler", workflow.get("scheduler", "simple")),
+                "denoise": 1.0}},
+            "11": {"class_type": "VAEDecode", "inputs": {
+                "samples": ["6", 0], "vae": ["4", 0]}},
+            "12": {"class_type": "SaveImage", "inputs": {
+                "images": ["11", 0], "filename_prefix": "webui-qwen-image-2.1-edit"}},
+        })
     return pr, seed
 
 

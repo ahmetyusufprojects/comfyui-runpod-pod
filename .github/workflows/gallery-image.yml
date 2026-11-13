@@ -49,15 +49,16 @@ jobs:
           qwen_edit = catalog['groups']['qwen_image_edit']
           qwen_turbo = catalog['groups']['qwen_image_edit_turbo']
           assert qwen_edit['enabled'] is True
-          assert qwen_edit['files'][0]['name'] == 'qwen_image_edit_2511_int8_convrot.safetensors'
-          assert qwen_edit['files'][0]['sha256'] == '11b5af5ac601821d73930c84846c9a158e67177356daf927ce1c8d10f3963829'
-          assert qwen_edit['files'][1]['repo'] == 'ethanfel/Qwen2.5-VL-7B-Huihui-Abliterated-ComfyUI-ConvRot-INT8'
-          assert qwen_edit['files'][1]['sha256'] == '3dc4aae7dc34000c95de546cb220f1b67e51c86d7095fb9e3d19cec7032f5df7'
-          assert qwen_turbo['depends_on'] == ['qwen_image_edit']
-          assert qwen_turbo['files'][0]['name'] == 'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors'
-          assert qwen_turbo['files'][0]['sha256'] == '22226e8d05d354bb356627d428809f5afd7819399b077238a2b70a82883a904f'
-          assert catalog['workflows']['qwen_image_edit']['steps'] == 40
-          assert catalog['workflows']['qwen_image_edit_turbo']['steps'] == 4
+          assert qwen_edit['files'][0]['name'] == 'qwen_image_2.1_int8_convrot.safetensors'
+          assert qwen_edit['files'][1]['name'] == 'qwen3vl_8b_int8_convrot_heretic.safetensors'
+          assert qwen_edit['files'][1]['sha256'] == 'f15ce4275428e04f42cdb59e3a253cb290cae5de99259527f01d3d2e51153653'
+          assert 'depends_on' not in qwen_turbo
+          assert qwen_turbo['files'][0]['name'] == 'qwen_image_2.1_turbo_int8_convrot.safetensors'
+          assert qwen_turbo['files'][0]['sha256'] == 'fef670f4b008bb101c4075aac011c4dd20fdaa54186cf1171b28911ee218f145'
+          assert qwen_edit['files'][2]['sha256'] == 'b97c3e7a0e17fcfb434a72ebb75dbfeb5f07e233a98e4a4906ada39ebcd090c9'
+          assert catalog['workflows']['qwen_image_edit']['steps'] == 25
+          assert catalog['workflows']['qwen_image_edit_turbo']['steps'] == 8
+          assert len(catalog['workflows']['qwen_image_edit_turbo']['sigmas'].split(',')) == 9
           qwen = catalog['groups']['llm_qwen27b']['files']
           assert len(qwen) == 2
           assert qwen[0]['name'] == 'Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q4_K_M.gguf'

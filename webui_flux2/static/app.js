@@ -7,8 +7,8 @@ const RUNPOD_IMAGE_DEFAULTS = {
   flux2: {steps: 4, sampler: 'euler', cfg: 1},
   flux3: {steps: 16, sampler: 'euler', cfg: 1},
   krea2: {steps: 8, sampler: 'euler_ancestral', cfg: 1},
-  qwen_image_edit: {steps: 40, sampler: 'euler', cfg: 4},
-  qwen_image_edit_turbo: {steps: 4, sampler: 'euler', cfg: 1},
+  qwen_image_edit: {steps: 25, sampler: 'euler', cfg: 1},
+  qwen_image_edit_turbo: {steps: 8, sampler: 'euler', cfg: 1},
   illustrious: {steps: 28, sampler: 'euler_ancestral', cfg: 5}
 };
 let fotoB64 = null, fotoB64_2 = null, fotoMime = null, fotoMime2 = null, takipIs = null;
@@ -261,15 +261,15 @@ function uretimModGuncelle(){
   if(bboxWrap) bboxWrap.hidden = !RUNPOD_WEBUI || model !== 'flux3';
   const turboQwen = RUNPOD_WEBUI && model === 'qwen_image_edit_turbo';
   $('steps').disabled = turboQwen;
-  $('steps').title = turboQwen ? 'Turbo, bu model için doğrulanmış 4 adımda çalışır.' : '';
+  $('steps').title = turboQwen ? 'Turbo, yayımlanan sabit sigmalarla 8 adımda çalışır.' : '';
   $('cfg').disabled = turboQwen;
   $('cfg').title = turboQwen ? 'Turbo modelinin önerilen CFG değeri 1’dir.' : '';
   if($('runpodLoraPicker')) $('runpodLoraPicker').hidden = !RUNPOD_WEBUI || videoMu() ||
     model === 'qwen_image_edit' || model === 'qwen_image_edit_turbo';
   if(RUNPOD_WEBUI && $('runpodModelInfo')){
     const names = {z_image:'Moody Pro v13.2',flux2:'Flux 2 Klein',flux3:'Flux 3 Klein · 16 adım',
-      krea2:'Moody Krea Mix v7SE',qwen_image_edit:'Qwen Image Edit 2511 · Normal',
-      qwen_image_edit_turbo:'Qwen Image Edit 2511 · Turbo · 4 adım',illustrious:'Illustrious XL'};
+      krea2:'Moody Krea Mix v7SE',qwen_image_edit:'Qwen Image 2.1 · Düzenleme',
+      qwen_image_edit_turbo:'Qwen Image 2.1 · Turbo düzenleme · 8 adım',illustrious:'Illustrious XL'};
     $('runpodModelInfo').textContent = names[model] + (refSayisi() && model === 'flux2'
       ? ' · referans düzenleme' : (model === 'qwen_image_edit' || model === 'qwen_image_edit_turbo'
         ? ' · en az bir referans fotoğraf gerekir.'
@@ -288,9 +288,9 @@ function uretimModGuncelle(){
     else if(RUNPOD_WEBUI && runpodModel) bilgi.textContent =
       (runpodModel === 'flux2' || runpodModel === 'flux3' ? 'Referanslı düzenleme: ' : 'Seçili model: ') +
       ({z_image:'Z-Image · Moody Pro',flux2:'Flux 2 Klein',flux3:'Flux 3 Klein',krea2:'Krea 2',
-        qwen_image_edit:'Qwen Image Edit 2511 · Normal',
-        qwen_image_edit_turbo:'Qwen Image Edit 2511 · Turbo',illustrious:'Illustrious'}[model] || model) +
-      (model === 'qwen_image_edit_turbo' ? ' · 4 adım · CFG 1' : ' · ' + $('steps').value + ' adım');
+        qwen_image_edit:'Qwen Image 2.1 · Düzenleme',
+        qwen_image_edit_turbo:'Qwen Image 2.1 · Turbo düzenleme',illustrious:'Illustrious'}[model] || model) +
+      (model === 'qwen_image_edit_turbo' ? ' · 8 adım · CFG 1' : ' · ' + $('steps').value + ' adım');
     else if(refSayisi() >= 2) bilgi.textContent = 'Otomatik: Flux2 Klein · çift referans düzenleme · ' + $('steps').value + ' adım';
     else if(refSayisi() === 1) bilgi.textContent = 'Otomatik: Flux2 Klein · düzenleme (1 referans) · ' + $('steps').value + ' adım';
     else if(model === 'anima') bilgi.textContent = 'Anima Turbo v1.1 · saf görsel üretimi · ' + $('steps').value + ' adım';
@@ -962,7 +962,7 @@ if(wfEl) wfEl.onchange = e => {
   $('uretimVideoMod').classList.toggle('aktif', video);
   $('wfAciklama').textContent = video ?
     'Referans fotoğraftan sesli video üretir (en az 1 referans). Ölçü en uzun kenara göre alınır.' :
-    (RUNPOD_WEBUI ? 'Modeli aşağıdan seçebilirsin. Qwen Image Edit 2511 ve Flux 2 referanslı düzenlemeyi destekler.' :
+    (RUNPOD_WEBUI ? 'Modeli aşağıdan seçebilirsin. Qwen Image 2.1 ve Flux 2 referanslı düzenlemeyi destekler.' :
      'Model otomatik seçilir: referans varsa Flux2 Klein düzenleme; yoksa Z-Image Turbo veya Anima modeli.');
   uretimIcGorunum();
   uretimModGuncelle();
@@ -2354,8 +2354,8 @@ function gecmisKaydiGoster(k, meta, i, albumIndex, medyayiKoru){
   const detay = [];
   if(meta.width && meta.height) detay.push(meta.width + '×' + meta.height);
   if(meta.model) detay.push(({z_image: 'Z-Image', flux2: 'Flux 2 Klein', flux3: 'Flux 3 Klein',
-    krea2: 'Krea 2', qwen_image_edit: 'Qwen Image Edit 2511',
-    qwen_image_edit_turbo: 'Qwen Image Edit 2511 Turbo', illustrious: 'Illustrious', anima: 'Anima Turbo v1.1',
+    krea2: 'Krea 2', qwen_image_edit: 'Qwen Image 2.1',
+    qwen_image_edit_turbo: 'Qwen Image 2.1 Turbo', illustrious: 'Illustrious', anima: 'Anima Turbo v1.1',
     moody_anima: 'Anima Moody Mix v1.0'})[meta.model] || meta.model);
   if(meta.steps) detay.push(meta.steps + ' step');
   if(meta.seed != null) detay.push('seed ' + meta.seed);

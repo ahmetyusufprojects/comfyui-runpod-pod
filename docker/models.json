@@ -38,24 +38,24 @@
     },
     "qwen_image_edit": {
       "group": "qwen_image_edit",
-      "diffusion_file": "qwen_image_edit_2511_int8_convrot.safetensors",
-      "text_encoder_file": "qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors",
-      "vae_file": "qwen_image_vae.safetensors",
-      "steps": 40,
-      "cfg": 4.0,
+      "diffusion_file": "qwen_image_2.1_int8_convrot.safetensors",
+      "text_encoder_file": "qwen3vl_8b_int8_convrot_heretic.safetensors",
+      "vae_file": "qwen_image_2.1_vae_bf16.safetensors",
+      "steps": 25,
+      "cfg": 1.0,
       "sampler": "euler",
       "scheduler": "simple"
     },
     "qwen_image_edit_turbo": {
       "group": "qwen_image_edit_turbo",
-      "diffusion_file": "qwen_image_edit_2511_int8_convrot.safetensors",
-      "text_encoder_file": "qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors",
-      "vae_file": "qwen_image_vae.safetensors",
-      "lora_file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
-      "steps": 4,
+      "diffusion_file": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+      "text_encoder_file": "qwen3vl_8b_int8_convrot_heretic.safetensors",
+      "vae_file": "qwen_image_2.1_vae_bf16.safetensors",
+      "steps": 8,
       "cfg": 1.0,
       "sampler": "euler",
-      "scheduler": "simple",
+      "scheduler": "manual_sigmas",
+      "sigmas": "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0",
       "turbo": true
     },
     "illustrious": {
@@ -142,22 +142,23 @@
       ]
     },
     "qwen_image_edit": {
-      "label": "Qwen Image Edit 2511 · Normal",
+      "label": "Qwen Image 2.1 · Düzenleme",
       "enabled": true,
       "engine": "comfy",
       "files": [
-        {"repo":"Comfy-Org/Qwen-Image-Edit_ComfyUI","revision":"f68ace85e60b4a02a323e394253731947657b7d2","path":"split_files/diffusion_models/qwen_image_edit_2511_int8_convrot.safetensors","dir":"diffusion_models","name":"qwen_image_edit_2511_int8_convrot.safetensors","size":20499083824,"sha256":"11b5af5ac601821d73930c84846c9a158e67177356daf927ce1c8d10f3963829"},
-        {"repo":"ethanfel/Qwen2.5-VL-7B-Huihui-Abliterated-ComfyUI-ConvRot-INT8","revision":"7b977aaa08da1c8376e86fc3bd5581b56d9d2e10","path":"qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors","dir":"text_encoders","name":"qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors","size":10064106602,"sha256":"3dc4aae7dc34000c95de546cb220f1b67e51c86d7095fb9e3d19cec7032f5df7"},
-        {"repo":"Comfy-Org/Krea-2","revision":"588feaf955b08b9ac4723eeb751752ab045dba71","path":"vae/qwen_image_vae.safetensors","dir":"vae","name":"qwen_image_vae.safetensors","size":253806246,"sha256":"a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"}
+        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"diffusion_models/qwen_image_2.1_int8_convrot.safetensors","dir":"diffusion_models","name":"qwen_image_2.1_int8_convrot.safetensors","size":7256783064,"sha256":"4d7d9623b905d39ec965d45d4dccda9d83003382f3da4cad2ff03883e519cc53"},
+        {"repo":"Nic3301/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot","revision":"e99294ec796cc18da63698dafe2da0d33d43f066","path":"qwen3vl_8b_int8_convrot_heretic.safetensors","dir":"text_encoders","name":"qwen3vl_8b_int8_convrot_heretic.safetensors","size":9350828392,"sha256":"f15ce4275428e04f42cdb59e3a253cb290cae5de99259527f01d3d2e51153653"},
+        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"vae/qwen_image_2.1_vae_bf16.safetensors","dir":"vae","name":"qwen_image_2.1_vae_bf16.safetensors","size":675509688,"sha256":"b97c3e7a0e17fcfb434a72ebb75dbfeb5f07e233a98e4a4906ada39ebcd090c9"}
       ]
     },
     "qwen_image_edit_turbo": {
-      "label": "Qwen Image Edit 2511 · Turbo 4 adım",
+      "label": "Qwen Image 2.1 · Turbo düzenleme · 8 adım",
       "enabled": true,
       "engine": "comfy",
-      "depends_on": ["qwen_image_edit"],
       "files": [
-        {"repo":"lightx2v/Qwen-Image-Edit-2511-Lightning","revision":"107d238d68b8387e32843d0b4a2e24ceb0d3ad86","path":"Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors","dir":"loras","name":"Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors","size":849608296,"sha256":"22226e8d05d354bb356627d428809f5afd7819399b077238a2b70a82883a904f"}
+        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors","dir":"diffusion_models","name":"qwen_image_2.1_turbo_int8_convrot.safetensors","size":7256787829,"sha256":"fef670f4b008bb101c4075aac011c4dd20fdaa54186cf1171b28911ee218f145"},
+        {"repo":"Nic3301/Qwen-Image-2.1-Text-Encoder-Heretic-int8-convrot","revision":"e99294ec796cc18da63698dafe2da0d33d43f066","path":"qwen3vl_8b_int8_convrot_heretic.safetensors","dir":"text_encoders","name":"qwen3vl_8b_int8_convrot_heretic.safetensors","size":9350828392,"sha256":"f15ce4275428e04f42cdb59e3a253cb290cae5de99259527f01d3d2e51153653"},
+        {"repo":"Comfy-Org/Qwen-Image-2.1","revision":"aacf31a6d48e707f352ecba714cee0680da3479b","path":"vae/qwen_image_2.1_vae_bf16.safetensors","dir":"vae","name":"qwen_image_2.1_vae_bf16.safetensors","size":675509688,"sha256":"b97c3e7a0e17fcfb434a72ebb75dbfeb5f07e233a98e4a4906ada39ebcd090c9"}
       ]
     },
     "illustrious": {
