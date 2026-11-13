@@ -3090,7 +3090,8 @@ def _iyilestirme_istegi_dogrula(kullanici, req):
         if secim["video"] != (tur == "video"):
             raise ValueError("Seçilen dosya ile iyileştirme türü eşleşmiyor.")
         preset = req.get("enhance_preset")
-        if preset not in IMAGE_PRESETS and not (tur == "video" and preset in VIDEO_PRESETS):
+        allowed_presets = VIDEO_PRESETS if tur == "video" else IMAGE_PRESETS
+        if preset not in allowed_presets:
             raise ValueError("Görüntü iyileştirme seçeneği geçersiz.")
         scale = float(req.get("scale", 2))
         if scale not in (1.0, 1.5, 2.0, 3.0, 4.0):
