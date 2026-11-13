@@ -48,7 +48,7 @@ from image_graphs import (DIFFUSION_FILE, TEXT_ENCODER_FILE, VAE_FILE,
                           ANIMA_TEXT_ENCODER_FILE, ANIMA_VAE_FILE,
                           build_prompt, build_z_image_prompt, build_anima_prompt,
                           build_flux3_prompt, build_krea2_prompt,
-                          build_illustrious_prompt)
+                          build_illustrious_prompt, build_qwen_image_edit_prompt)
 from image_utils import (exif_duzelt as _exif_duzelt,
                          fotograf_hazirla as _fotograf_hazirla,
                          scale_to_max_side)
@@ -250,6 +250,8 @@ MODEL_ANIMA = "anima"
 MODEL_MOODY_ANIMA = "moody_anima"
 MODEL_FLUX3 = "flux3"
 MODEL_KREA2 = "krea2"
+MODEL_QWEN_IMAGE_EDIT = "qwen_image_edit"
+MODEL_QWEN_IMAGE_EDIT_TURBO = "qwen_image_edit_turbo"
 MODEL_ILLUSTRIOUS = "illustrious"
 
 # --- Moduler is sistemi: yeni is tipi eklemek mevcut kodu kirmamali ---
@@ -495,11 +497,13 @@ def _form_temizle(ham):
             elif k == "model":
                 if v in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_ANIMA,
                          MODEL_MOODY_ANIMA, MODEL_FLUX3, MODEL_KREA2,
+                         MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO,
                          MODEL_ILLUSTRIOUS):
                     temiz[k] = v
             elif k in ("image_model", "model_instance"):
                 allowed = ("auto", MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_FLUX3,
-                           MODEL_KREA2, MODEL_ILLUSTRIOUS)
+                           MODEL_KREA2, MODEL_QWEN_IMAGE_EDIT,
+                           MODEL_QWEN_IMAGE_EDIT_TURBO, MODEL_ILLUSTRIOUS)
                 if v in allowed or (RUNPOD_MODE and pod_setup.model_instance(v)):
                     temiz[k] = v
             elif k == "flux3_bbox_mode":
@@ -1205,14 +1209,19 @@ def _is_dogrula(req):
         return {"hata": "Anima kapatıldı. Görsel üretim ayarlarından Illustrious veya başka bir modeli seç."}
     if model not in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_ANIMA,
                      MODEL_MOODY_ANIMA, MODEL_FLUX3, MODEL_KREA2,
+                     MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO,
                      MODEL_ILLUSTRIOUS):
         return {"hata": "Görsel modeli tanınmadı."}
     if model in (MODEL_KREA2, MODEL_ILLUSTRIOUS) and n_ref:
         return {"hata": "Seçilen model şu anda yalnızca sıfırdan görsel üretir. Referansla Flux 2 kullan."}
+    if model in (MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO) and not n_ref:
+        return {"hata": "Qwen Image Edit 2511 düzenleme modeli için en az bir referans görsel ekle."}
     if req.get("flux3_bbox_mode") and model != MODEL_FLUX3:
         return {"hata": "Kutu yerleşimi yalnızca Flux 3 Klein ile kullanılabilir."}
     runpod_workflow = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
                        MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
+                       MODEL_QWEN_IMAGE_EDIT: "qwen_image_edit",
+                       MODEL_QWEN_IMAGE_EDIT_TURBO: "qwen_image_edit_turbo",
                        MODEL_ILLUSTRIOUS: "illustrious"}.get(model)
     if RUNPOD_MODE and runpod_workflow:
         instance_id = req.get("model_instance") or runpod_workflow
@@ -1975,7 +1984,9 @@ def _ws_ilerleme_dinle(prompt_id, client_id, nodlar):
 # Leave headroom for CUDA allocations after ComfyUI releases its models.
 LLM_VRAM_GEREK_MB = 9000 if RUNPOD_MODE else 2600
 RUNPOD_GORSEL_VRAM_MB = {"z_image": 10000, "flux2": 16500, "flux3": 12500,
-                         "krea2": 22500, "illustrious": 10500, "video": 26000}
+                         "krea2": 22500, "qwen_image_edit": 23000,
+                         "qwen_image_edit_turbo": 23000,
+                         "illustrious": 10500, "video": 26000}
 GPU_BOSALTMA_TAVAN_SN = 20
 GPU_BOSALTMA_BEKLE = 0.25   # nvidia-smi tek cagri ~80ms; sik poll yuklemeyi hizlandirir
 LLM_KAPATMA_BEKLE_SN = 30  # llama durmazsa goruntu isi bu kadar bekler
@@ -2955,7 +2966,9 @@ def _imge_modeli_isitme_karari(model, llama_canliydi):
     global _son_goruntu_etkilesim
     if RUNPOD_MODE:
         workflow_key = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
-                        MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2"}.get(model)
+                        MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
+                        MODEL_QWEN_IMAGE_EDIT: "qwen_image_edit",
+                        MODEL_QWEN_IMAGE_EDIT_TURBO: "qwen_image_edit_turbo"}.get(model)
         encoder = pod_setup.workflow(workflow_key).get("text_encoder_file") \
             if workflow_key else None
         if not encoder:
@@ -3031,6 +3044,7 @@ def _isi_calistir(job):
             model = MODEL_ILLUSTRIOUS
         if model not in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_ANIMA,
                          MODEL_MOODY_ANIMA, MODEL_FLUX3, MODEL_KREA2,
+                         MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO,
                          MODEL_ILLUSTRIOUS):
             model = MODEL_FLUX2
         model_instance = req.get("model_instance") or model
@@ -3062,13 +3076,18 @@ def _isi_calistir(job):
         if RUNPOD_MODE:
             workflow_key = {MODEL_FLUX2: "flux2", MODEL_Z_IMAGE: "z_image",
                             MODEL_FLUX3: "flux3", MODEL_KREA2: "krea2",
+                            MODEL_QWEN_IMAGE_EDIT: "qwen_image_edit",
+                            MODEL_QWEN_IMAGE_EDIT_TURBO: "qwen_image_edit_turbo",
                             MODEL_ILLUSTRIOUS: "illustrious"}[model]
-            if model in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_FLUX3, MODEL_KREA2):
+            if model in (MODEL_FLUX2, MODEL_Z_IMAGE, MODEL_FLUX3, MODEL_KREA2,
+                         MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO):
                 p["model_files"] = {
                     "diffusion": workflow.get("diffusion_file"),
                     "text_encoder": workflow.get("text_encoder_file"),
                     "vae": workflow.get("vae_file"),
                 }
+                if model == MODEL_QWEN_IMAGE_EDIT_TURBO:
+                    p["model_files"]["lora"] = workflow.get("lora_file")
             elif model == MODEL_ILLUSTRIOUS:
                 p["model_files"] = {"checkpoint": workflow.get("checkpoint_file")}
             p["loras"] = pod_setup.ensure_loras(
@@ -3093,6 +3112,10 @@ def _isi_calistir(job):
             prompt, seed = build_flux3_prompt(p, image_name, image_name2)
         elif model == MODEL_KREA2:
             prompt, seed = build_krea2_prompt(p)
+        elif model in (MODEL_QWEN_IMAGE_EDIT, MODEL_QWEN_IMAGE_EDIT_TURBO):
+            prompt, seed = build_qwen_image_edit_prompt(
+                p, image_name, image_name2,
+                turbo=(model == MODEL_QWEN_IMAGE_EDIT_TURBO))
         elif model == MODEL_ILLUSTRIOUS:
             prompt, seed = build_illustrious_prompt(p)
         else:

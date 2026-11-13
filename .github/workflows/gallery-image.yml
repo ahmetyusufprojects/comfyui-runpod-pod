@@ -28,6 +28,7 @@ jobs:
           node --check webui_flux2/static/app.js
           node --check webui_flux2/static/setup.js
           node tests/app_selection_smoke.js
+          python3 tests/qwen_image_edit_smoke.py
           python3 - <<'PY'
           import json, runpy
           from pathlib import Path
@@ -45,6 +46,18 @@ jobs:
           assert catalog['workflows']['illustrious']['lora_group'] == 'anime_desire_lora'
           assert catalog['workflows']['illustrious']['steps'] == 28
           assert catalog['workflows']['illustrious']['cfg'] == 5.0
+          qwen_edit = catalog['groups']['qwen_image_edit']
+          qwen_turbo = catalog['groups']['qwen_image_edit_turbo']
+          assert qwen_edit['enabled'] is True
+          assert qwen_edit['files'][0]['name'] == 'qwen_image_edit_2511_int8_convrot.safetensors'
+          assert qwen_edit['files'][0]['sha256'] == '11b5af5ac601821d73930c84846c9a158e67177356daf927ce1c8d10f3963829'
+          assert qwen_edit['files'][1]['repo'] == 'ethanfel/Qwen2.5-VL-7B-Huihui-Abliterated-ComfyUI-ConvRot-INT8'
+          assert qwen_edit['files'][1]['sha256'] == '3dc4aae7dc34000c95de546cb220f1b67e51c86d7095fb9e3d19cec7032f5df7'
+          assert qwen_turbo['depends_on'] == ['qwen_image_edit']
+          assert qwen_turbo['files'][0]['name'] == 'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors'
+          assert qwen_turbo['files'][0]['sha256'] == '22226e8d05d354bb356627d428809f5afd7819399b077238a2b70a82883a904f'
+          assert catalog['workflows']['qwen_image_edit']['steps'] == 40
+          assert catalog['workflows']['qwen_image_edit_turbo']['steps'] == 4
           qwen = catalog['groups']['llm_qwen27b']['files']
           assert len(qwen) == 2
           assert qwen[0]['name'] == 'Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q4_K_M.gguf'

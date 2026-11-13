@@ -36,6 +36,28 @@
       "sampler": "euler_ancestral",
       "scheduler": "beta"
     },
+    "qwen_image_edit": {
+      "group": "qwen_image_edit",
+      "diffusion_file": "qwen_image_edit_2511_int8_convrot.safetensors",
+      "text_encoder_file": "qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors",
+      "vae_file": "qwen_image_vae.safetensors",
+      "steps": 40,
+      "cfg": 4.0,
+      "sampler": "euler",
+      "scheduler": "simple"
+    },
+    "qwen_image_edit_turbo": {
+      "group": "qwen_image_edit_turbo",
+      "diffusion_file": "qwen_image_edit_2511_int8_convrot.safetensors",
+      "text_encoder_file": "qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors",
+      "vae_file": "qwen_image_vae.safetensors",
+      "lora_file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler": "euler",
+      "scheduler": "simple",
+      "turbo": true
+    },
     "illustrious": {
       "group": "illustrious",
       "checkpoint_file": "WAI-NSFW-illustrious-SDXL-V14.0-V-Prediction.safetensors",
@@ -117,6 +139,25 @@
         {"repo":"catlover1937/moody-krea-mix","revision":"e50cbbf63ea3f3bb2c2c25843375868207fd6f48","path":"Moody-Krea-Mix-v7SE_00001__clean_fp8.safetensors","dir":"diffusion_models","name":"Moody-Krea-Mix-v7SE_00001__clean_fp8.safetensors","size":14125457032,"sha256":"f91869cf9f27a5c72f33b62bca30e20ec6af303406cd0364d90c408f1d9b66b5"},
         {"repo":"Comfy-Org/Krea-2","revision":"588feaf955b08b9ac4723eeb751752ab045dba71","path":"text_encoders/qwen3vl_4b_fp8_scaled.safetensors","dir":"text_encoders","name":"qwen3vl_4b_fp8_scaled.safetensors","size":5242467968,"sha256":"54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094"},
         {"repo":"Comfy-Org/Krea-2","revision":"588feaf955b08b9ac4723eeb751752ab045dba71","path":"vae/qwen_image_vae.safetensors","dir":"vae","name":"qwen_image_vae.safetensors","size":253806246,"sha256":"a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"}
+      ]
+    },
+    "qwen_image_edit": {
+      "label": "Qwen Image Edit 2511 · Normal",
+      "enabled": true,
+      "engine": "comfy",
+      "files": [
+        {"repo":"Comfy-Org/Qwen-Image-Edit_ComfyUI","revision":"f68ace85e60b4a02a323e394253731947657b7d2","path":"split_files/diffusion_models/qwen_image_edit_2511_int8_convrot.safetensors","dir":"diffusion_models","name":"qwen_image_edit_2511_int8_convrot.safetensors","size":20499083824,"sha256":"11b5af5ac601821d73930c84846c9a158e67177356daf927ce1c8d10f3963829"},
+        {"repo":"ethanfel/Qwen2.5-VL-7B-Huihui-Abliterated-ComfyUI-ConvRot-INT8","revision":"7b977aaa08da1c8376e86fc3bd5581b56d9d2e10","path":"qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors","dir":"text_encoders","name":"qwen_2.5_vl_7b_huihui_abliterated_int8_convrot.safetensors","size":10064106602,"sha256":"3dc4aae7dc34000c95de546cb220f1b67e51c86d7095fb9e3d19cec7032f5df7"},
+        {"repo":"Comfy-Org/Qwen-Image_ComfyUI","revision":"1f12b17be14c89b026c51a91d67c32f84bb047bc","path":"split_files/vae/qwen_image_vae.safetensors","dir":"vae","name":"qwen_image_vae.safetensors","size":253806246,"sha256":"a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"}
+      ]
+    },
+    "qwen_image_edit_turbo": {
+      "label": "Qwen Image Edit 2511 · Turbo 4 adım",
+      "enabled": true,
+      "engine": "comfy",
+      "depends_on": ["qwen_image_edit"],
+      "files": [
+        {"repo":"lightx2v/Qwen-Image-Edit-2511-Lightning","revision":"107d238d68b8387e32843d0b4a2e24ceb0d3ad86","path":"Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors","dir":"loras","name":"Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors","size":849608296,"sha256":"22226e8d05d354bb356627d428809f5afd7819399b077238a2b70a82883a904f"}
       ]
     },
     "illustrious": {
