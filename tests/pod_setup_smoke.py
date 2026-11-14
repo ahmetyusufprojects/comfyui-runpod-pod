@@ -606,19 +606,22 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     saved_ready = pod_setup._ready
     saved_flex = pod_setup._flex
     saved_data_lock = pod_setup._data_lock
+    saved_root = pod_setup.ROOT
     saved_settings_path = pod_setup._system_settings_path
     saved_validate_mount = pod_setup.validate_mount
     saved_prefix = os.environ.get("POD_FLEX_PREFIX")
     saved_volume_mount = os.environ.get("POD_VOLUME_MOUNT")
+    saved_flex_key = os.environ.get("POD_FLEX_ENCRYPTION_KEY")
     saved_bootstrap = os.environ.pop("WEBUI_BOOTSTRAP_PASSWORD", None)
     saved_auto_download = os.environ.get("WEBUI_AUTO_DOWNLOAD")
     setup_volume = scratch / "auto-download-volume"
     setup_volume.mkdir()
-    settings_dir = setup_volume / "gallery-auto-test"
-    settings_dir.mkdir()
+    runtime_root = scratch / "runtime"
+    user_data = runtime_root / "auto-download-user-data"
+    user_data.mkdir(mode=0o700, parents=True, exist_ok=True)
     enabled_settings = copy.deepcopy(pod_setup._SYSTEM_SETTINGS_DEFAULT)
     enabled_settings["auto_download"] = True
-    (settings_dir / "system-settings.json").write_text(
+    (user_data / "system-settings.json").write_text(
         json.dumps(enabled_settings), encoding="utf-8")
     account_file = scratch / "auto-download-account.json"
     account_file.write_text("{}", encoding="utf-8")
@@ -634,8 +637,10 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
     try:
         os.environ["POD_FLEX_PREFIX"] = "gallery-auto-test"
         os.environ["POD_VOLUME_MOUNT"] = str(setup_volume)
+        os.environ["POD_FLEX_ENCRYPTION_KEY"] = "synthetic-test-key"
         os.environ["WEBUI_AUTO_DOWNLOAD"] = "1"
         pod_setup.validate_mount = lambda: setup_volume
+        pod_setup.ROOT = runtime_root
         pod_setup._ready = False
         pod_setup._flex = None
         pod_setup._data_lock = None
@@ -650,6 +655,7 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
         pod_setup._ready = saved_ready
         pod_setup._flex = saved_flex
         pod_setup._data_lock = saved_data_lock
+        pod_setup.ROOT = saved_root
         pod_setup._system_settings_path = saved_settings_path
         pod_setup.validate_mount = saved_validate_mount
         if saved_prefix is None:
@@ -660,6 +666,10 @@ with tempfile.TemporaryDirectory(prefix="pod-setup-test-") as temporary:
             os.environ.pop("POD_VOLUME_MOUNT", None)
         else:
             os.environ["POD_VOLUME_MOUNT"] = saved_volume_mount
+        if saved_flex_key is None:
+            os.environ.pop("POD_FLEX_ENCRYPTION_KEY", None)
+        else:
+            os.environ["POD_FLEX_ENCRYPTION_KEY"] = saved_flex_key
         if saved_bootstrap is not None:
             os.environ["WEBUI_BOOTSTRAP_PASSWORD"] = saved_bootstrap
         if saved_auto_download is None:

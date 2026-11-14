@@ -18,6 +18,9 @@ webui_flux2/promptlar.json
 webui_flux2/kutuphane/
 webui_flux2/gecmis/
 **/__pycache__/
+**/node_modules/
+webui_flux2/frontend/dist/
+webui_flux2/frontend/coverage/
 Gemma-4E4B-3/
 llama.cpp/
 docker_backup/

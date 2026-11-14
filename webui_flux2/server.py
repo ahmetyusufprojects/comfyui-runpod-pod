@@ -10,6 +10,7 @@ preset + maksimum boyuta olcekleme (en uzun kenar, 16'nin kati), steps/cfg/seed.
 Upscale YOK: istek uzerine kaldirildi, sadece saf uretim + duzenleme.
 """
 import base64
+import asyncio
 import contextlib
 import datetime as _dt
 import hashlib
@@ -63,6 +64,7 @@ DATA_ROOT = os.path.abspath(os.environ.get("WEBUI_DATA_ROOT", BASE_DIR))
 RUNPOD_MODE = os.environ.get("WEBUI_RUNPOD") == "1"
 SETUP_PORT = 8192
 _setup_httpd = None
+_asgi_servers = []
 _startup_error = None
 if RUNPOD_MODE:
     import pod_setup
@@ -3912,6 +3914,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with open(path, "rb") as stream:
             shutil.copyfileobj(stream, self.wfile, length=1024 * 1024)
 
+    def _serve_react_preview(self, parsed):
+        root = os.path.join(BASE_DIR, "frontend-dist")
+        if parsed.path in ("/", "/index.html"):
+            path = os.path.join(root, "index.html")
+            content_type = "text/html; charset=utf-8"
+        elif parsed.path.startswith("/assets/"):
+            name = parsed.path[len("/assets/"):]
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+                self._send(404, '{"hata":"bulunamadi"}')
+                return
+            path = os.path.join(root, "assets", name)
+            content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+            if content_type in ("text/javascript", "text/css"):
+                content_type += "; charset=utf-8"
+        else:
+            self._send(404, '{"hata":"bulunamadi"}')
+            return
+        try:
+            with open(path, "rb") as stream:
+                self._send(200, stream.read(), content_type)
+        except OSError:
+            self._send(404, '{"hata":"bulunamadi"}')
+
     # --- Auth guard'lari: tum veri/is endpoint'leri buradan gecer ---
     def _cerez_token(self):
         try:
@@ -4019,8 +4044,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _setup_get(self, parsed):
         if parsed.path in ("/", "/index.html"):
+            if parsed.query and urllib.parse.parse_qs(parsed.query).get("ui") == ["next"]:
+                self._serve_react_preview(parsed)
+                return
             with open(os.path.join(BASE_DIR, "setup.html"), "rb") as stream:
                 self._send(200, stream.read(), "text/html; charset=utf-8")
+            return
+        if parsed.path.startswith("/assets/"):
+            self._serve_react_preview(parsed)
             return
         if parsed.path.startswith("/static/"):
             name = parsed.path[len("/static/"):]
@@ -4038,13 +4069,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, body, content_type)
             return
         if parsed.path in ("/api/sunucu-hazir", "/api/setup-state"):
-            ready = pod_setup.is_ready()
-            storage = pod_setup.storage_status()
-            self._send(200, json.dumps({"hazir": ready,
-                                       "hata": bool(_startup_error),
-                                       "parolasiz": self._setup_parolasiz(),
-                                       **storage},
-                                  ensure_ascii=False))
+            code, payload = _setup_health_state()
+            self._send(code, json.dumps(payload, ensure_ascii=False))
             return
         if parsed.path == "/api/kurulum-durumu":
             if not pod_setup.is_ready():
@@ -4652,23 +4678,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._setup_get(parsed)
             return
         if parsed.path == "/api/sunucu-hazir":
-            kapaniyor = _kapatma_istegi.is_set()
-            hazir = not kapaniyor and (not RUNPOD_MODE or pod_setup.is_ready())
-            self._send(503 if kapaniyor else 200,
-                       json.dumps({"pid": os.getpid(), "hazir": hazir}))
+            code, payload = _main_health_state()
+            self._send(code, json.dumps(payload))
             return
         if (RUNPOD_MODE and not pod_setup.is_ready()
                 and parsed.path not in ("/", "/index.html", "/static/app.css",
-                                        "/static/app.js")):
+                                        "/static/app.js")
+                and not parsed.path.startswith("/assets/")):
             self._send(503, '{"hata":"Sistem hazırlanıyor."}')
             return
         if _kapatma_istegi.is_set() and parsed.path not in (
-                "/", "/index.html", "/static/app.css", "/static/app.js"):
+                "/", "/index.html", "/static/app.css", "/static/app.js") \
+                and not parsed.path.startswith("/assets/"):
             self._send(503, '{"hata":"WebUI güvenli biçimde kapanıyor"}')
             return
         if parsed.path in ("/", "/index.html"):
-            with open(os.path.join(BASE_DIR, "index.html"), "rb") as f:
-                self._send(200, f.read(), "text/html; charset=utf-8")
+            if (RUNPOD_MODE and parsed.query
+                    and urllib.parse.parse_qs(parsed.query).get("ui") == ["next"]):
+                self._serve_react_preview(parsed)
+            else:
+                with open(os.path.join(BASE_DIR, "index.html"), "rb") as f:
+                    self._send(200, f.read(), "text/html; charset=utf-8")
+        elif RUNPOD_MODE and parsed.path.startswith("/assets/"):
+            self._serve_react_preview(parsed)
         elif parsed.path.startswith("/static/"):
             ad = parsed.path[len("/static/"):]
             if ad not in ("app.css", "app.js"):
@@ -6082,6 +6114,22 @@ _kapatma_istegi = threading.Event()
 _kapatma_istek_kilit = threading.Lock()
 
 
+def _main_health_state():
+    kapaniyor = _kapatma_istegi.is_set()
+    hazir = not kapaniyor and (not RUNPOD_MODE or pod_setup.is_ready())
+    return (503 if kapaniyor else 200), {"pid": os.getpid(), "hazir": hazir}
+
+
+def _setup_health_state():
+    ready = pod_setup.is_ready()
+    storage = pod_setup.storage_status()
+    return 200, {"hazir": ready,
+                 "hata": bool(_startup_error),
+                 "parolasiz": (RUNPOD_MODE
+                               and os.environ.get("WEBUI_SETUP_PASSWORDLESS") == "1"),
+                 **storage}
+
+
 def duzgun_kapat(muhurlensin=True):
     """Isleri durdur; istenirse acik kasalari basariyla muhurlendikten sonra cik."""
     global _duzgun_kapatildi
@@ -6131,6 +6179,8 @@ def _sunucu_kapat_arka(muhurlensin=True):
             _httpd.shutdown()
             if _setup_httpd is not None:
                 _setup_httpd.shutdown()
+        for server in tuple(_asgi_servers):
+            server.should_exit = True
     except Exception as e:
         print("WebUI sunucusu durdurulamadı: %s" % e, flush=True)
 
@@ -6173,10 +6223,117 @@ class WebUIServer(http.server.ThreadingHTTPServer):
         super().server_close()
 
 
+def _runpod_prepare():
+    """Prepare RunPod persistence and services while installer stays available."""
+    global _startup_error
+    try:
+        pod_setup.prepare_data(DATA_ROOT, _auth_store)
+        kasa.kalici_kopya = pod_setup.checkpoint
+        _auth_store.kalici_kopya = pod_setup.checkpoint
+        comfy_restart = app_update.ROOT / 'restart-comfy'
+        if comfy_restart.is_file():
+            try:
+                pod_setup._launch_comfy()
+                comfy_restart.unlink()
+            except Exception as exc:
+                _system_event('ComfyUI yeniden başlatılamadı: ' + type(exc).__name__)
+    except Exception as exc:
+        _startup_error = type(exc).__name__
+        detail = " ".join(str(exc).split())
+        detail = re.sub(r"(?i)(hf_[a-z0-9_-]{12,}|(?:token|password|secret)\s*[=:]\s*\S+)",
+                        "[REDACTED]", detail)[:240]
+        diagnostic = _startup_error + (": " + detail if detail else "")
+        _system_event("Pod hazırlığı tamamlanamadı (" + diagnostic + ").")
+        print("Pod hazırlığı tamamlanamadı (%s); 8192 portundaki durum ekranı açık kalacak."
+              % diagnostic, flush=True)
+
+
+async def _run_asgi_servers():
+    """Serve both existing RunPod ports through FastAPI's compatibility seam."""
+    import uvicorn
+    from api import create_apps
+
+    apps = create_apps(Handler, main_health=_main_health_state,
+                       setup_health=_setup_health_state)
+    config = {
+        "host": "0.0.0.0", "access_log": False, "log_level": "warning",
+        "lifespan": "off", "timeout_keep_alive": 10,
+    }
+
+    class _SetupServer(uvicorn.Server):
+        # Only the main server owns process signal handlers; both share one loop.
+        def install_signal_handlers(self):
+            return None
+
+    setup_server = _SetupServer(uvicorn.Config(apps.setup, port=SETUP_PORT, **config))
+    main_server = uvicorn.Server(uvicorn.Config(apps.main, port=8189, **config))
+    _asgi_servers[:] = [main_server, setup_server]
+    # The installer starts before the main listener so it can report progress.
+    # Handle a stop request during that interval without interrupting the
+    # synchronous data preparation halfway through a snapshot write.
+    stop_requested = asyncio.Event()
+
+    def request_stop(_signum, _frame):
+        stop_requested.set()
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+    setup_task = asyncio.create_task(setup_server.serve())
+    tasks = [setup_task]
+
+    async def wait_for_start(server, task):
+        deadline = time.monotonic() + 30
+        while not server.started:
+            if task.done():
+                await task
+                raise RuntimeError("ASGI sunucusu başlatılamadı.")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Kurucu ASGI sunucusu 30 saniyede başlamadı.")
+            await asyncio.sleep(0.05)
+
+    try:
+        await wait_for_start(setup_server, setup_task)
+        _system_event("Kurulum ekranı 8192 portunda hazır.")
+        print("Kurulum arayüzü: http://0.0.0.0:%d" % SETUP_PORT, flush=True)
+        if stop_requested.is_set():
+            return
+        # Keep 8192 responsive while volume checks or startup reconciliation run.
+        await asyncio.to_thread(_runpod_prepare)
+        if stop_requested.is_set():
+            return
+        main_task = asyncio.create_task(main_server.serve())
+        tasks.append(main_task)
+        await wait_for_start(main_server, main_task)
+        _system_event("WebUI 8189 portunda hazır.")
+        print("Flux2 WebUI: http://0.0.0.0:8189 (RunPod ASGI)", flush=True)
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for server in _asgi_servers:
+            server.should_exit = True
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        failure = next((result for result in results if isinstance(result, BaseException)), None)
+        if failure is not None:
+            raise failure
+    finally:
+        for server in _asgi_servers:
+            server.should_exit = True
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        _asgi_servers.clear()
+        if not _duzgun_kapatildi:
+            await asyncio.to_thread(duzgun_kapat)
+
+
 if __name__ == "__main__":
     if RUNPOD_MODE:
         os.umask(0o077)
         pod_setup.validate_mount()
+        if os.environ.get("WEBUI_ASGI") == "1":
+            try:
+                asyncio.run(_run_asgi_servers())
+            except KeyboardInterrupt:
+                if not _duzgun_kapatildi:
+                    duzgun_kapat()
+            raise SystemExit(0)
         _setup_httpd = WebUIServer(("0.0.0.0", SETUP_PORT), Handler)
         threading.Thread(target=_setup_httpd.serve_forever,
                          kwargs={"poll_interval": 0.2}, daemon=True,

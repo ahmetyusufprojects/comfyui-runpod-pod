@@ -54,7 +54,7 @@ def check_volume_optional_first_run():
             raise AssertionError("first admin must be created through the WebUI")
 
     keys = ("POD_VOLUME_MOUNT", "POD_ALLOW_EPHEMERAL_DATA", "POD_FLEX_PREFIX",
-            "WEBUI_AUTO_DOWNLOAD")
+            "POD_FLEX_ENCRYPTION_KEY", "WEBUI_AUTO_DOWNLOAD")
     old_env = {key: os.environ.get(key) for key in keys}
     names = ("ROOT", "COMFY", "_data_lock", "_flex", "_ready",
              "_system_settings_path", "_storage_mode", "validate_mount")
@@ -72,6 +72,7 @@ def check_volume_optional_first_run():
     try:
         os.environ["POD_ALLOW_EPHEMERAL_DATA"] = "1"
         os.environ["POD_FLEX_PREFIX"] = "gallery-webui"
+        os.environ.pop("POD_FLEX_ENCRYPTION_KEY", None)
         os.environ["WEBUI_AUTO_DOWNLOAD"] = "0"
         with tempfile.TemporaryDirectory(prefix="gallery-volume-check-") as temporary:
             base = Path(temporary)
@@ -108,11 +109,25 @@ def check_volume_optional_first_run():
             mounted_account = EmptyAccounts(user_data / "kullanicilar.json")
             pod_setup.prepare_data(str(user_data), mounted_account)
             assert pod_setup.storage_status() == {
-                "storage_mode": "persistent", "storage_persistent": True}
+                "storage_mode": "ephemeral", "storage_persistent": False}
             assert not Path(mounted_account.dosya).exists()
-            assert pod_setup._flex is not None
-            assert pod_setup._system_settings_path == volume / "gallery-webui" / "system-settings.json"
+            assert pod_setup._flex is None
+            assert pod_setup._system_settings_path == user_data / "system-settings.json"
             assert pod_setup._system_settings_versions()
+            assert not (volume / "gallery-webui").exists()
+            close_lock()
+
+            os.environ["POD_FLEX_ENCRYPTION_KEY"] = "synthetic-test-key"
+            pod_setup._ready = False
+            pod_setup._system_settings_path = None
+            pod_setup._storage_mode = "unknown"
+            encrypted_account = EmptyAccounts(user_data / "kullanicilar.json")
+            pod_setup.prepare_data(str(user_data), encrypted_account)
+            assert pod_setup.storage_status() == {
+                "storage_mode": "persistent", "storage_persistent": True}
+            assert pod_setup._flex is not None
+            assert pod_setup._system_settings_path == user_data / "system-settings.json"
+            assert not list((volume / "gallery-webui").iterdir())
             close_lock()
     finally:
         close_lock()
@@ -123,7 +138,7 @@ def check_volume_optional_first_run():
                 os.environ[key] = value
         for name, value in old_state.items():
             setattr(pod_setup, name, value)
-    print("no-volume and empty-volume startup both remain ready for first-account creation")
+    print("no-volume, unkeyed-volume, and keyed-volume startup preserve the encrypted-only boundary")
 
 
 def check_storage_clean_allowlist():

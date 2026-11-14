@@ -25,13 +25,16 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      - name: Install API contract test tools
+        run: python3 -m pip install --disable-pip-version-check fastapi==0.136.3 httpx==0.28.1 pytest==9.1.1
       - name: Check Python and setup UI syntax
         run: |
           set -eu
           python3 -m py_compile webui_flux2/*.py pod-launch.py tests/*.py
+          PYTHONPATH=webui_flux2 python3 -m pytest -q tests/test_api_legacy_adapter.py
           node --check webui_flux2/static/app.js
           node --check webui_flux2/static/setup.js
           node tests/app_selection_smoke.js
@@ -214,6 +217,15 @@ jobs:
           installer = json.load(urllib.request.urlopen(
               "http://127.0.0.1:8192/api/pod-kurulum", timeout=2))
           assert installer["hazir"] is True and installer["storage_mode"] == "ephemeral", installer
+          import re
+          for port in (8189, 8192):
+              preview = urllib.request.urlopen(
+                  f"http://127.0.0.1:{port}/?ui=next", timeout=3).read()
+              match = re.search(rb'src="(/assets/[^\"]+\.js)"', preview)
+              assert match and b"ComfyUI WebUI" in preview, preview[:500]
+              bundle = urllib.request.urlopen(
+                  f"http://127.0.0.1:{port}" + match.group(1).decode(), timeout=3).read()
+              assert b"Sistem durumu" in bundle or b"S\xc4\xb0STEM DURUMU" in bundle
           password = secrets.token_urlsafe(18)
           payload = json.dumps({"kullanici": "synthetic", "sifre": password}).encode()
           request = urllib.request.Request("http://127.0.0.1:8189/api/kurulum",
@@ -269,6 +281,11 @@ jobs:
           set -eu
           docker cp tests/installer_storage_archive_smoke.py gallery-check:/tmp/installer_storage_archive_smoke.py
           docker exec gallery-check /opt/webui-venv/bin/python /tmp/installer_storage_archive_smoke.py
+      - name: Verify encrypted-only Flex snapshots
+        run: |
+          set -eu
+          docker cp tests/flex_store_encryption_smoke.py gallery-check:/tmp/flex_store_encryption_smoke.py
+          docker exec gallery-check /opt/webui-venv/bin/python /tmp/flex_store_encryption_smoke.py
       - name: Verify application update and rollback
         run: |
           set -eu

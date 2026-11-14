@@ -1,12 +1,19 @@
+FROM node:24-bookworm-slim AS frontend-build
+WORKDIR /frontend
+COPY webui_flux2/frontend/package.json webui_flux2/frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY webui_flux2/frontend/ ./
+RUN npm test && npm run build
+
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl ffmpeg git gnupg libgomp1 python3 python3-venv tini \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/webui-venv \
-    && /opt/webui-venv/bin/pip install --no-cache-dir Pillow==12.2.0 huggingface-hub==0.36.2 uv==0.13.7 psutil==7.0.0 boto3==1.44.3
+    && /opt/webui-venv/bin/pip install --no-cache-dir Pillow==12.2.0 huggingface-hub==0.36.2 uv==0.13.7 psutil==7.0.0 boto3==1.44.3 fastapi==0.136.3 uvicorn==0.51.0
 
-ENV WEBUI_RUNPOD=1 WEBUI_SETUP_PASSWORDLESS=1 PYTHONUNBUFFERED=1 \
+ENV WEBUI_RUNPOD=1 WEBUI_ASGI=1 WEBUI_SETUP_PASSWORDLESS=1 PYTHONUNBUFFERED=1 \
     POD_RUNTIME_ROOT=/opt/runtime POD_VOLUME_MOUNT=/workspace POD_MODEL_STORAGE=/models \
     POD_ALLOW_EPHEMERAL_DATA=1 \
     POD_MODEL_CATALOG=/opt/pod/models.json \
@@ -19,6 +26,8 @@ ENV WEBUI_RUNPOD=1 WEBUI_SETUP_PASSWORDLESS=1 PYTHONUNBUFFERED=1 \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 COPY webui_flux2/arsiv.py webui_flux2/auth.py webui_flux2/comfy_client.py webui_flux2/enhancement_graphs.py webui_flux2/flex_store.py webui_flux2/image_graphs.py webui_flux2/image_utils.py webui_flux2/index.html webui_flux2/kasa.py webui_flux2/llm.py webui_flux2/pod_setup.py webui_flux2/app_update.py webui_flux2/prompt_store.py webui_flux2/prompt_translation.py webui_flux2/r2_backups.py webui_flux2/server.py webui_flux2/video_r2v_api.json webui_flux2/video_wan22_api.json /opt/webui_flux2/
+COPY webui_flux2/api/ /opt/webui_flux2/api/
+COPY --from=frontend-build /frontend/dist/ /opt/webui_flux2/frontend-dist/
 COPY webui_flux2/static/app.css webui_flux2/static/app.js /opt/webui_flux2/static/
 COPY webui_flux2/setup.html /opt/webui_flux2/
 COPY webui_flux2/static/setup.css webui_flux2/static/setup.js /opt/webui_flux2/static/

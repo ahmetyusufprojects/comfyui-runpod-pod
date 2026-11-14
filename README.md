@@ -1,83 +1,37 @@
-# ComfyUI Runpod Pod
+# ComfyUI WebUI — RunPod dağıtımı
 
-Single-container Runpod Pod deployment for the local ComfyUI and `webui_flux2`
-application.
+Bu depo RunPod için küçük bir uygulama imajı üretir. ComfyUI, modeller ve çalışma zamanı ilk gerektiğinde Pod container diskine kurulur/indirilir; WebUI ve bağımsız kurucu aynı container içinde çalışır. Güncel dağıtım `docker/Dockerfile.gallery` ve `docker/supervisor.py` üzerinden yapılır. Eski bootstrap betikleri ve eski RunPod talimatları güncel dağıtımı anlatmaz.
 
-## What is included
+## Servisler
 
-- Official `runpod/worker-comfyui:main-base` CUDA base image.
-- ComfyUI source pinned to the tested local revision.
-- `webui_flux2` application source.
-- llama.cpp server built with CUDA support.
-- Runtime model downloads to ephemeral container storage at `/models`.
-- User vaults and history under the only Network Volume path,
-  `/workspace/user-data`.
+| Adres/port | İşlev |
+| --- | --- |
+| `8189/http` | Ana WebUI: hesap/kasa, üretim, prompt stüdyosu, sohbet, arşiv, ayarlar ve izleme |
+| `8192/http` | Bağımsız kurucu: indirme kuyruğu, modeller, sistem ayarları, günlükler, yedekleme ve bakım |
+| `8188` | Container içindeki ComfyUI API’si; RunPod HTTP portu olarak sunulmaz |
 
-Models, llama.cpp runtime files, source checkout, and service logs are
-intentionally kept on the container disk. They are not stored on the Network
-Volume and may be downloaded again when a new Pod is created. Only
-`/workspace/user-data` is persistent. Set `HF_TOKEN` in the Pod environment
-when Hugging Face access requires authentication.
+RunPod imajında 8189 ve 8192 portları FastAPI/Uvicorn ile açılır. Mevcut API yolları ve JSON yanıtları, geçiş süresince `server.py` içindeki eski Handler'a uyumluluk katmanından aktarılır; sağlık uçları FastAPI router'larına taşınmıştır. Windows portable çalışması değişmeden `http.server` yolunu kullanır.
 
-The model downloader is strict by default. For a service-only boot test, set
-`SKIP_MODEL_DOWNLOAD=1`; for a real deployment leave it at `0`. If a model
-repository returns Hugging Face `401`, add a valid `HF_TOKEN` environment
-variable to the Pod. The token is used only for the download process. The
-current core manifest uses the public `Comfy-Org/Flux-2-Klein-4B` and
-`Comfy-Org/Z-Image-Turbo` repositories. Gemma files are downloaded only when
-`DOWNLOAD_LLM_MODELS=1` is set, because that repository requires authorization.
+Eski, tam işlevli arayüz varsayılan olarak açılır. React/TypeScript arayüzünün ilk durum ekranı iki portta `/?ui=next` adresinden önizlenebilir; üretim, sohbet, arşiv ve kurucu işlevleri henüz bu ekrana taşınmadı. Uygulamanın veri akışlarını kademeli geçirmek için bu önizleme varsayılan arayüzü değiştirmez. Ayrıntı: [mimari](docs/architecture.md) ve [ADR’ler](docs/decisions/).
 
-The Pod starts ComfyUI and WebUI before model downloads begin. The WebUI system
-monitor shows the queue and allows reordering during the first 60 seconds;
-without a change it uses Gemma (when enabled), Flux 2 Klein, then Z-Image Turbo.
-Completed groups are immediately usable while later groups continue downloading.
-Once a file download starts, reordering is refused so active downloads are not
-interrupted.
+## İmaj ve sürüm etiketleri
 
-## Runpod settings
+GitHub Actions, `.github/workflows/gallery-image.yml` ile Linux imajını uzakta derler. Docker build aşamasında Node 24 ile React/TypeScript arayüzünü sınar ve üretim paketini çıkarır; Python API sözleşmeleri ve sentetik container açılışı da denetlenir. Başarılı yayında `ghcr.io/ahmetyusufprojects/comfyui-runpod-pod:gallery-<commit>` ve `:latest`, `:beta` etiketleri üretilir. `:stable` yalnızca açık promosyonla/`docker/stable-image.txt` değişikliğiyle güncellenir; yeni imaj mevcut Pod’u veya RunPod şablonunu kendiliğinden değiştirmez.
 
-- Pod, not Serverless.
-- Container disk: 120 GB.
-- Network Volume: disabled by default. Pass a positive `-VolumeInGb` only when
-  persistent user data is intentionally required.
-- When creating a Pod from the template, pass `--container-disk-in-gb 120`
-  explicitly; Runpod can otherwise fall back to its 20 GB default.
-- For low-cost tests, use an available community GPU and
-  `--cloud-type COMMUNITY`; do not use secure RTX 4090/A40 pricing unless
-  explicitly required. Prefer RTX A5000, RTX 4090 community, or another
-  available GPU at or below the target hourly rate.
-- Expose HTTP port: `8189`.
-- Optional internal diagnostics: `8188`.
-- Do not use Docker Compose; the image runs all services through
-  `docker/start.sh`.
+Güncel dağıtım dalı `runpod/gallery-first`’tir. `pod-launch.py` varsayılan olarak beta kanalını ve en fazla 0,32 USD/saat GPU bütçesini seçer; kararlı kanal açıkça seçilmelidir. İmaj şablonları ayrıca etiketlenir. Secrets yalnız RunPod/GitHub ayarlarından sağlanır; değerleri kaynak koda veya loglara koymayın.
 
-## Build-free deployment
+## Depolama sınırı
 
-Use the official `runpod/worker-comfyui:main-base` image directly. It contains
-the CUDA, Python, PyTorch, and ComfyUI runtime and is not a model. The template's
-startup command downloads `docker/bootstrap-runpod.sh` from this repository,
-installs the application source and a CUDA 12.8 llama-server release, and then
-starts both services. No local Docker build or 5 GB base-image download is
-needed on Windows.
+- Modeller `/models` altında; ComfyUI, önbellekler ve uygulama çalışma dosyaları `/opt/runtime` altındadır. Bunlar container diskindedir ve container yeniden yaratıldığında kaybolabilir.
+- Ana uygulama verisinin varsayılan kökü `/opt/runtime/user-data`’dır. Modeller, kullanıcı çalışma dosyaları ve uygulama ayarları container diskinde kalır. Flex'e kalıcılık yalnız `POD_FLEX_PREFIX` ve RunPod Secret olarak verilen `POD_FLEX_ENCRYPTION_KEY` birlikte varsa açılır. Bu durumda Flex'e yalnız GPG/AES-256 ile şifrelenmiş, doğrulanan `.tar.gpg` anlık görüntüsü yazılır; hesap kayıtları, genel ayarlar ve zaten şifreli kasa dosyaları bu arşivin içindedir. Anahtar yoksa uygulama container diskinde ephemeral çalışır ve volume'e yazmaz.
+- R2 yedekleri `r2_backups.py` üzerinden şifreli arşiv olarak işlenir. Yeni imaj, anahtar sağlandığında tanıdığı eski `.tar` hesap snapshot'larını ve `system-settings*.json` dosyalarını şifreleyip doğrular; ancak bundan sonra bu eski kaynak dosyaları kaldırır. Tanınmayan dosyalar otomatik taşınmaz veya silinmez. Bu uygulama geçmişteki tüm volume içeriğinin şifreli olduğu anlamına gelmez. Ayrıntı: [depolama rehberi](docs/feature-guides/persistent-data-and-backups.md).
 
-Runpod's HTTP proxy URL is:
-`https://<POD_ID>-8189.proxy.runpod.net`
+## Model kataloğu ve güncelleme
 
-The official Runpod worker image uses `/comfyui` and already supplies the
-CUDA/Python runtime. The startup script overlays this application's files
-without placing runtime files on Network Storage.
+`docker/models.json` şema 2 model ve workflow kataloğunun tek kaynağıdır. Grup dosyaları, motoru, hedef yol/adı, sabit kaynak revizyonu ve bağımlılıkları burada tanımlanır; iş akışı profilleri `workflows` bölümündedir. Model/workflow ekleme ve katalog doğrulaması için [model rehberine](docs/feature-guides/adding-a-model-and-workflow.md) bakın.
 
-Example volume-free test command:
+Uygulama güncellemesi `app_update.py` tarafından mevcut imajın içerdiği dosya kümesi ve katalog için yapılır. Dockerfile veya supervisor değişiklikleri canlı uygulama güncellemesi değildir; yeni imaj gerekir. İzin verilen dosya listesi React/statik dosya veya yeni modül eklendiğinde güncellenmelidir.
 
-```powershell
-runpodctl pod create --name comfyui-e2e --template-id fccm9qs9s6 `
-  --gpu-id "NVIDIA RTX A5000" --cloud-type COMMUNITY `
-  --container-disk-in-gb 120 --volume-in-gb 0
-```
+## Geliştirme
 
-## Sources
-
-- [Runpod ComfyUI base image](https://github.com/runpod-workers/comfyui-base)
-- [Runpod port exposure](https://docs.runpod.io/pods/configuration/expose-ports)
-- [Runpod Pod management](https://docs.runpod.io/pods/manage-pods)
-- [Runpod template CLI](https://github.com/runpod/runpodctl)
+Katkı akışı, mevcut komutlar ve güvenli doğrulama sınırları için [CONTRIBUTING.md](CONTRIBUTING.md) ve [AGENTS.md](AGENTS.md) dosyalarını okuyun. Bu depo belgeleri uygulama davranışını değiştirmez. API/UI özelliği ekleme: [rehber](docs/feature-guides/adding-an-api-ui-feature.md).

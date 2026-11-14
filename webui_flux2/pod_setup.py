@@ -1157,7 +1157,8 @@ def prepare_data(data_root, accounts):
     volume_attached = mount == requested_mount and mount != Path("/")
     _flex = None
     flex_prefix = os.environ.get("POD_FLEX_PREFIX")
-    if volume_attached and flex_prefix:
+    flex_key = os.environ.get("POD_FLEX_ENCRYPTION_KEY", "")
+    if volume_attached and flex_prefix and flex_key:
         from flex_store import FlexStore
 
         if not flex_prefix.isascii() or not flex_prefix.replace("-", "").isalnum():
@@ -1168,24 +1169,36 @@ def prepare_data(data_root, accounts):
         if snapshots.parent != mount:
             raise RuntimeError("Flex dizini seçilen bağlama noktasında olmalı.")
         snapshots.mkdir(mode=0o700, parents=True, exist_ok=True)
-        _system_settings_path = snapshots / "system-settings.json"
         _flex = FlexStore(target, snapshots)
-    elif volume_attached:
-        if not target.is_relative_to(mount) or target == mount:
-            raise RuntimeError("Kullanıcı dizini kalıcı diskin altında olmalı.")
+        _flex.migrate_legacy()
+        # Settings are written on the container disk and enter Flex only inside
+        # the encrypted snapshot. Never write a plain JSON object to the volume.
         _system_settings_path = target / "system-settings.json"
     else:
+        if volume_attached and target.is_relative_to(mount):
+            raise RuntimeError(
+                "Kullanıcı kayıt dizini ağ volume'ünde olamaz; container diskini seçin.")
         if not target.is_relative_to(ROOT) or target == ROOT:
             raise RuntimeError("Volume yokken kullanıcı verileri container diskinde olmalı.")
         _system_settings_path = target / "system-settings.json"
-        print("Kalıcı volume bağlı değil; kullanıcı verileri ve genel ayarlar container diskinde.",
-              flush=True)
-    _storage_mode = "persistent" if volume_attached else "ephemeral"
+        if volume_attached and flex_prefix and not flex_key:
+            print("Flex kalıcılığı kapalı; POD_FLEX_ENCRYPTION_KEY olmadan volume'a yazılmayacak.",
+                  flush=True)
+        elif volume_attached:
+            print("Şifreli Flex ayarı yok; kullanıcı kayıtları ve ayarlar container diskinde.",
+                  flush=True)
+        else:
+            print("Kalıcı volume bağlı değil; kullanıcı verileri ve genel ayarlar container diskinde.",
+                  flush=True)
+    _storage_mode = "persistent" if _flex is not None else "ephemeral"
     target.mkdir(mode=0o700, parents=True, exist_ok=True)
     _data_lock = (target / ".webui.lock").open("a")
     fcntl.flock(_data_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     if _flex is not None and not Path(accounts.dosya).exists():
         _flex.restore()
+    if (_flex is not None and not _system_settings_path.is_file()
+            and not _system_settings_versions()):
+        _flex.restore_settings()
     if not accounts.kurulu_mu() and Path(accounts.dosya).exists():
         raise RuntimeError("Kullanıcı kaydı boş veya okunamıyor; yeni hesap oluşturulmadı.")
     # No account is a normal first-run state. The WebUI asks the owner to
@@ -1199,6 +1212,8 @@ def prepare_data(data_root, accounts):
     _system_settings_write(settings)
     _apply_saved_links(settings)
     _ready = True
+    if _flex is not None:
+        _flex.save()
     if (settings.get("auto_download")
             and os.environ.get("WEBUI_AUTO_DOWNLOAD", "1") != "0"):
         order = list(settings.get("default_download_order", []))
