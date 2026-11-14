@@ -293,8 +293,14 @@ def refresh_after_system_import():
             if group in CATALOG and CATALOG[group].get("enabled", True)]
         _apply_saved_links(settings)
         _system_settings_write(settings)
-        return {"model_count": len(settings.get("model_instances", [])),
-                "lora_count": len(settings.get("loras", []))}
+        order = list(settings.get("default_download_order", []))
+        order.extend(entry["group"] for entry in settings.get("loras", [])
+                     if entry.get("auto_download") and entry["group"] not in order)
+        models = len(settings.get("model_instances", []))
+        loras = len(settings.get("loras", []))
+    queued = start_order(order)
+    return {"model_count": models, "lora_count": loras,
+            "queued_after_restore": queued}
 
 
 def _system_settings_read():
@@ -1411,6 +1417,18 @@ def _engine_ready(group):
     return (COMFY / ".pod-ready").is_file()
 
 
+def _installation_ready(group):
+    """Check installed files and runtime without requiring a live model server."""
+    if not _group_files_verified(group):
+        return False
+    if CATALOG[group]["engine"] in ("comfy", "translation"):
+        try:
+            return (COMFY / ".pod-ready").read_text(encoding="utf-8").strip() == COMFY_REF
+        except OSError:
+            return False
+    return _runtime_available(group)
+
+
 def _runtime_available(group):
     item = CATALOG[group]
     if item["engine"] == "comfy":
@@ -1492,6 +1510,34 @@ def start(group):
         if _thread is None or not _thread.is_alive():
             _thread = threading.Thread(target=_run, name="pod-setup", daemon=True)
             _thread.start()
+
+
+def start_order(groups):
+    """Queue the saved install order after restore, skipping prepared groups."""
+    global _thread
+    if not _ready:
+        return 0
+    added = 0
+    seen = set()
+    with _lock:
+        for group in groups:
+            if (not isinstance(group, str) or group not in CATALOG
+                    or not CATALOG[group].get("enabled", True)
+                    or group in seen or _installation_ready(group)):
+                continue
+            seen.add(group)
+            for item in _bagimlilik_sirasi(group):
+                if item == _active or item in _queue:
+                    continue
+                if _installation_ready(item):
+                    continue
+                _queue.append(item)
+                _state[item] = ("queued", "")
+                added += 1
+        if added and (_thread is None or not _thread.is_alive()):
+            _thread = threading.Thread(target=_run, name="pod-setup", daemon=True)
+            _thread.start()
+    return added
 
 
 def move(group, direction):

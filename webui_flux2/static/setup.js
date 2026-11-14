@@ -4,6 +4,8 @@ const labels = {idle:'Kurulu değil',queued:'Sırada',running:'Hazırlanıyor',p
 let lastStatus = null, busy = false, logBusy = false, currentUser = null;
 let passwordlessInstaller = false;
 let systemSettingsLoaded = false, systemSettingsData = null;
+let backupUploadToken = null, backupUploadKey = null;
+let selectedR2Backup = null, r2ListBusy = false, r2UploadToken = null, r2UploadKey = null;
 
 async function api(path, options={}) {
   const response = await fetch(path, {cache:'no-store', credentials:'same-origin', ...options});
@@ -83,38 +85,281 @@ function draw(info) {
   }
 }
 function switchView(id) {
-  for(const view of ['downloadsView','settingsView']) $(view).hidden=view!==id;
+  for(const view of ['downloadsView','backupsView','settingsView']) $(view).hidden=view!==id;
   document.querySelectorAll('.setup-tabs button').forEach(button=>
     button.classList.toggle('active',button.dataset.view===id));
   if(id==='settingsView') loadSystemSettings();
+  if(id==='backupsView') loadR2Backups();
+}
+function switchSettingsPane(id) {
+  document.querySelectorAll('.settings-pane').forEach(pane=>pane.hidden=pane.id!==id);
+  document.querySelectorAll('.settings-tabs button').forEach(button=>
+    button.classList.toggle('active',button.dataset.settings===id));
+  if(id==='modelsPanel'||id==='linksPanel'||id==='loraPanel') loadSystemSettings();
 }
 $('backupExportForm')?.addEventListener('submit',async event=>{
   event.preventDefault();
   const password=$('backupExportPassword').value, status=$('backupExportStatus');
   if(!password)return;
   const button=event.currentTarget.querySelector('button[type="submit"]');
-  button.disabled=true;status.textContent='Tüm hesaplar mühürleniyor ve sistem yedeği şifreleniyor…';
+  button.disabled=true;status.textContent=$('backupExcludeMedia').checked
+    ?'Kullanıcı kasaları taranıyor; medya ayıklanıp kayıtlar şifreleniyor…'
+    :'Tüm hesaplar mühürleniyor ve sistem yedeği şifreleniyor…';
   try{
-    const response=await fetch('/api/backup-export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'X-Backup-Password':password}});
+    const headers={'X-Backup-Password':password};
+    if($('backupExcludeMedia').checked)headers['X-Backup-Media']='exclude';
+    const response=await fetch('/api/backup-export',{method:'POST',cache:'no-store',credentials:'same-origin',headers});
     if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.hata||`HTTP ${response.status}`);}
     const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download='webui-system.wuis.gpg';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-    $('backupExportPassword').value='';status.textContent='Tüm sistem yedeği AES-256 ile şifrelendi. Açık kasalar mühürlendi; WebUI’de yeniden açabilirsin.';
+    $('backupExportPassword').value='';status.textContent=$('backupExcludeMedia').checked
+      ?'Medyasız sistem yedeği şifrelendi ve indirildi. Sohbetler, promptlar ve model ayarları korundu.'
+      :'Tüm sistem yedeği AES-256 ile şifrelendi. Açık kasalar mühürlendi; WebUI’de yeniden açabilirsin.';
   }catch(error){status.textContent='Yedek alınamadı: '+error.message;}
   finally{button.disabled=false;}
+});
+function backupFileKey(file){return `webui-system-backup:${file.size}:${file.lastModified}:${file.name}`;}
+$('backupFile')?.addEventListener('change',()=>{
+  const file=$('backupFile').files?.[0];
+  backupUploadKey=file?backupFileKey(file):null;
+  backupUploadToken=backupUploadKey?localStorage.getItem(backupUploadKey):null;
+  if(backupUploadToken)$('backupImportStatus').textContent='Bu yedek daha önce sunucuya yüklendi; yeniden yüklemeden parola deneyebilirsin.';
+});
+function uploadBackupOnce(file,status,progress){
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();xhr.open('POST','/api/backup-upload');xhr.withCredentials=true;
+    xhr.setRequestHeader('Content-Type','application/octet-stream');
+    xhr.upload.onprogress=event=>{
+      if(!event.lengthComputable)return;
+      const percent=Math.min(100,Math.round(100*event.loaded/event.total));
+      progress.hidden=false;progress.value=percent;
+      status.textContent=`Şifreli yedek bu Pod’a aktarılıyor · %${percent} (${bytes(event.loaded)} / ${bytes(event.total)})`;
+    };
+    xhr.onerror=()=>reject(new Error('Yedek sunucuya yüklenemedi.'));
+    xhr.onload=()=>{
+      let body={};try{body=JSON.parse(xhr.responseText||'{}');}catch{}
+      if(xhr.status<200||xhr.status>=300){reject(Object.assign(new Error(body.hata||`HTTP ${xhr.status}`),{status:xhr.status}));return;}
+      resolve(body);
+    };
+    xhr.send(file);
+  });
+}
+function updateBackupRestoreProgress(state,status,progress){
+  const labels={uploaded:'Yedek bulutta saklandı',parola_dogrulaniyor:'Yedek parolası ve arşiv doğrulanıyor',
+    arsiv_aciliyor:'Şifreli arşiv açılıyor',kayitlar_dogrulaniyor:'Kullanıcı kayıtları ve model ayarları doğrulanıyor',
+    sisteme_yerlestiriliyor:'Yedek sisteme yerleştiriliyor',tamamlandi:'Yedek geri yüklendi',
+    error:'Parola yanlış veya yedek okunamadı'};
+  const stage=state.stage||'Yedek geri yükleniyor';
+  status.textContent=(labels[stage]||stage)+(state.files?` · ${state.files} dosya`:'' )+
+    (state.bytes?` · ${bytes(state.bytes)}`:'');
+  progress.hidden=false;
+  if(stage==='uploaded'){progress.value=100;return;}
+  if(stage==='parola_dogrulaniyor')progress.value=5;
+  else if(stage==='arsiv_aciliyor')progress.value=state.bytes?Math.min(65,15+45*state.bytes/(20*1024**3)):15;
+  else if(stage==='kayitlar_dogrulaniyor')progress.value=72;
+  else if(stage==='sisteme_yerlestiriliyor')progress.value=88;
+  else if(state.status==='complete')progress.value=100;
+  else progress.removeAttribute('value');
+}
+function prettySize(value){
+  const size=Number(value)||0;
+  if(size>=1024**3)return `${(size/1024**3).toFixed(2)} GiB`;
+  if(size>=1024**2)return `${(size/1024**2).toFixed(1)} MiB`;
+  return `${(size/1024).toFixed(0)} KiB`;
+}
+function formatDate(value){
+  const date=new Date(value);
+  return Number.isNaN(date.getTime())?'Tarih bilinmiyor':date.toLocaleString('tr-TR');
+}
+async function loadR2Backups(){
+  if(r2ListBusy)return;
+  r2ListBusy=true;
+  const root=$('r2BackupList'), badge=$('r2Status');
+  root.replaceChildren(); badge.textContent='R2 bağlantısı kontrol ediliyor…';badge.className='r2-status';
+  try{
+    const state=await api('/api/r2-backups');
+    if(!state.connected){
+      badge.textContent=state.error||'R2 deposuna bağlanılamadı.';badge.classList.add('bad');
+      const note=document.createElement('p');note.className='muted';
+      note.textContent=state.configured?'Secret değerlerini ve Cloudflare R2 bağlantısını kontrol edin.':'RunPod şablonunda R2 erişim Secret’ları yapılandırılmamış.';
+      root.append(note);return;
+    }
+    badge.textContent=`Bağlı · ${state.bucket} · ${state.backups?.length||0} yedek`;
+    badge.classList.add('good');
+    const items=state.backups||[];
+    if(!items.length){const empty=document.createElement('p');empty.className='muted empty-state';empty.textContent='Henüz R2’ye yedek kaydedilmedi.';root.append(empty);return;}
+    for(const item of items){
+      const row=document.createElement('article');row.className='backup-row';
+      const info=document.createElement('div');info.className='backup-row-info';
+      const title=document.createElement('h3');title.textContent=item.name||'Sistem yedeği';
+      const meta=document.createElement('p');meta.textContent=`${formatDate(item.modified)} · ${prettySize(item.size)} · şifreli`;
+      const id=document.createElement('code');id.textContent=item.id;
+      info.append(title,meta,id);
+      const actions=document.createElement('div');actions.className='backup-actions';
+      const download=document.createElement('a');download.className='button-link quiet';download.textContent='İndir';
+      download.href='/api/r2-backup-download?id='+encodeURIComponent(item.id);download.setAttribute('download','webui-system-'+item.id);
+      const restore=document.createElement('button');restore.type='button';restore.textContent='Geri yükle';restore.addEventListener('click',()=>openR2Restore(item));
+      const remove=document.createElement('button');remove.type='button';remove.textContent='Sil';remove.className='danger-button';
+      remove.addEventListener('click',async()=>{
+        if(!window.confirm(`“${item.name||'Sistem yedeği'}” yedeğini R2’den kalıcı olarak silmek istiyor musun?`))return;
+        remove.disabled=true;
+        try{await api('/api/r2-backup-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id})});await loadR2Backups();}
+        catch(error){showError(error.message);remove.disabled=false;}
+      });
+      actions.append(download,restore,remove);row.append(info,actions);root.append(row);
+    }
+  }catch(error){badge.textContent='R2 listesi alınamadı: '+error.message;badge.classList.add('bad');
+    const note=document.createElement('p');note.className='muted';note.textContent='Bağlantıyı yenileyebilir veya RunPod şablonundaki Secret ayarlarını kontrol edebilirsiniz.';root.append(note);
+  }finally{r2ListBusy=false;}
+}
+function openR2Restore(item){
+  selectedR2Backup=item;$('r2RestorePanel').hidden=false;
+  $('r2RestoreTitle').textContent=`${item.name||'Sistem yedeği'} · geri yükle`;
+  $('r2RestoreStatus').hidden=true;$('r2RestoreProgress').hidden=true;$('r2RestorePassword').value='';
+  $('r2RestorePanel').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function r2TokenFor(id){return `webui-r2-restore:${id}`;}
+async function pollR2Job(jobId,status,progress){
+  while(true){
+    const state=await api('/api/backup-progress?token='+encodeURIComponent(jobId));
+    status.hidden=false;status.textContent=state.error||state.stage||'İşlem sürüyor…';
+    progress.hidden=false;
+    if(Number(state.total)>0){progress.value=Math.min(100,Math.round(100*Number(state.bytes||0)/Number(state.total)));}
+    else progress.removeAttribute('value');
+    if(state.status==='complete')return state;
+    if(state.status==='error')throw new Error(state.error||state.stage||'Yedek işlemi tamamlanamadı.');
+    await new Promise(resolve=>setTimeout(resolve,850));
+  }
+}
+function setSubmitting(form,isSubmitting){
+  form.classList.toggle('is-submitting',isSubmitting);
+  form.setAttribute('aria-busy',String(isSubmitting));
+}
+$('r2Refresh')?.addEventListener('click',loadR2Backups);
+$('r2CreateForm')?.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const form=event.currentTarget,button=form.querySelector('button[type="submit"]');
+  const status=$('r2CreateStatus'),progress=$('r2CreateProgress'),password=$('r2CreatePassword').value;
+  if(!password)return;
+  if(!window.confirm('Yedek hazırlanırken açık kullanıcı kasaları mühürlenir. Şifreli sistem kopyası R2’ye kaydedilsin mi?'))return;
+  button.disabled=true;setSubmitting(form,true);status.hidden=false;status.textContent='Tüm kayıtlar bir araya getiriliyor…';progress.hidden=false;progress.removeAttribute('value');
+  try{
+    const started=await api('/api/r2-backup-create',{method:'POST',headers:{'Content-Type':'application/json','X-Backup-Password':password},
+      body:JSON.stringify({name:$('r2CreateName').value.trim(),exclude_media:$('r2ExcludeMedia').checked})});
+    const done=await pollR2Job(started.job_id,status,progress);
+    status.textContent=`${status.textContent} · ${prettySize(done.result?.size||0)}`;
+    progress.value=100;$('r2CreatePassword').value='';await loadR2Backups();
+  }catch(error){status.textContent='Yedek oluşturulamadı: '+error.message;}
+  finally{button.disabled=false;setSubmitting(form,false);}
+});
+$('r2UploadForm')?.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const form=event.currentTarget,button=form.querySelector('button[type="submit"]');
+  const file=$('r2UploadFile').files?.[0],status=$('r2UploadStatus'),progress=$('r2UploadProgress');
+  if(!file)return;
+  button.disabled=true;setSubmitting(form,true);status.hidden=false;progress.hidden=false;progress.value=0;
+  try{
+    const fileKey=`webui-r2-upload:${backupFileKey(file)}`;
+    let token=r2UploadKey===fileKey?r2UploadToken:localStorage.getItem(fileKey);
+    if(!token){
+      status.textContent='Şifreli dosya bu Pod’a yükleniyor…';
+      const uploaded=await uploadBackupOnce(file,status,progress);token=uploaded.token;
+      r2UploadKey=fileKey;r2UploadToken=token;localStorage.setItem(fileKey,token);
+    }
+    status.textContent='Şifreli dosya R2’ye gönderiliyor…';progress.removeAttribute('value');
+    try{
+      await api('/api/r2-backup-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,name:$('r2UploadName').value.trim()})});
+    }catch(error){
+      if(error.status!==404)throw error;
+      localStorage.removeItem(fileKey);r2UploadToken=null;
+      status.textContent='Geçici kopya artık bu Pod’da yok; şifreli dosya tekrar yükleniyor…';
+      const uploaded=await uploadBackupOnce(file,status,progress);token=uploaded.token;
+      r2UploadKey=fileKey;r2UploadToken=token;localStorage.setItem(fileKey,token);
+      await api('/api/r2-backup-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,name:$('r2UploadName').value.trim()})});
+    }
+    await pollR2Job(token,status,progress);
+    localStorage.removeItem(fileKey);r2UploadToken=null;r2UploadKey=null;
+    status.textContent='Şifreli yedek R2’ye kaydedildi.';progress.value=100;$('r2UploadFile').value='';await loadR2Backups();
+  }catch(error){status.textContent='Yedek R2’ye aktarılamadı. Şifreli dosya ve aktarım kaydı korunuyor: '+error.message;}
+  finally{button.disabled=false;setSubmitting(form,false);}
+});
+$('r2RestoreClose')?.addEventListener('click',()=>{$('r2RestorePanel').hidden=true;selectedR2Backup=null;});
+$('r2RestoreForm')?.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const form=event.currentTarget;
+  const item=selectedR2Backup,password=$('r2RestorePassword').value;
+  if(!item||!password)return;
+  if(!window.confirm('Bu işlem mevcut tüm kullanıcıları, kasaları ve genel ayarları seçilen yedekteki kayıtlarla değiştirecek. Devam edilsin mi?'))return;
+  const button=form.querySelector('button[type="submit"]'),status=$('r2RestoreStatus'),progress=$('r2RestoreProgress');
+  button.disabled=true;setSubmitting(form,true);status.hidden=false;progress.hidden=false;progress.removeAttribute('value');
+  let token=localStorage.getItem(r2TokenFor(item.id));
+  if(!token){token=(window.crypto?.randomUUID?.()||`${Date.now()}-${Math.random()}`).replace(/[^a-f0-9]/gi,'').toLowerCase().padEnd(32,'0').slice(0,32);localStorage.setItem(r2TokenFor(item.id),token);}
+  try{
+    status.textContent='Yedek bu Pod’a indiriliyor…';
+    await api('/api/r2-backup-prepare-restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,token})});
+    await pollR2Job(token,status,progress);
+    status.textContent='Şifreli yedek hazır; parola doğrulanıyor…';
+    const pending=api('/api/backup-import',{method:'POST',headers:{'Content-Type':'application/json','X-Backup-Password':password},body:JSON.stringify({token})});
+    let finished=false;pending.then(()=>{finished=true;},()=>{finished=true;});
+    while(!finished){
+      try{const state=await api('/api/backup-progress?token='+encodeURIComponent(token));updateBackupRestoreProgress(state,status,progress);}
+      catch{}
+      await new Promise(resolve=>setTimeout(resolve,850));
+    }
+    const result=await pending;
+    localStorage.removeItem(r2TokenFor(item.id));$('r2RestorePassword').value='';progress.value=100;
+    const queued=Number(result.kurulum_sirasina_eklenen||0);
+    status.textContent=`Geri yüklendi · ${result.kullanici_sayisi||0} kullanıcı, ${result.lora_sayisi||0} LoRA.`+
+      (queued?` ${queued} eksik kurulum işi sıraya alındı.`:' Model ve kurulum kayıtları korundu.')+' Yedekteki hesapla yeniden giriş yap.';
+  }catch(error){
+    status.textContent=`${error.message} Şifreli yedek bu Pod’da korundu; doğru parolayı tekrar deneyebilirsin.`;
+  }finally{button.disabled=false;setSubmitting(form,false);}
 });
 $('backupImportForm')?.addEventListener('submit',async event=>{
   event.preventDefault();
   const file=$('backupFile').files?.[0], password=$('backupPassword').value;
-  if(!file||!password)return;
+  if((!file&&!backupUploadToken)||!password)return;
   if(!window.confirm('Bu işlem bu sistemdeki tüm kullanıcıları, kasaları ve genel ayarları yedekteki kayıtlarla değiştirecek. Devam edilsin mi?'))return;
-  const status=$('backupImportStatus'), button=event.currentTarget.querySelector('button[type="submit"]');
-  status.textContent='Tüm sistem yedeği doğrulanıyor…';button.disabled=true;
+  const status=$('backupImportStatus'), progress=$('backupImportProgress'), button=event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled=true;progress.hidden=false;progress.value=0;
   try{
-    const result=await api('/api/backup-import',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Backup-Password':password},body:file});
+    if(!backupUploadToken){
+      const uploaded=await uploadBackupOnce(file,status,progress);
+      backupUploadToken=uploaded.token;backupUploadKey=backupFileKey(file);
+      localStorage.setItem(backupUploadKey,backupUploadToken);
+      status.textContent='Yedek sunucuya ulaştı; parola doğrulanıyor…';
+    }
+    let result;
+    try{
+      const pending=api('/api/backup-import',{method:'POST',headers:{'Content-Type':'application/json','X-Backup-Password':password},body:JSON.stringify({token:backupUploadToken})});
+      let finished=false;pending.then(()=>{finished=true;},()=>{finished=true;});
+      while(!finished){
+        try{const state=await api('/api/backup-progress?token='+encodeURIComponent(backupUploadToken));updateBackupRestoreProgress(state,status,progress);}
+        catch{}
+        await new Promise(resolve=>setTimeout(resolve,800));
+      }
+      result=await pending;
+    }catch(error){
+      if(error.status===404){if(backupUploadKey)localStorage.removeItem(backupUploadKey);backupUploadToken=null;}
+      throw error;
+    }
+    if(backupUploadKey)localStorage.removeItem(backupUploadKey);
+    backupUploadToken=null;backupUploadKey=null;
     $('backupPassword').value='';$('backupFile').value='';
-    status.textContent=`${result.kullanici_sayisi||0} kullanıcı, güncel model kataloğu ve ${result.lora_sayisi||0} LoRA kaydı geri yüklendi. Yedekteki hesapla yeniden giriş yap.`;
-  }catch(error){status.textContent='İçe aktarma başarısız: '+error.message;}
+    const queued=Number(result.kurulum_sirasina_eklenen||0);
+    status.textContent=`${result.kullanici_sayisi||0} kullanıcı, model kataloğu ve ${result.lora_sayisi||0} LoRA kaydı geri yüklendi.`+
+      (queued?` ${queued} eksik kurulum işi otomatik sıraya alındı.`:' Modeller zaten hazır olduğundan yeni kurulum başlatılmadı.')+
+      ' Yedekteki hesapla yeniden giriş yap.';
+    progress.value=100;
+  }catch(error){
+    status.textContent=backupUploadToken&&error.status===400
+      ?'Parola yanlış veya yedek okunamadı. Dosya sunucuda korundu; doğru parolayı girip tekrar deneyebilirsin. ('+error.message+')'
+      :backupUploadToken&&error.status===507
+        ?'Yedek sunucuda korundu, ancak geri yükleme için geçici diskte daha fazla boş alan gerekiyor.'
+        :backupUploadToken
+          ?'Geri yükleme tamamlanamadı. Yedek sunucuda korundu; sorun giderilince yeniden deneyebilirsin. ('+error.message+')'
+          :'İçe aktarma başarısız: '+error.message;
+  }
   finally{button.disabled=false;}
 });
 function drawVariantFiles(data) {
@@ -368,6 +613,8 @@ async function refresh() {
 }
 document.querySelectorAll('.setup-tabs button').forEach(button=>
   button.addEventListener('click',()=>switchView(button.dataset.view)));
+document.querySelectorAll('.settings-tabs button').forEach(button=>
+  button.addEventListener('click',()=>switchSettingsPane(button.dataset.settings)));
 $('saveSystemSettings').addEventListener('click',async()=>{
   const order=Array.from($('defaultOrder').children).filter(row=>row.querySelector('input').checked).map(row=>row.dataset.group);
   $('settingsStatus').textContent='Kaydediliyor…';

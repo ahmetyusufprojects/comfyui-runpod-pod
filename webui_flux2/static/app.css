@@ -1131,3 +1131,5 @@ body.uygulama-acik.tam-calisma #uygulama>:is(#kartModel,#wsUretim,#wsStudyo){fle
   #sohbetAna .mesaj{padding:7px 10px;max-width:96%}
   #sohbetAna .mesaj .icerik{font-size:14px}
 }
+.backup-media-toggle{margin:10px 0}
+.backup-media-toggle[hidden]{display:none!important}

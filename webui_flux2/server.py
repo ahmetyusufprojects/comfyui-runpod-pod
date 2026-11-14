@@ -67,14 +67,84 @@ _startup_error = None
 if RUNPOD_MODE:
     import pod_setup
     import app_update
+    import r2_backups
 
 _app_update_lock = threading.Lock()
 _app_update_state = {"status": "idle"}
 _system_backup_lock = threading.Lock()
+_backup_progress_lock = threading.RLock()
+_backup_restore_progress = {}
+_BACKUP_UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "webui-system-backup-imports")
+_r2_jobs_lock = threading.RLock()
+_r2_jobs = set()
+
+
+def _backup_upload_path(token):
+    if not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{32}", token):
+        return None
+    return os.path.join(_BACKUP_UPLOAD_DIR, "webui-backup-upload-" + token + ".gpg")
+
+
+def _backup_progress_set(token, **state):
+    with _backup_progress_lock:
+        current = _backup_restore_progress.setdefault(token, {})
+        current.update(state)
+        current["updated"] = time.time()
+
+
+def _backup_progress_get(token):
+    with _backup_progress_lock:
+        state = _backup_restore_progress.get(token)
+        return dict(state) if state else None
+
+
+def _r2_start_job(token, worker, complete_stage):
+    """Run a long R2 transfer without keeping the installer request open."""
+    with _r2_jobs_lock:
+        if token in _r2_jobs:
+            return False
+        _r2_jobs.add(token)
+    _backup_progress_set(token, status="running", stage="İş hazırlanıyor",
+                         bytes=0, total=0, error="")
+
+    def run():
+        try:
+            result = worker()
+            _backup_progress_set(token, status="complete", stage=complete_stage,
+                                 result=result or {}, error="")
+        except Exception as exc:
+            # R2Error never embeds endpoint credentials; the other expected
+            # exceptions are local backup/IO errors and are kept short.
+            message = str(exc).strip()[:240] or type(exc).__name__
+            _backup_progress_set(token, status="error", stage="İşlem tamamlanamadı",
+                                 error=message)
+        finally:
+            with _r2_jobs_lock:
+                _r2_jobs.discard(token)
+
+    threading.Thread(target=run, name="r2-backup-" + token[:8], daemon=True).start()
+    return True
+
+
+def _r2_progress_callback(token, stage, total):
+    lock = threading.Lock()
+    transferred = [0]
+    last_reported = [0]
+
+    def update(amount):
+        with lock:
+            transferred[0] += int(amount or 0)
+            current = transferred[0]
+            if current - last_reported[0] < 2 * 1024 * 1024 and current < total:
+                return
+            last_reported[0] = current
+        _backup_progress_set(token, status="running", stage=stage,
+                             bytes=min(current, total), total=total, error="")
+    return update
 
 
 @contextlib.contextmanager
-def _sistem_yedegi_hazirla(parola):
+def _sistem_yedegi_hazirla(parola, medya_haric=False):
     """Pause writes, seal every open account, then prepare one full-system archive."""
     if not _system_backup_lock.acquire(blocking=False):
         raise RuntimeError("Başka bir sistem yedeği işlemi sürüyor.")
@@ -98,13 +168,17 @@ def _sistem_yedegi_hazirla(parola):
             if (_kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu
                     or pod_setup._active or pod_setup._queue):
                 raise RuntimeError("Yedek hazırlanırken yeni bir iş kuyruğa girdi.")
-        closed = kasa.hepsini_kapat()
-        if any(not value for value in closed.values()):
-            raise RuntimeError("Bir veya daha fazla açık kasa mühürlenemedi.")
-        pod_setup.checkpoint()
-        path = kasa.sistem_yedegi_uret(
-            DATA_ROOT, pod_setup._system_settings_path, parola)
-        yield path
+        snapshot_context = (kasa.sistem_yedegi_medya_haric_kasalar(DATA_ROOT)
+                            if medya_haric else contextlib.nullcontext(None))
+        with snapshot_context as filtered_vaults:
+            closed = kasa.hepsini_kapat()
+            if any(not value for value in closed.values()):
+                raise RuntimeError("Bir veya daha fazla açık kasa mühürlenemedi.")
+            pod_setup.checkpoint()
+            path = kasa.sistem_yedegi_uret(
+                DATA_ROOT, pod_setup._system_settings_path, parola,
+                medya_haric_vaultlar=filtered_vaults)
+            yield path
     finally:
         if path:
             try:
@@ -3983,6 +4057,62 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not pod_setup.is_ready():
             self._send(503, '{"hata":"Sistem hazırlanıyor."}')
             return
+        if parsed.path == "/api/r2-backups":
+            if not self._setup_yetkili():
+                return
+            try:
+                state = r2_backups.status()
+                state.update(r2_backups.list_backups())
+                state["error"] = ""
+            except r2_backups.R2Error as exc:
+                configured = bool(os.environ.get("R2_ENDPOINT") or os.environ.get("R2_ACCOUNT_ID")) \
+                    and bool(os.environ.get("R2_ACCESS_KEY_ID")) \
+                    and bool(os.environ.get("R2_SECRET_ACCESS_KEY"))
+                state = {"configured": configured, "connected": False,
+                         "bucket": os.environ.get("R2_BUCKET", "moody-webui-backups"),
+                         "backups": [], "error": str(exc)[:240]}
+            self._send(200, json.dumps(state, ensure_ascii=False))
+            return
+        if parsed.path == "/api/r2-backup-download":
+            if not self._setup_yetkili():
+                return
+            object_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
+            try:
+                item = r2_backups.get_object(object_id)
+            except r2_backups.R2Error as exc:
+                status = 404 if "NoSuchKey" in str(exc) else 502
+                self._send(status, json.dumps({"hata": str(exc)[:240]}, ensure_ascii=False))
+                return
+            size = int(item.get("ContentLength", 0))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition",
+                             'attachment; filename="webui-system-' + object_id + '"')
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            body = item["Body"]
+            try:
+                while True:
+                    chunk = body.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+            except OSError:
+                pass
+            finally:
+                body.close()
+            return
+        if parsed.path == "/api/backup-progress":
+            if not self._setup_yetkili():
+                return
+            token = (urllib.parse.parse_qs(parsed.query).get("token") or [""])[0]
+            state = _backup_progress_get(token) if _backup_upload_path(token) else None
+            if state is None:
+                self._send(404, '{"hata":"Yedek yükleme oturumu bulunamadı."}')
+            else:
+                self._send(200, json.dumps(state, ensure_ascii=False))
+            return
         if parsed.path == "/api/ben":
             if self._setup_parolasiz():
                 self._send(200, json.dumps({"kullanici": "Kurulum paneli",
@@ -4050,21 +4180,152 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not pod_setup.is_ready():
             self._send(503, '{"hata":"Sistem hazırlanıyor."}')
             return
+        if parsed.path == "/api/r2-backup-create":
+            if not self._setup_yetkili():
+                return
+            request = self._json_oku()
+            if "__hata__" in request:
+                self._send(400, json.dumps({"hata": request["__hata__"]}))
+                return
+            password = self.headers.get("X-Backup-Password") or ""
+            if not password:
+                self._send(400, '{"hata":"Yedek parolası gerekli."}')
+                return
+            token = uuid.uuid4().hex
+            name = str(request.get("name") or "webui-system").strip()[:80] or "webui-system"
+            media_excluded = bool(request.get("exclude_media"))
+
+            def create_backup():
+                staged = None
+                with _sistem_yedegi_hazirla(password, medya_haric=media_excluded) as path:
+                    fd, staged = tempfile.mkstemp(prefix="webui-r2-backup-", suffix=".wuis.gpg")
+                    os.close(fd)
+                    os.remove(staged)
+                    # Move the already-encrypted archive out of the snapshot
+                    # context, so user writes resume before the network upload.
+                    os.replace(path, staged)
+                try:
+                    total = os.path.getsize(staged)
+                    _backup_progress_set(token, status="running", stage="R2 deposuna yükleniyor",
+                                         bytes=0, total=total, error="")
+                    result = r2_backups.upload_file(
+                        staged, name,
+                        _r2_progress_callback(token, "R2 deposuna yükleniyor", total))
+                    return {"id": result["id"], "name": result["name"], "size": result["size"]}
+                finally:
+                    if staged:
+                        try:
+                            os.remove(staged)
+                        except OSError:
+                            pass
+
+            try:
+                _r2_start_job(token, create_backup, "Şifreli yedek R2'ye kaydedildi")
+            except Exception as exc:
+                self._send(503, json.dumps({"hata": str(exc)[:240]}, ensure_ascii=False))
+                return
+            self._send(202, json.dumps({"job_id": token}, ensure_ascii=False))
+            return
+        if parsed.path == "/api/r2-backup-save":
+            if not self._setup_yetkili():
+                return
+            request = self._json_oku()
+            token = request.get("token")
+            path = _backup_upload_path(token)
+            if not path or not os.path.isfile(path):
+                self._send(404, json.dumps(
+                    {"hata": "Önce şifreli yedek dosyasını bu Pod'a yükleyin."},
+                    ensure_ascii=False))
+                return
+            name = str(request.get("name") or "webui-system").strip()[:80] or "webui-system"
+
+            def save_uploaded_backup():
+                total = os.path.getsize(path)
+                _backup_progress_set(token, status="running", stage="R2 deposuna yükleniyor",
+                                     bytes=0, total=total, error="")
+                result = r2_backups.upload_file(
+                    path, name, _r2_progress_callback(token, "R2 deposuna yükleniyor", total))
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                return {"id": result["id"], "name": result["name"], "size": result["size"]}
+
+            _r2_start_job(token, save_uploaded_backup, "Şifreli yedek R2'ye kaydedildi")
+            self._send(202, json.dumps({"job_id": token}, ensure_ascii=False))
+            return
+        if parsed.path == "/api/r2-backup-prepare-restore":
+            if not self._setup_yetkili():
+                return
+            request = self._json_oku()
+            object_id = request.get("id")
+            if not r2_backups.is_backup_id(object_id):
+                self._send(400, '{"hata":"Yedek kaydı kimliği geçersiz."}')
+                return
+            token = request.get("token") or uuid.uuid4().hex
+            if not _backup_upload_path(token):
+                self._send(400, '{"hata":"Yedek oturumu geçersiz."}')
+                return
+
+            def prepare_restore():
+                destination = _backup_upload_path(token)
+                os.makedirs(_BACKUP_UPLOAD_DIR, mode=0o700, exist_ok=True)
+                if os.path.isfile(destination):
+                    size = os.path.getsize(destination)
+                    return {"size": size, "reused": True}
+                meta = r2_backups.head_backup(object_id)
+                total = meta["size"]
+                if total <= 0 or total > 100 * 1024 * 1024 * 1024:
+                    raise RuntimeError("Yedek boş veya 100 GiB sınırını aşıyor.")
+                if shutil.disk_usage(_BACKUP_UPLOAD_DIR).free < total + 256 * 1024 * 1024:
+                    raise RuntimeError("Yedeği indirmek için geçici diskte yeterli boş alan yok.")
+                partial = destination + ".uploading"
+                _backup_progress_set(token, status="running", stage="R2'den şifreli yedek indiriliyor",
+                                     bytes=0, total=total, error="")
+                try:
+                    size = r2_backups.download_file(
+                        object_id, partial,
+                        _r2_progress_callback(token, "R2'den şifreli yedek indiriliyor", total))
+                    os.replace(partial, destination)
+                except Exception:
+                    try:
+                        os.remove(partial)
+                    except OSError:
+                        pass
+                    raise
+                return {"size": size, "reused": False}
+
+            _r2_start_job(token, prepare_restore, "Şifreli yedek indirildi; parola ile geri yükleyebilirsiniz")
+            self._send(202, json.dumps({"token": token}, ensure_ascii=False))
+            return
+        if parsed.path == "/api/r2-backup-delete":
+            if not self._setup_yetkili():
+                return
+            request = self._json_oku()
+            try:
+                object_id = request.get("id")
+                if not r2_backups.is_backup_id(object_id):
+                    raise r2_backups.R2Error("Yedek kaydı kimliği geçersiz.")
+                r2_backups.delete_backup(object_id)
+                self._send(200, '{"deleted":true}')
+            except r2_backups.R2Error as exc:
+                self._send(400, json.dumps({"hata": str(exc)[:240]}, ensure_ascii=False))
+            return
         if parsed.path == "/api/backup-export":
             if not self._setup_yetkili():
                 return
             parola = self.headers.get("X-Backup-Password") or ""
+            medya_haric = self.headers.get("X-Backup-Media") == "exclude"
             try:
-                with _sistem_yedegi_hazirla(parola) as path:
+                with _sistem_yedegi_hazirla(parola, medya_haric=medya_haric) as path:
                     self._send_file(path, "webui-system.wuis.gpg")
             except (kasa.KasaHatasi, OSError, RuntimeError) as exc:
                 if not self.wfile.closed:
                     self._send(409, json.dumps({"hata": str(exc)[:300]}, ensure_ascii=False))
             return
-        if parsed.path == "/api/backup-import":
+        if parsed.path == "/api/backup-upload":
             if not self._setup_yetkili():
                 return
-            parola = self.headers.get("X-Backup-Password") or ""
             try:
                 length = int(self.headers.get("Content-Length", 0))
             except (TypeError, ValueError):
@@ -4072,23 +4333,98 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if length <= 0 or length > 100 * 1024 * 1024 * 1024:
                 self._send(413, '{"hata":"Yedek boş veya 100 GiB sınırını aşıyor."}')
                 return
+            partial = None
+            try:
+                os.makedirs(_BACKUP_UPLOAD_DIR, mode=0o700, exist_ok=True)
+                try:
+                    os.chmod(_BACKUP_UPLOAD_DIR, 0o700)
+                except OSError:
+                    pass
+                if shutil.disk_usage(_BACKUP_UPLOAD_DIR).free < length + 256 * 1024 * 1024:
+                    self._send(507, '{"hata":"Yedeği saklamak için geçici diskte yeterli boş alan yok."}')
+                    return
+                token = uuid.uuid4().hex
+                destination = _backup_upload_path(token)
+                partial = destination + ".uploading"
+                with open(partial, "wb") as stream:
+                    remaining = length
+                    while remaining:
+                        chunk = self.rfile.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            raise OSError("Yedek aktarımı yarıda kesildi.")
+                        stream.write(chunk)
+                        remaining -= len(chunk)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(partial, destination)
+                _backup_progress_set(token, status="uploaded", stage="Yedek Pod'a yüklendi",
+                                     bytes=length, files=0, error="")
+                self._send(200, json.dumps({"token": token, "size": length}))
+            except OSError as exc:
+                if partial:
+                    try:
+                        os.remove(partial)
+                    except OSError:
+                        pass
+                self._send(507, json.dumps({"hata": str(exc)[:200]}, ensure_ascii=False))
+            return
+        if parsed.path == "/api/backup-import":
+            if not self._setup_yetkili():
+                return
+            parola = self.headers.get("X-Backup-Password") or ""
+            token = None
+            temp = None
+            retained_upload = self.headers.get("Content-Type", "").split(";", 1)[0].strip() == "application/json"
+            if retained_upload:
+                request = self._json_oku()
+                token = request.get("token")
+                temp = _backup_upload_path(token)
+                if not temp or not os.path.isfile(temp):
+                    self._send(404, '{"hata":"Yüklenen yedek bulunamadı; dosyayı yeniden seçip yükleyin."}')
+                    return
+            else:
+                try:
+                    length = int(self.headers.get("Content-Length", 0))
+                except (TypeError, ValueError):
+                    length = 0
+                if length <= 0 or length > 100 * 1024 * 1024 * 1024:
+                    self._send(413, '{"hata":"Yedek boş veya 100 GiB sınırını aşıyor."}')
+                    return
+                fd, temp = tempfile.mkstemp(prefix="system-import-", suffix=".wuis.gpg")
+                try:
+                    with os.fdopen(fd, "wb") as stream:
+                        remaining = length
+                        while remaining:
+                            chunk = self.rfile.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                raise OSError("Yedek aktarımı yarıda kesildi.")
+                            stream.write(chunk)
+                            remaining -= len(chunk)
+                except OSError as exc:
+                    try:
+                        os.remove(temp)
+                    except OSError:
+                        pass
+                    self._send(400, json.dumps({"hata": str(exc)}, ensure_ascii=False))
+                    return
+            length = os.path.getsize(temp)
             try:
                 free_bytes = shutil.disk_usage(DATA_ROOT).free
             except OSError:
                 free_bytes = 0
             if free_bytes < length * 2 + 512 * 1024 * 1024:
+                if not retained_upload:
+                    try:
+                        os.remove(temp)
+                    except OSError:
+                        pass
                 self._send(507, '{"hata":"Yedeği güvenle geri yüklemek için geçici diskte yeterli boş alan yok."}')
                 return
-            fd, temp = tempfile.mkstemp(prefix="system-import-", suffix=".wuis.gpg")
             try:
-                with os.fdopen(fd, "wb") as stream:
-                    remaining = length
-                    while remaining:
-                        block = self.rfile.read(min(1024 * 1024, remaining))
-                        if not block:
-                            raise OSError("Yedek aktarımı yarıda kesildi.")
-                        stream.write(block)
-                        remaining -= len(block)
+                if token:
+                    _backup_progress_set(token, status="running",
+                                         stage="Parola ve yedek doğrulanıyor",
+                                         bytes=0, files=0, error="")
                 if not _system_backup_lock.acquire(blocking=False):
                     raise RuntimeError("Başka bir sistem yedeği işlemi sürüyor.")
                 try:
@@ -4100,7 +4436,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         if _kapatma_istegi.is_set():
                             raise RuntimeError("Sistem başka bir işlem yürütüyor.")
                         _kapatma_istegi.set()
-                        if not _http_yazma_kosulu.wait_for(lambda: not _http_yazma_istekleri, timeout=30):
+                        if not _http_yazma_kosulu.wait_for(
+                                lambda: not _http_yazma_istekleri, timeout=30):
                             _kapatma_istegi.clear()
                             raise RuntimeError("Kayıt işlemleri tamamlanmadı.")
                     try:
@@ -4108,28 +4445,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             if (_kuyruk_calismasi or _ceviri_calismasi or _kuyruk or _ceviri_kuyrugu
                                     or pod_setup._active or pod_setup._queue):
                                 raise RuntimeError("İçe aktarma sırasında yeni bir iş kuyruğa girdi.")
-                        closed = kasa.hepsini_kapat()
-                        if any(not value for value in closed.values()):
-                            raise RuntimeError("Açık bir kullanıcı kasası mühürlenemedi; veri değiştirilmedi.")
+                        def import_progress(state):
+                            if token:
+                                _backup_progress_set(token,
+                                    stage=state.get("durum", "Geri yükleniyor"),
+                                    files=state.get("dosya", 0),
+                                    bytes=state.get("bayt", 0))
+                            if state.get("durum") == "sisteme_yerlestiriliyor":
+                                closed = kasa.hepsini_kapat()
+                                if any(not value for value in closed.values()):
+                                    raise RuntimeError(
+                                        "Açık bir kullanıcı kasası mühürlenemedi; veri değiştirilmedi.")
                         result = kasa.sistem_yedegi_ice_aktar(
-                            temp, parola, DATA_ROOT, pod_setup._system_settings_path)
+                            temp, parola, DATA_ROOT, pod_setup._system_settings_path,
+                            ilerleme=import_progress)
                         pod_setup.refresh_data_lock()
                         merged = pod_setup.refresh_after_system_import()
                         result["model_sayisi"] = merged["model_count"]
                         result["lora_sayisi"] = merged["lora_count"]
+                        result["kurulum_sirasina_eklenen"] = merged.get("queued_after_restore", 0)
                         pod_setup.checkpoint()
+                        if token:
+                            _backup_progress_set(token, status="complete",
+                                stage="Geri yükleme tamamlandı; eksik kurulum sırası başlatıldı",
+                                files=0, bytes=length, error="")
+                            try:
+                                os.remove(temp)
+                            except OSError:
+                                pass
                     finally:
                         _kapatma_istegi.clear()
                 finally:
                     _system_backup_lock.release()
                 self._send(200, json.dumps(result, ensure_ascii=False))
             except (kasa.KasaHatasi, OSError, RuntimeError) as exc:
+                if token:
+                    _backup_progress_set(token, status="error",
+                        stage="Yedek korundu; parolayı veya dosyayı kontrol edin",
+                        error=str(exc)[:240])
                 self._send(400, json.dumps({"hata": str(exc)}, ensure_ascii=False))
             finally:
-                try:
-                    os.remove(temp)
-                except OSError:
-                    pass
+                if not retained_upload and temp:
+                    try:
+                        os.remove(temp)
+                    except OSError:
+                        pass
             return
         if _kapatma_istegi.is_set():
             self._send(503, '{"hata":"Sistem yedeği hazırlanıyor; kısa süre sonra yeniden deneyin."}')
@@ -4405,7 +4765,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if RUNPOD_MODE:
                     if self._admin_gerekli() is None:
                         return
-                    with _sistem_yedegi_hazirla(parola) as path:
+                    medya_haric = self.headers.get("X-Backup-Media") == "exclude"
+                    with _sistem_yedegi_hazirla(parola, medya_haric=medya_haric) as path:
                         self._send_file(path, "webui-system.wuis.gpg")
                 else:
                     kullanici = self._auth_gerekli()

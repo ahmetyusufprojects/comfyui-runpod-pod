@@ -19,11 +19,13 @@ import os as _os
 import hmac as _hmac
 import hashlib as _hashlib
 import json as _json
+import re as _re
 import shutil as _shutil
 import subprocess as _sp
 import tempfile as _tempfile
 import threading as _th
 import time as _time
+import contextlib as _contextlib
 from functools import wraps as _wraps
 
 import auth as _auth
@@ -240,7 +242,146 @@ def yedek_uret(kullanici):
         _sifirla(parola)
 
 
-def sistem_yedegi_uret(data_root, system_settings_path, parola):
+_MEDYA_UZANTILARI = {
+    ".png", ".jpg", ".jpeg", ".jfif", ".webp", ".gif", ".apng", ".bmp",
+    ".tif", ".tiff", ".avif", ".heic", ".heif", ".jxl", ".ico", ".raw",
+    ".dng", ".cr2", ".nef", ".arw", ".orf", ".rw2", ".mp4", ".webm",
+    ".mov", ".mkv", ".avi", ".m4v", ".mpeg", ".mpg", ".3gp", ".3g2",
+    ".wmv", ".m2v", ".m2ts", ".ts", ".vob", ".f4v", ".wav", ".mp3",
+    ".m4a", ".aac", ".flac", ".ogg", ".opus", ".aiff", ".wma", ".amr",
+    ".mid", ".midi",
+}
+_MEDYA_DATA_URI = _re.compile(
+    r"data:(?:image|video|audio)/[^;,]+;base64,[A-Za-z0-9+/=_-]+", _re.IGNORECASE)
+
+
+def _jsondan_medya_cikar(value, media_hint=False):
+    if isinstance(value, dict):
+        kind = str(value.get("type") or "").lower()
+        mime = str(value.get("mime_type") or value.get("mime") or "").lower()
+        media_block = (media_hint or any(part in kind for part in ("image", "video", "audio"))
+                       or mime.startswith(("image/", "video/", "audio/")))
+        result = {}
+        changed = False
+        for key, item in value.items():
+            name = str(key).lower()
+            if "base64" in name or (media_block and name in ("data", "bytes", "payload")):
+                changed = True
+                continue
+            hint = name in ("image", "image_url", "video", "audio", "media", "inline_data")
+            cleaned, item_changed = _jsondan_medya_cikar(item, hint)
+            result[key] = cleaned
+            changed = changed or item_changed
+        return result, changed
+    if isinstance(value, list):
+        result = []
+        changed = False
+        for item in value:
+            cleaned, item_changed = _jsondan_medya_cikar(item, media_hint)
+            result.append(cleaned)
+            changed = changed or item_changed
+        return result, changed
+    if isinstance(value, str):
+        cleaned, count = _MEDYA_DATA_URI.subn("[medya yedekten çıkarıldı]", value)
+        return cleaned, bool(count)
+    return value, False
+
+
+def _json_medya_temizle(path):
+    try:
+        with open(path, "r", encoding="utf-8") as stream:
+            value = _json.load(stream)
+        cleaned, changed = _jsondan_medya_cikar(value)
+        if changed:
+            temp = path + ".media-free-tmp"
+            try:
+                with open(temp, "w", encoding="utf-8") as stream:
+                    _json.dump(cleaned, stream, ensure_ascii=False, indent=2)
+                _os.replace(temp, path)
+            except OSError:
+                try:
+                    _os.remove(temp)
+                except OSError:
+                    pass
+                return None
+        return changed
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+
+
+def _medyayi_temizle(kok):
+    silinen = 0
+    for dizin, _, dosyalar in _os.walk(kok):
+        for ad in dosyalar:
+            yol = _os.path.join(dizin, ad)
+            extension = _os.path.splitext(ad)[1].lower()
+            if extension == ".json":
+                if _json_medya_temizle(yol) is None:
+                    raise KasaHatasi(
+                        "Medyasız yedek için bir JSON kaydı güvenle ayıklanamadı.")
+            if extension in _MEDYA_UZANTILARI:
+                try:
+                    _os.remove(yol)
+                    silinen += 1
+                except OSError as exc:
+                    raise KasaHatasi(
+                        "Bir medya dosyası yedekten güvenle çıkarılamadı.") from exc
+    return silinen
+
+
+@_contextlib.contextmanager
+def sistem_yedegi_medya_haric_kasalar(data_root):
+    """Build filtered encrypted vault snapshots from every currently open user."""
+    temp = _tempfile.mkdtemp(prefix="webui-media-free-vaults-")
+    passwords = {}
+    try:
+        vault_users = set()
+        previous_users = set()
+        try:
+            for name in _os.listdir(KASALAR_DIR):
+                if not name.endswith(".tar.gpg"):
+                    continue
+                previous = name.endswith(".onceki.tar.gpg")
+                username = name[:-15] if previous else name[:-8]
+                if not _auth.kullanici_adi_gecerli_mi(username):
+                    continue
+                (previous_users if previous else vault_users).add(username)
+        except OSError:
+            pass
+        if previous_users - vault_users:
+            raise KasaHatasi(
+                "Medyasız yedek için kurtarma kasası bulunan her kullanıcının ana kasası açık olmalı.")
+
+        with _kilit:
+            for username in vault_users:
+                record = _acik.get(username)
+                if record is None or record.get("kapaniyor"):
+                    raise KasaHatasi(
+                        "Medyasız yedek için mevcut tüm kullanıcı kasaları açık olmalı. "
+                        "Kullanıcılar kasalarını açtıktan sonra yeniden deneyin.")
+                passwords[username] = bytearray(record["parola"])
+
+        snapshots = {}
+        for username in sorted(vault_users):
+            source = _calisma(username)
+            if not _os.path.isdir(source):
+                raise KasaHatasi("Medyasız yedek için açık kullanıcı verisi bulunamadı.")
+            filtered = _os.path.join(temp, username)
+            _shutil.copytree(source, filtered, symlinks=False)
+            _medyayi_temizle(filtered)
+            destination = _os.path.join(temp, username + ".tar.gpg")
+            if not _arsiv_sifrele(filtered, destination, passwords[username]):
+                raise KasaHatasi("Medyasız kullanıcı kasası şifrelenemedi.")
+            snapshots[username] = destination
+        yield snapshots
+    finally:
+        for password in passwords.values():
+            _sifirla(password)
+        _shutil.rmtree(temp, ignore_errors=True)
+
+
+def sistem_yedegi_uret(data_root, system_settings_path, parola, *,
+                       medya_haric_vaultlar=None):
     """Create one encrypted archive containing every account record and global settings."""
     hazir = _parola_hazirla(parola)
     kok = _os.path.abspath(data_root)
@@ -263,6 +404,28 @@ def sistem_yedegi_uret(data_root, system_settings_path, parola):
                     _shutil.copytree(entry.path, destination, symlinks=False)
                 elif entry.is_file(follow_symlinks=False):
                     _shutil.copy2(entry.path, destination)
+        if medya_haric_vaultlar is not None:
+            # Unencrypted leftovers are also filtered. Opaque user vaults are
+            # replaced below with snapshots encrypted under each user's password.
+            _medyayi_temizle(data_copy)
+            vault_dir = _os.path.join(data_copy, "kasalar")
+            _os.makedirs(vault_dir, exist_ok=True)
+            for name in _os.listdir(vault_dir):
+                if name.endswith(".tar.gpg"):
+                    try:
+                        _os.remove(_os.path.join(vault_dir, name))
+                    except OSError:
+                        pass
+            for username, snapshot in medya_haric_vaultlar.items():
+                _shutil.copy2(snapshot, _os.path.join(vault_dir, username + ".tar.gpg"))
+                previous = _os.path.join(vault_dir, username + ".onceki.tar.gpg")
+                if _os.path.isfile(_onceki_dosya(username)):
+                    _shutil.copy2(snapshot, previous)
+                else:
+                    try:
+                        _os.remove(previous)
+                    except FileNotFoundError:
+                        pass
         # Old browser sessions must never be transferred to another install.
         account_file = _os.path.join(data_copy, "kullanicilar.json")
         if _os.path.isfile(account_file):
@@ -319,7 +482,8 @@ def sistem_yedegi_uret(data_root, system_settings_path, parola):
         _shutil.rmtree(gecici_kok, ignore_errors=True)
 
 
-def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_path):
+def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_path,
+                            ilerleme=None):
     """Validate and restore a complete encrypted system backup with rollback."""
     hazir = _parola_hazirla(parola)
     hedef = _os.path.abspath(data_root)
@@ -332,11 +496,16 @@ def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_pa
     settings_parent = _os.path.dirname(settings_path)
     old_data = hedef + ".system-import-old"
     settings_backup = _os.path.join(stage, "settings-old")
+    def bildir(durum, **detay):
+        if ilerleme is not None:
+            ilerleme({"durum": durum, **detay})
     try:
         if _os.path.exists(old_data):
             raise KasaHatasi("önceki geri yükleme artığı bulundu; veri korunarak durduruldu")
+        bildir("parola_dogrulaniyor")
         if not _deneme_cozum(sifreli_dosya, hazir):
             raise KasaHatasi(GENEL_HATA)
+        bildir("arsiv_aciliyor", dosya=0, bayt=0)
         extract_root = os_path = _os.path.join(stage, "payload")
         _os.makedirs(extract_root, exist_ok=True)
         with _sp.Popen(_gpg_komutu() + ["-d", sifreli_dosya], stdin=_sp.PIPE,
@@ -347,6 +516,8 @@ def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_pa
             import tarfile as _tarfile
             with _tarfile.open(fileobj=gpg.stdout, mode="r|") as archive:
                 total = 0
+                copied_total = 0
+                file_count = 0
                 for member in archive:
                     name = member.name.replace("\\", "/")
                     parts = [part for part in name.split("/") if part not in ("", ".")]
@@ -358,6 +529,7 @@ def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_pa
                             or member.issym() or member.islnk()):
                         raise KasaHatasi("yedek içinde güvenli olmayan dosya yolu var")
                     total += max(0, member.size)
+                    file_count += 1
                     if total > 20 * 1024 * 1024 * 1024:
                         raise KasaHatasi("yedek açılmış boyut sınırını aşıyor")
                     destination = _os.path.abspath(_os.path.join(extract_root, *parts))
@@ -371,10 +543,21 @@ def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_pa
                         if source is None:
                             raise KasaHatasi("yedek dosyası okunamadı")
                         with source, open(destination, "wb") as output:
-                            _shutil.copyfileobj(source, output)
+                            while True:
+                                chunk = source.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                output.write(chunk)
+                                copied_total += len(chunk)
+                                bildir("arsiv_aciliyor", dosya=file_count,
+                                       bayt=copied_total)
+                    if member.isdir():
+                        bildir("arsiv_aciliyor", dosya=file_count,
+                               bayt=copied_total)
             gpg.stdout.close()
             if gpg.wait() != 0:
                 raise KasaHatasi(GENEL_HATA)
+        bildir("kayitlar_dogrulaniyor", dosya=file_count, bayt=copied_total)
         account_file = _os.path.join(data_stage, "kullanicilar.json")
         with open(account_file, "r", encoding="utf-8") as stream:
             accounts = _json.load(stream)
@@ -389,6 +572,7 @@ def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_pa
         if not isinstance(settings, dict) or settings.get("schema") != 1:
             raise KasaHatasi("yedekte geçerli genel ayarlar yok")
 
+        bildir("sisteme_yerlestiriliyor", dosya=file_count, bayt=copied_total)
         # Save existing data and settings so any filesystem error rolls back.
         _os.makedirs(settings_backup, exist_ok=True)
         if _os.path.isdir(settings_parent):
@@ -424,6 +608,7 @@ def sistem_yedegi_ice_aktar(sifreli_dosya, parola, data_root, system_settings_pa
                 _shutil.copy2(entry.path, _os.path.join(settings_parent, entry.name))
             raise
         _shutil.rmtree(old_data, ignore_errors=True)
+        bildir("tamamlandi", dosya=file_count, bayt=copied_total)
         return {"aktarildi": True, "kullanici_sayisi": len(accounts["kullanicilar"])}
     except KasaHatasi:
         raise

@@ -8,16 +8,16 @@
   <link rel="stylesheet" href="/static/setup.css">
 </head>
 <body>
-  <header>
+  <header class="app-header">
     <div class="mark" aria-hidden="true">W</div>
-    <div><p class="eyebrow">RUNPOD · AYRI KURULUM EKRANI</p><h1>Model kurulumu</h1></div>
+    <div class="brand"><p class="eyebrow">RUNPOD · YÖNETİM</p><h1>Model kurulumu</h1></div>
     <span id="connection" class="connection">Bağlanıyor…</span>
     <span id="storageMode" class="storage-mode" hidden></span>
   </header>
   <main>
     <section id="preparing" class="panel preparing">
       <span class="spinner" aria-hidden="true"></span>
-      <div><h2 id="prepareTitle">Pod hazırlanıyor</h2><p id="prepareText">Bu ekran, ana WebUI açılmadan da kullanılabilir. Sistem durumu kontrol ediliyor.</p></div>
+      <div><h2 id="prepareTitle">Pod hazırlanıyor</h2><p id="prepareText">Kurulum ekranı ana WebUI’den bağımsız çalışır. Sistem durumu kontrol ediliyor.</p></div>
     </section>
 
     <section id="loginPanel" class="panel login" hidden>
@@ -31,20 +31,20 @@
 
     <section id="dashboard" hidden>
       <div class="panel intro">
-        <div><p class="eyebrow">MODEL VE ÇALIŞMA ORTAMI</p><h2>Kurulum sırasını yönet</h2><p>İndirilecek grubu ekleyin. Bekleyen işleri öne alın; çalışan indirmeyi duraklatıp sürdürebilir veya iptal edebilirsiniz. İndirmenin kalan kısmı geçici diskte korunur.</p></div>
+        <div><p class="eyebrow">MODEL VE ÇALIŞMA ORTAMI</p><h2>İşleri ve ayarları yönet</h2><p>Model hazırlığını takip et, kalıcı sistem ayarlarını düzenle ve şifreli sistem yedeklerini R2’de sakla.</p></div>
         <div class="account"><span id="whoami"></span><button id="logout" class="quiet" type="button">Çıkış</button></div>
       </div>
       <nav class="setup-tabs" aria-label="Kurulum bölümleri">
         <button type="button" class="active" data-view="downloadsView">İndirmeler</button>
-        <button type="button" data-view="settingsView">Genel ayarlar</button>
+        <button type="button" data-view="backupsView">Yedekler</button>
+        <button type="button" data-view="settingsView">Ayarlar</button>
       </nav>
       <div id="errorBox" class="notice error" role="status" hidden></div>
+
       <div id="downloadsView">
         <div id="progressPanel" class="panel progress" hidden>
           <div class="progress-title"><div><p class="eyebrow">ŞU AN ÇALIŞIYOR</p><h2 id="progressStage"></h2></div><span id="progressSpeed"></span></div>
-          <p id="progressFile" class="muted"></p>
-          <div class="track"><span id="progressBar"></span></div>
-          <p id="progressAmount" class="muted"></p>
+          <p id="progressFile" class="muted"></p><div class="track"><span id="progressBar"></span></div><p id="progressAmount" class="muted"></p>
         </div>
         <div class="section-title"><div><p class="eyebrow">MODEL LİSTESİ</p><h2>Hazırlık ve indirme</h2></div><button id="refresh" class="quiet" type="button">Yenile</button></div>
         <div id="groups" class="groups"></div>
@@ -54,66 +54,133 @@
         </section>
         <footer id="storageExplanation">Depolama durumu kontrol ediliyor.</footer>
       </div>
-      <div id="settingsView" hidden>
-        <section class="panel settings-card">
-          <div class="section-title"><div><p class="eyebrow">TÜM SİSTEM YEDEĞİ</p><h2>Şifreli yedek oluştur veya geri yükle</h2></div></div>
-          <p class="muted">Yedek; tüm kullanıcı hesaplarını, şifreli kasaları, kullanıcı kayıtlarını ve volume üzerindeki genel kurulum/model ayarlarını içerir. Modeller ve ComfyUI dosyaları eklenmez. Seçtiğin parola yedek dosyasını korur; kullanıcıların kendi kasa parolaları değişmez. Geri yükleme mevcut sistem kayıtlarının tamamını değiştirir.</p>
-          <form id="backupExportForm" class="model-form">
-            <label>Yeni yedek parolası<input id="backupExportPassword" type="password" autocomplete="new-password" minlength="8" required></label>
-            <button type="submit">Tüm sistemi şifreleyip indir</button><span id="backupExportStatus" class="muted" role="status"></span>
+
+      <div id="backupsView" hidden>
+        <section class="panel backup-hero">
+          <div><p class="eyebrow">ÖZEL R2 DEPOSU</p><h2>Şifreli sistem yedekleri</h2>
+            <p>Yedekler özel Cloudflare R2 kovasında tutulur. Bu bir RunPod volume’ü değildir; Pod silinse veya değişse de yedek orada kalır. Sistem verileri R2’ye gönderilmeden önce şifrelenir.</p></div>
+          <div id="r2Status" class="r2-status" role="status">R2 bağlantısı kontrol ediliyor…</div>
+        </section>
+        <div class="backup-grid">
+          <section class="panel backup-card">
+            <div class="section-title"><div><p class="eyebrow">YENİ YEDEK</p><h2>Şifrele ve R2’ye kaydet</h2></div></div>
+            <p class="muted">Kullanıcılar, şifreli kasalar, sohbetler, promptlar, model ve kurulum ayarları eklenir. Modellerin kendisi ve medya dosyaları eklenmez.</p>
+            <form id="r2CreateForm" class="stack-form">
+              <label>Yedek adı<input id="r2CreateName" maxlength="80" value="webui-system" required></label>
+              <label>Yedek parolası<input id="r2CreatePassword" type="password" autocomplete="new-password" minlength="8" required></label>
+              <label class="check-row"><input id="r2ExcludeMedia" type="checkbox"><span><b>Medya içeriğini dışarıda bırak</b><small>Fotoğraf, video ve sesler eklenmez; metin kayıtları ve model ayarları korunur. Tüm kullanıcı kasalarının açık olması gerekir.</small></span></label>
+              <button type="submit">Şifreli yedek oluştur</button>
+            </form>
+            <div id="r2CreateStatus" class="task-status" role="status" hidden></div>
+            <progress id="r2CreateProgress" max="100" value="0" hidden></progress>
+          </section>
+          <section class="panel backup-card">
+            <div class="section-title"><div><p class="eyebrow">MEVCUT ŞİFRELİ DOSYA</p><h2>Bilgisayardaki yedeği R2’ye al</h2></div></div>
+            <p class="muted">Önceden indirdiğin `.wuis.gpg` sistem yedeğini buraya aktar. Dosya şifreli kalır; yanlışlıkla açık kayıt yüklenmez.</p>
+            <form id="r2UploadForm" class="stack-form">
+              <label>Yedek adı<input id="r2UploadName" maxlength="80" value="webui-system" required></label>
+              <label>Şifreli yedek dosyası<input id="r2UploadFile" type="file" accept=".gpg,.wuis.gpg,application/octet-stream" required></label>
+              <button type="submit">Şifreli dosyayı R2’ye kaydet</button>
+            </form>
+            <div id="r2UploadStatus" class="task-status" role="status" hidden></div>
+            <progress id="r2UploadProgress" max="100" value="0" hidden></progress>
+          </section>
+        </div>
+        <section class="panel backup-list-card">
+          <div class="section-title"><div><p class="eyebrow">BULUT KAYITLARI</p><h2>R2’deki yedekler</h2></div><button id="r2Refresh" class="quiet" type="button">Listeyi yenile</button></div>
+          <div id="r2BackupList" class="backup-list"><p class="muted">Yedek listesi yükleniyor…</p></div>
+        </section>
+        <section id="r2RestorePanel" class="panel restore-panel" hidden>
+          <div class="section-title"><div><p class="eyebrow">SİSTEMİ GERİ YÜKLE</p><h2 id="r2RestoreTitle">Yedeği geri yükle</h2></div><button id="r2RestoreClose" type="button" class="quiet" aria-label="Geri yükleme panelini kapat">Kapat</button></div>
+          <p class="muted">Yedek geçici diske bir kez indirilir. Parola yanlışsa dosya korunur; aynı yedek için yeniden indirme gerekmez. Geri yükleme mevcut kullanıcıları ve sistem ayarlarını yedekteki kayıtlarla değiştirir.</p>
+          <form id="r2RestoreForm" class="stack-form restore-form">
+            <label>Yedek parolası<input id="r2RestorePassword" type="password" autocomplete="current-password" minlength="8" required></label>
+            <button type="submit">Doğrula ve geri yükle</button>
           </form>
-          <form id="backupImportForm" class="model-form">
+          <div id="r2RestoreStatus" class="task-status" role="status" hidden></div>
+          <progress id="r2RestoreProgress" max="100" value="0" hidden></progress>
+        </section>
+        <details class="panel local-backup">
+          <summary>Dosyaya dışa aktar veya bilgisayardan geri yükle</summary>
+          <p class="muted">Bu seçenek R2 kullanmadan doğrudan şifreli yedek dosyası indirir veya seçtiğin dosyayı geri yükler.</p>
+          <form id="backupExportForm" class="stack-form">
+            <label>Yeni yedek parolası<input id="backupExportPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+            <label class="check-row"><input id="backupExcludeMedia" type="checkbox"><span><b>Medya dosyalarını yedeğe alma</b><small>Fotoğraf, video ve ses dosyaları çıkarılır; metin kayıtları ve ayarlar korunur.</small></span></label>
+            <button type="submit">Şifreli yedeği indir</button><span id="backupExportStatus" class="muted" role="status"></span>
+          </form>
+          <form id="backupImportForm" class="stack-form">
             <label>Yedek parolası<input id="backupPassword" type="password" autocomplete="current-password" required></label>
             <label>Şifreli sistem yedeği<input id="backupFile" type="file" accept=".gpg,.wuis.gpg,application/octet-stream" required></label>
-            <button type="submit">Tüm sistemi doğrula ve geri yükle</button><span id="backupImportStatus" class="muted" role="status"></span>
+            <small class="muted">Yüklemeden sonra şifreli dosya, başarılı geri yüklemeye kadar bu Pod’da saklanır. Yanlış parolada yeniden yükleme gerekmez.</small>
+            <button type="submit">Tüm sistemi doğrula ve geri yükle</button><span id="backupImportStatus" class="muted" role="status"></span><progress id="backupImportProgress" max="100" value="0" hidden></progress>
           </form>
-        </section>
-        <section class="panel settings-card">
-          <div class="section-title"><div><p class="eyebrow">UYGULAMA SÜRÜMÜ</p><h2>Uygulamayı güncelle</h2></div></div>
-          <p class="muted">Güncelleme, bu Pod’un stable veya beta kanalındaki en son başarılı imaj sürümünü alır. İşlerin tamamlanmış olmalıdır. Açık kasalar mühürlenir; indirilen modeller korunur. Taban sistem dosyaları değişmişse yeni Pod gerekir.</p>
-          <div class="actions"><span id="updateChannel" class="muted">Kanal: stable</span><button id="updateApp" type="button">Stable sürümünü güncelle</button><span id="updateAppStatus" class="muted" role="status"></span></div>
-          <div class="actions restart-actions"><button id="restartApp" class="quiet" type="button">Uygulamayı yeniden başlat</button><span id="restartAppStatus" class="muted" role="status">İndirilen modeller korunur.</span></div>
-        </section>
-        <section class="panel settings-card clean-storage-card">
-          <div class="section-title"><div><p class="eyebrow">GEÇİCİ DEPOLAMA</p><h2>Yeniden kurulabilir dosyaları temizle</h2></div></div>
-          <p class="muted">ComfyUI, indirilen modeller, LLM dosyaları ve önbellekler silinir; gerektiğinde kurucu ekranından yeniden indirilebilir. Kullanıcı hesapları, kasa, arşiv ve genel ayarlar korunur.</p>
-          <p class="clean-storage-note">Bu işlem aktif üretim, sohbet veya model indirme işi varken çalışmaz. İndirmeler yeniden yapılacağı için Pod’un geçici disk kullanımı azalır.</p>
-          <div class="actions"><button id="cleanStorage" class="danger-button" type="button">Geçici depolamayı temizle</button><span id="cleanStorageStatus" class="muted" role="status"></span></div>
-        </section>
-        <section class="panel settings-card">
-          <div class="section-title"><div><p class="eyebrow">YENİ POD BAŞLANGICI</p><h2>Otomatik indirme ve sıra</h2></div></div>
-          <p class="muted">Seçtiğin modeller her yeni Pod açıldığında sırayla hazırlanır. Bu liste mevcut oturumun sırasında yaptığın değişiklikleri etkilemez.</p>
-          <label class="setting-toggle"><input id="autoDownload" type="checkbox"><span><b>Pod açılınca indirmeyi başlat</b><small>Kapalıysa açılışta indirme başlamaz. Açıkken aşağıda seçtiğin varsayılan sıra uygulanır.</small></span></label>
-          <div id="defaultOrder" class="default-order"></div>
-          <div class="actions"><button id="saveSystemSettings" type="button">Genel ayarları kaydet</button><span id="settingsStatus" class="muted" role="status"></span></div>
-        </section>
-        <section class="panel settings-card">
-          <div class="section-title"><div><p class="eyebrow">MODEL LİSTESİ</p><h2>Model ekle veya adını değiştir</h2></div></div>
-          <p class="muted">Var olan bir model türünden yeni kayıt oluştur. Her kaydın adı ve dosya bağlantıları ayrıdır; indirme otomatik başlamaz.</p>
-          <div id="modelInstances" class="model-instances"></div>
-          <form id="modelForm" class="model-form">
-            <label>Model türü<select id="modelFamily"></select></label>
-            <label>Görünen ad<input id="modelName" maxlength="80" required placeholder="Örn. Krea · farklı sürüm"></label>
-            <div id="modelVariantFiles" class="model-variant-files"></div>
-            <button type="submit">Model kaydı ekle</button><span id="modelFormStatus" class="muted" role="status"></span>
-          </form>
-        </section>
-        <section class="panel settings-card">
-          <div class="section-title"><div><p class="eyebrow">DOSYA BAĞLANTILARI</p><h2>Model indirme bağlantıları</h2></div></div>
-          <p class="muted">Alternatif dosya bağlantısı kaydedildiğinde kurulu dosya yenilenir. Dosya henüz kurulu değilse yalnızca bağlantı güncellenir.</p>
-          <div id="modelLinks" class="model-links"></div>
-        </section>
-        <section class="panel settings-card">
-          <div class="section-title"><div><p class="eyebrow">MODEL EKLENTİLERİ</p><h2>LoRA kütüphanesi</h2></div></div>
-          <p class="muted">LoRA’yı uyumlu görsel modeline bağla. Civitai’de sürümü seçtikten sonra adres çubuğundaki `modelVersionId` bulunan sayfa bağlantısını yapıştırabilirsin. HF veya Civitai bağlantısı kullan; gizli anahtarları bağlantıya yazma.</p>
-          <form id="loraForm" class="lora-form">
-            <label>LoRA adı<input id="loraName" maxlength="80" required placeholder="Örn. çizgi roman ışığı"></label>
-            <label>Görsel modeli<select id="loraModel"><option value="z_image">Z-Image</option><option value="flux2">Flux 2 Klein</option><option value="flux3">Flux 3 Klein</option><option value="krea2">Krea 2</option><option value="illustrious">Illustrious</option></select></label>
-            <label class="lora-link">İndirme bağlantısı<input id="loraLink" type="url" required placeholder="Civitai sürüm sayfası?modelVersionId=… veya doğrudan indirme bağlantısı"></label>
-            <button type="submit">LoRA ekle</button><span id="loraFormStatus" class="muted" role="status"></span>
-          </form>
-          <div id="loraList" class="lora-list"></div>
-        </section>
+        </details>
+      </div>
+
+      <div id="settingsView" hidden>
+        <nav class="settings-tabs" aria-label="Ayar grupları">
+          <button type="button" class="active" data-settings="startupPanel">Açılış</button>
+          <button type="button" data-settings="modelsPanel">Modeller</button>
+          <button type="button" data-settings="linksPanel">Bağlantılar</button>
+          <button type="button" data-settings="loraPanel">LoRA</button>
+          <button type="button" data-settings="systemPanel">Sistem</button>
+        </nav>
+        <div id="startupPanel" class="settings-pane">
+          <section class="panel settings-card">
+            <div class="section-title"><div><p class="eyebrow">YENİ POD BAŞLANGICI</p><h2>Otomatik indirme ve sıra</h2></div></div>
+            <p class="muted">Seçtiğin modeller her yeni Pod açıldığında sırayla hazırlanır. Bu liste mevcut oturumda yaptığın sıra değişikliklerini etkilemez.</p>
+            <label class="setting-toggle"><input id="autoDownload" type="checkbox"><span><b>Pod açılınca indirmeyi başlat</b><small>Açıkken aşağıda seçtiğin varsayılan sıra uygulanır.</small></span></label>
+            <div id="defaultOrder" class="default-order"></div>
+            <div class="actions"><button id="saveSystemSettings" type="button">Genel ayarları kaydet</button><span id="settingsStatus" class="muted" role="status"></span></div>
+          </section>
+        </div>
+        <div id="modelsPanel" class="settings-pane" hidden>
+          <section class="panel settings-card">
+            <div class="section-title"><div><p class="eyebrow">MODEL LİSTESİ</p><h2>Model ekle veya adını değiştir</h2></div></div>
+            <p class="muted">Var olan bir model türünden yeni kayıt oluştur. Her kaydın adı ve dosya bağlantıları ayrıdır.</p>
+            <div id="modelInstances" class="model-instances"></div>
+            <form id="modelForm" class="model-form">
+              <label>Model türü<select id="modelFamily"></select></label>
+              <label>Görünen ad<input id="modelName" maxlength="80" required placeholder="Örn. Krea · farklı sürüm"></label>
+              <div id="modelVariantFiles" class="model-variant-files"></div>
+              <button type="submit">Model kaydı ekle</button><span id="modelFormStatus" class="muted" role="status"></span>
+            </form>
+          </section>
+        </div>
+        <div id="linksPanel" class="settings-pane" hidden>
+          <section class="panel settings-card">
+            <div class="section-title"><div><p class="eyebrow">DOSYA BAĞLANTILARI</p><h2>Model indirme bağlantıları</h2></div></div>
+            <p class="muted">Alternatif bağlantı kaydedilince kurulu dosya yenilenir. Dosya henüz kurulu değilse yalnızca adres güncellenir.</p>
+            <div id="modelLinks" class="model-links"></div>
+          </section>
+        </div>
+        <div id="loraPanel" class="settings-pane" hidden>
+          <section class="panel settings-card">
+            <div class="section-title"><div><p class="eyebrow">MODEL EKLENTİLERİ</p><h2>LoRA kütüphanesi</h2></div></div>
+            <p class="muted">LoRA’yı uyumlu görsel modeline bağla. Civitai sürümünü seçtikten sonra adres çubuğundaki `modelVersionId` bulunan sayfa bağlantısını yapıştırabilirsin. HF veya Civitai bağlantısı kullan; gizli anahtarları bağlantıya yazma.</p>
+            <form id="loraForm" class="lora-form">
+              <label>LoRA adı<input id="loraName" maxlength="80" required placeholder="Örn. çizgi roman ışığı"></label>
+              <label>Görsel modeli<select id="loraModel"><option value="z_image">Z-Image</option><option value="flux2">Flux 2 Klein</option><option value="flux3">Flux 3 Klein</option><option value="krea2">Krea 2</option><option value="illustrious">Illustrious</option></select></label>
+              <label class="lora-link">İndirme bağlantısı<input id="loraLink" type="url" required placeholder="Civitai sürüm sayfası?modelVersionId=… veya doğrudan indirme bağlantısı"></label>
+              <button type="submit">LoRA ekle</button><span id="loraFormStatus" class="muted" role="status"></span>
+            </form>
+            <div id="loraList" class="lora-list"></div>
+          </section>
+        </div>
+        <div id="systemPanel" class="settings-pane" hidden>
+          <section class="panel settings-card">
+            <div class="section-title"><div><p class="eyebrow">UYGULAMA SÜRÜMÜ</p><h2>Uygulamayı güncelle</h2></div></div>
+            <p class="muted">Güncelleme, bu Pod’un stable veya beta kanalındaki en son başarılı imaj sürümünü alır. İndirilen modeller korunur; taban sistem değişmişse yeni Pod gerekir.</p>
+            <div class="actions"><span id="updateChannel" class="muted">Kanal: stable</span><button id="updateApp" type="button">Stable sürümünü güncelle</button><span id="updateAppStatus" class="muted" role="status"></span></div>
+            <div class="actions restart-actions"><button id="restartApp" class="quiet" type="button">Uygulamayı yeniden başlat</button><span id="restartAppStatus" class="muted" role="status">İndirilen modeller korunur.</span></div>
+          </section>
+          <section class="panel settings-card clean-storage-card">
+            <div class="section-title"><div><p class="eyebrow">GEÇİCİ DEPOLAMA</p><h2>Yeniden kurulabilir dosyaları temizle</h2></div></div>
+            <p class="muted">ComfyUI, indirilen modeller, LLM dosyaları ve önbellekler silinir; gerektiğinde kurucu ekranından yeniden indirilebilir. Kullanıcı hesapları, kasa, arşiv ve genel ayarlar korunur.</p>
+            <p class="clean-storage-note">Aktif üretim, sohbet veya indirme işi varken temizleme yapılmaz.</p>
+            <div class="actions"><button id="cleanStorage" class="danger-button" type="button">Geçici depolamayı temizle</button><span id="cleanStorageStatus" class="muted" role="status"></span></div>
+          </section>
+        </div>
       </div>
     </section>
   </main>

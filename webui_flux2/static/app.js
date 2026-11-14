@@ -614,6 +614,7 @@ async function boot(){
       const k = await kurulumYaniti.json();
       if(!k){ girisEkraniAc(); bootCalisiyor = false; return; }
       RUNPOD_WEBUI = k.runpod === true;
+      if($('backupExcludeMediaWrap')) $('backupExcludeMediaWrap').hidden=!RUNPOD_WEBUI;
       uretimEnhanceAyarlariniGuncelle();
       const storageNote=$('firstRunStorageNote');
       if(storageNote){
@@ -5780,15 +5781,18 @@ window.addEventListener('scroll',()=>{
 },{passive:true});
 $('backupExport').onclick=async()=>{
   const button=$('backupExport'),status=$('backupExportStatus');
+  const mediaFree=RUNPOD_WEBUI&&$('backupExcludeMedia')?.checked;
   const password=RUNPOD_WEBUI ? window.prompt('Tüm sistem yedeği için bir parola belirle. Geri yüklerken aynı parola gerekecek.') : '';
   if(RUNPOD_WEBUI && !password)return;
-  button.disabled=true;status.textContent=RUNPOD_WEBUI?'Tüm hesaplar mühürleniyor ve sistem yedeği şifreleniyor…':'Kasa şifrelenip yedekleniyor…';
+  button.disabled=true;status.textContent=mediaFree?'Kullanıcı kasaları taranıyor, medya ayıklanıyor ve kayıtlar şifreleniyor…':(RUNPOD_WEBUI?'Tüm hesaplar mühürleniyor ve sistem yedeği şifreleniyor…':'Kasa şifrelenip yedekleniyor…');
   try{
-    const response=await fetch('/api/backup-export',{method:'POST',cache:'no-store',headers:RUNPOD_WEBUI?{'X-Backup-Password':password}:{}});
+    const headers=RUNPOD_WEBUI?{'X-Backup-Password':password}:{};
+    if(mediaFree)headers['X-Backup-Media']='exclude';
+    const response=await fetch('/api/backup-export',{method:'POST',cache:'no-store',headers});
     if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.hata||'HTTP '+response.status);}
     const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download=RUNPOD_WEBUI?'webui-system.wuis.gpg':'webui-vault.wui.gpg';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-    status.textContent=RUNPOD_WEBUI?'Tüm sistem yedeği AES-256 ile şifrelendi ve indirildi.':'Şifreli kullanıcı yedeği indirildi.';
+    status.textContent=mediaFree?'Medyasız sistem yedeği şifrelendi ve indirildi. Sohbetler, promptlar ve model ayarları korundu.':(RUNPOD_WEBUI?'Tüm sistem yedeği AES-256 ile şifrelendi ve indirildi.':'Şifreli kullanıcı yedeği indirildi.');
   }catch(error){status.textContent='Yedek alınamadı: '+error.message;}
   finally{button.disabled=false;}
 };
