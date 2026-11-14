@@ -1986,7 +1986,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._setup_post(parsed)
             return
         if parsed.path == "/api/sunucu-kapat" or (RUNPOD_MODE and parsed.path == "/api/backup-export"):
-            self._do_POST(parsed)
+            self._do_POST()
             return
         with _http_yazma_kosulu:
             kapaniyor = _kapatma_istegi.is_set()
@@ -1996,7 +1996,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(503, '{"hata":"WebUI güvenli biçimde kapanıyor"}')
             return
         try:
-            self._do_POST(parsed)
+            self._do_POST()
         finally:
             with _http_yazma_kosulu:
                 _http_yazma_istekleri.discard(self)
