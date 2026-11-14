@@ -61,7 +61,7 @@ _storage_mode = "unknown"
 _system_settings_lock = threading.RLock()
 _SYSTEM_SETTINGS_DEFAULT = {
     "schema": 1,
-    "auto_download": False,
+    "auto_download": True,
     "default_download_order": ["zimage", "llm_26b"],
     "model_instances": [],
     "link_overrides": {},
@@ -2135,6 +2135,34 @@ def _model(file, cancel, group):
 from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import HfHubHTTPError
 c=json.loads(sys.stdin.read())
+# Xet writes blocks out of order; the partial file length is not transfer progress.
+# Capture the byte callbacks emitted by hf_xet instead.
+try:
+    import hf_xet, threading, time
+    original_download = hf_xet.download_files
+    callback_lock = threading.Lock()
+    def measured_download(*args, **kwargs):
+        callbacks = kwargs.get('progress_updater') or []
+        transferred = [0.0]
+        last_write = [0.0]
+        def wrap(callback):
+            def update(amount):
+                callback(amount)
+                with callback_lock:
+                    transferred[0] += max(0, amount)
+                    now = time.monotonic()
+                    if now - last_write[0] >= 0.3:
+                        tmp = c['progress'] + '.tmp'
+                        with open(tmp, 'w') as f:
+                            f.write(str(int(transferred[0])))
+                        os.replace(tmp, c['progress'])
+                        last_write[0] = now
+            return update
+        kwargs['progress_updater'] = [wrap(cb) for cb in callbacks]
+        return original_download(*args, **kwargs)
+    hf_xet.download_files = measured_download
+except ImportError:
+    pass
 try:
     hf_hub_download(repo_id=c['repo'], revision=c.get('revision'),
                     filename=c['path'], local_dir=c['local_dir'],
@@ -2168,6 +2196,8 @@ except HfHubHTTPError as e:
         previous_progress_path = partial
         process = None
         stalled = False
+        xet_progress = incoming / ".xet-progress"
+        xet_progress.unlink(missing_ok=True)
         env = os.environ.copy()
         if mode == "http":
             env["HF_HUB_DISABLE_XET"] = "1"
@@ -2179,7 +2209,8 @@ except HfHubHTTPError as e:
                 with _lock:
                     _active_process = process
                 payload = json.dumps({"repo": file["repo"], "revision": file.get("revision"),
-                                      "path": file["path"], "local_dir": str(incoming)}).encode("utf-8")
+                                      "path": file["path"], "local_dir": str(incoming),
+                                      "progress": str(xet_progress)}).encode("utf-8")
                 process.stdin.write(payload)
                 process.stdin.close()
                 activity_io = _process_io_bytes(process.pid)
@@ -2195,6 +2226,12 @@ except HfHubHTTPError as e:
                         current_size = progress_file.stat().st_size
                     except OSError:
                         current_size = previous_size
+                    if mode == "xet":
+                        try:
+                            current_size = int(xet_progress.read_text())
+                        except (OSError, ValueError):
+                            # An Xet sparse file's length can jump ahead of actual progress.
+                            current_size = 0
                     current_io = _process_io_bytes(process.pid)
                     if (current_size != previous_size or
                             (current_io is not None and activity_io is not None
@@ -2203,7 +2240,8 @@ except HfHubHTTPError as e:
                         activity_io = current_io
                     elif activity_io is None and current_io is not None:
                         activity_io = current_io
-                    stable_partial = bool(partial and previous_progress_path == progress_file)
+                    stable_partial = (mode == "xet" and xet_progress.exists()) or bool(
+                        mode == "http" and partial and previous_progress_path == progress_file)
                     rate = (max(0, current_size - previous_size)
                             / max(now - previous_time, .001) / (1024 * 1024)
                             if stable_partial else None)
@@ -2221,6 +2259,7 @@ except HfHubHTTPError as e:
                 with _lock:
                     if _active_process is process:
                         _active_process = None
+        xet_progress.unlink(missing_ok=True)
         if cancel.is_set():
             raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
         if process.returncode == 42:
