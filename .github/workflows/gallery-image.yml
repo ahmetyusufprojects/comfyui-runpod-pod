@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install API contract test tools
-        run: python3 -m pip install --disable-pip-version-check fastapi==0.136.3 httpx==0.28.1 pytest==9.1.1
+        run: python3 -m pip install --disable-pip-version-check fastapi==0.136.3 httpx==0.28.1 pytest==9.1.1 Pillow==12.2.0
       - name: Check Python and setup UI syntax
         run: |
           set -eu
