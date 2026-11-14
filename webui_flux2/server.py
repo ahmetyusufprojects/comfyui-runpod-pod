@@ -2009,7 +2009,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _http_yazma_kosulu.notify_all()
 
     def _do_POST(self):
-        return _handle_main_post(self, sys.modules[__name__])
+        parsed = urllib.parse.urlparse(self.path)
+        return _handle_main_post(self, parsed, sys.modules[__name__])
 
 
 _httpd = None
