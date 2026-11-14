@@ -2182,7 +2182,7 @@ except HfHubHTTPError as e:
                                       "path": file["path"], "local_dir": str(incoming)}).encode("utf-8")
                 process.stdin.write(payload)
                 process.stdin.close()
-                previous_io = _process_io_bytes(process.pid)
+                activity_io = _process_io_bytes(process.pid)
                 while process.poll() is None:
                     if cancel.is_set():
                         _stop_process(process)
@@ -2197,8 +2197,12 @@ except HfHubHTTPError as e:
                         current_size = previous_size
                     current_io = _process_io_bytes(process.pid)
                     if (current_size != previous_size or
-                            (current_io is not None and previous_io is not None and current_io > previous_io)):
+                            (current_io is not None and activity_io is not None
+                             and current_io - activity_io >= 65536)):
                         last_activity = now
+                        activity_io = current_io
+                    elif activity_io is None and current_io is not None:
+                        activity_io = current_io
                     stable_partial = bool(partial and previous_progress_path == progress_file)
                     rate = (max(0, current_size - previous_size)
                             / max(now - previous_time, .001) / (1024 * 1024)
@@ -2206,7 +2210,7 @@ except HfHubHTTPError as e:
                     _progress(group, "İndiriliyor", name=file["name"],
                               downloaded=current_size, total=file.get("size"),
                               rate=round(rate, 2) if rate is not None else None)
-                    previous_time, previous_size, previous_io = now, current_size, current_io
+                    previous_time, previous_size = now, current_size
                     previous_progress_path = partial
                     if now - last_activity >= stall_limit:
                         stalled = True
