@@ -1,5 +1,6 @@
 """Exercise supervisor replacement and rollback without a GPU or user data."""
 import json
+import base64
 import io
 import os
 import shutil
@@ -24,9 +25,21 @@ with tarfile.open(fileobj=archive, mode='w:gz') as tar:
     tar.add('/opt/pod/models.json', arcname='repo/docker/models.json')
     tar.add('/opt/pod/base.Dockerfile', arcname='repo/docker/Dockerfile.gallery')
     tar.add('/opt/pod/supervisor.py', arcname='repo/docker/supervisor.py')
-app_update._fetch = lambda url, limit: (json.dumps({'workflow_runs': [{'head_sha': 'a' * 40}]}).encode()
-                                       if 'api.github.com' in url else archive.getvalue())
-assert app_update.prepare() == 'a' * 40
+def fetch_beta(url, limit):
+    if 'actions/workflows/' in url:
+        return json.dumps({'workflow_runs': [{'head_sha': 'a' * 40}]}).encode()
+    return archive.getvalue()
+
+app_update._fetch = fetch_beta
+assert app_update.prepare('beta') == 'a' * 40
+def fetch_stable(url, limit):
+    if '/contents/docker/stable-image.txt' in url:
+        return json.dumps({'content': base64.b64encode(
+            ('gallery-' + 'b' * 40).encode()).decode()}).encode()
+    return archive.getvalue()
+
+app_update._fetch = fetch_stable
+assert app_update.prepare('stable') == 'b' * 40
 assert (root / 'stage/webui_flux2/server.py').is_file()
 
 def pid():

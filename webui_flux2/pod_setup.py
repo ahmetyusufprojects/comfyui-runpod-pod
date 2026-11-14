@@ -169,6 +169,53 @@ _validate_catalog()
 _LORA_MODELS = {"z_image", "flux2", "flux3", "krea2", "illustrious"}
 _LORA_ID_RE = re.compile(r"^[a-f0-9]{12}$")
 
+def _legacy_lora_source(item, filename):
+    """Recover installer metadata from older backups that stored only a link."""
+    source_file = item.get("source_file")
+    if isinstance(source_file, dict):
+        source = source_file.get("source") or "hf"
+        if source == "hf" and all(source_file.get(key) for key in
+                                  ("repo", "revision", "path")):
+            return {**source_file, "source": "hf", "dir": "loras", "name": filename}
+        if source == "civitai" and str(source_file.get("version", "")).isdigit():
+            host = source_file.get("host", "civitai.com")
+            if host in _CIVITAI_HOSTS:
+                return {**source_file, "source": "civitai", "host": host,
+                        "dir": "loras", "name": filename}
+        if source == "url" and str(source_file.get("url", "")).startswith("https://"):
+            return {**source_file, "source": "url", "dir": "loras", "name": filename}
+    link = str(item.get("link") or "").strip()
+    parsed = urllib.parse.urlsplit(link)
+    if parsed.scheme != "https" or parsed.username or parsed.password:
+        return None
+    if parsed.hostname == "huggingface.co":
+        try:
+            source = _parse_hf_link(link)
+        except ValueError:
+            return None
+        if Path(source["path"]).suffix.lower() not in (".safetensors", ".pt"):
+            return None
+        return dict(source, source="hf", dir="loras", name=filename)
+    if parsed.hostname not in _CIVITAI_HOSTS:
+        return None
+    query = urllib.parse.parse_qs(parsed.query)
+    version = None
+    match = re.fullmatch(r"/api/download/models/(\d+)/?", parsed.path)
+    if match:
+        version = int(match.group(1))
+    else:
+        for key in ("modelVersionId", "versionId"):
+            try:
+                version = int((query.get(key) or [""])[0])
+                break
+            except (TypeError, ValueError):
+                continue
+    if not version or version < 1:
+        return None
+    host = "civitai.red" if parsed.hostname.endswith(".red") else "civitai.com"
+    return {"source": "civitai", "host": host, "version": version,
+            "dir": "loras", "name": filename}
+
 
 def _lora_entries_clean(values):
     result = []
@@ -204,7 +251,7 @@ def _lora_entries_clean(values):
                        "auto_download": item.get("auto_download") is True,
                        "default_selected": item.get("default_selected") is True,
                        "built_in": item.get("built_in") is True,
-                       "source_file": item.get("source_file"),
+                       "source_file": _legacy_lora_source(item, filename),
                        "link": str(item.get("link") or "")[:1000]})
         used.add(identifier)
     return result
@@ -212,7 +259,15 @@ def _lora_entries_clean(values):
 
 def _register_lora_groups(settings):
     """Expose saved LoRAs as ordinary cancellable installer download groups."""
-    for entry in _lora_entries_clean(settings.get("loras")):
+    entries = _lora_entries_clean(settings.get("loras"))
+    groups = {entry["group"] for entry in entries
+              if workflow_enabled(entry["model"])
+              and isinstance(entry.get("source_file"), dict)}
+    for group in list(CATALOG):
+        if group.startswith("lora_") and group not in groups:
+            CATALOG.pop(group, None)
+            _state.pop(group, None)
+    for entry in entries:
         if not workflow_enabled(entry["model"]):
             continue
         group = entry["group"]
@@ -224,6 +279,22 @@ def _register_lora_groups(settings):
         CATALOG[group] = {"label": "LoRA · " + entry["name"],
                           "engine": "comfy", "files": [dict(file)]}
     _validate_catalog()
+
+
+def refresh_after_system_import():
+    """Merge legacy backup settings with this image's current models and LoRAs."""
+    with _system_settings_lock:
+        settings = _system_settings_read()
+        _model_instances_apply(settings)
+        settings["loras"] = _lora_entries_clean(settings.get("loras"))
+        _register_lora_groups(settings)
+        settings["default_download_order"] = [
+            group for group in settings.get("default_download_order", [])
+            if group in CATALOG and CATALOG[group].get("enabled", True)]
+        _apply_saved_links(settings)
+        _system_settings_write(settings)
+        return {"model_count": len(settings.get("model_instances", [])),
+                "lora_count": len(settings.get("loras", []))}
 
 
 def _system_settings_read():
@@ -404,6 +475,21 @@ def _default_model_instances():
 def _model_instances_apply(settings):
     """Rebuild editable model variants from the checksummed universal settings."""
     saved = settings.get("model_instances") or []
+    saved_variant_groups = {item.get("group") for item in saved
+                            if isinstance(item, dict)
+                            and re.fullmatch(r"variant_[a-f0-9]{10}",
+                                             str(item.get("group") or ""))}
+    for group, item in list(CATALOG.items()):
+        if item.get("variant") and group not in saved_variant_groups:
+            CATALOG.pop(group, None)
+    builtin_ids = set((_CATALOG_DATA.get("workflows") or {}).keys())
+    saved_variant_ids = {item.get("id") for item in saved
+                         if isinstance(item, dict)
+                         and re.fullmatch(r"variant_[a-f0-9]{10}",
+                                          str(item.get("group") or ""))}
+    for identifier in list(WORKFLOWS):
+        if identifier not in builtin_ids and identifier not in saved_variant_ids:
+            WORKFLOWS.pop(identifier, None)
     saved_by_id = {item.get("id"): item for item in saved
                    if isinstance(item, dict) and isinstance(item.get("id"), str)}
     records = _default_model_instances()

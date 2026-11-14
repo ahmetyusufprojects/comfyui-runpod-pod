@@ -4005,11 +4005,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not self._setup_yetkili():
                 return
             state = dict(_app_update_state)
+            state.setdefault("kanal", app_update.image_channel())
             if state.get('status') == 'idle':
                 try:
                     state = json.loads((app_update.ROOT / 'result.json').read_text(encoding='utf-8'))
                 except (OSError, ValueError):
                     pass
+                state.setdefault("kanal", app_update.image_channel())
             self._send(200, json.dumps(state, ensure_ascii=False))
             return
         if parsed.path == "/api/system-settings":
@@ -4112,6 +4114,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         result = kasa.sistem_yedegi_ice_aktar(
                             temp, parola, DATA_ROOT, pod_setup._system_settings_path)
                         pod_setup.refresh_data_lock()
+                        merged = pod_setup.refresh_after_system_import()
+                        result["model_sayisi"] = merged["model_count"]
+                        result["lora_sayisi"] = merged["lora_count"]
                         pod_setup.checkpoint()
                     finally:
                         _kapatma_istegi.clear()
@@ -4160,7 +4165,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not _app_update_lock.acquire(blocking=False):
                 self._send(409, '{"hata":"Güncelleme zaten sürüyor."}')
                 return
-            _app_update_state = {"status": "preparing"}
+            _app_update_state = {"status": "preparing",
+                                 "kanal": app_update.image_channel()}
             threading.Thread(target=_app_update_worker, daemon=True).start()
             self._send(202, '{"status":"preparing"}')
             return

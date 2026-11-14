@@ -1,5 +1,6 @@
 """Stage only source files from the latest successfully built gallery image."""
 import io
+import base64
 import json
 import os
 import py_compile
@@ -12,6 +13,38 @@ from pathlib import Path
 ROOT = Path(os.environ.get('POD_RUNTIME_ROOT', '/opt/runtime')) / 'app-update'
 REPO = 'ahmetyusufprojects/comfyui-runpod-pod'
 BRANCH = 'runpod%2Fgallery-first'
+CHANNELS = ('stable', 'beta')
+
+def image_channel():
+    """Return the update channel selected by the RunPod template."""
+    value = os.environ.get('WEBUI_IMAGE_CHANNEL', 'stable').strip().lower()
+    if value not in CHANNELS:
+        raise RuntimeError('İmaj kanalı stable veya beta olmalı.')
+    return value
+
+def _stable_commit():
+    url = (f'https://api.github.com/repos/{REPO}/contents/docker/stable-image.txt'
+           f'?ref={BRANCH}')
+    value = json.loads(_fetch(url, 16 * 1024)).get('content')
+    if not isinstance(value, str):
+        raise RuntimeError('Stable sürüm işaretçisi okunamadı.')
+    try:
+        tag = base64.b64decode(value, validate=False).decode('ascii').strip()
+    except (ValueError, UnicodeDecodeError):
+        raise RuntimeError('Stable sürüm işaretçisi geçersiz.') from None
+    match = re.fullmatch(r'gallery-([0-9a-f]{40})', tag)
+    if not match:
+        raise RuntimeError('Stable imaj sürümü geçersiz.')
+    return match.group(1)
+
+def _beta_commit():
+    api = (f'https://api.github.com/repos/{REPO}/actions/workflows/'
+           f'gallery-image.yml/runs?branch={BRANCH}&status=success&per_page=1')
+    runs = json.loads(_fetch(api, 1024 * 1024)).get('workflow_runs') or []
+    commit = runs[0].get('head_sha') if runs else ''
+    if not re.fullmatch(r'[0-9a-f]{40}', commit):
+        raise RuntimeError('Başarılı bir beta imajı bulunamadı.')
+    return commit
 
 def _fetch(url, limit):
     req = urllib.request.Request(url, headers={'User-Agent': 'RunPod-WebUI-Updater',
@@ -22,12 +55,11 @@ def _fetch(url, limit):
         raise RuntimeError('Güncelleme paketi çok büyük.')
     return data
 
-def prepare():
-    api = f'https://api.github.com/repos/{REPO}/actions/workflows/gallery-image.yml/runs?branch={BRANCH}&status=success&per_page=1'
-    runs = json.loads(_fetch(api, 1024 * 1024)).get('workflow_runs') or []
-    commit = runs[0].get('head_sha') if runs else ''
-    if not re.fullmatch(r'[0-9a-f]{40}', commit):
-        raise RuntimeError('Başarılı bir imaj sürümü bulunamadı.')
+def prepare(channel=None):
+    channel = channel or image_channel()
+    if channel not in CHANNELS:
+        raise RuntimeError('İmaj kanalı stable veya beta olmalı.')
+    commit = _stable_commit() if channel == 'stable' else _beta_commit()
     archive = _fetch(f'https://codeload.github.com/{REPO}/tar.gz/{commit}', 32 * 1024 * 1024)
     ROOT.mkdir(parents=True, exist_ok=True)
     stage = ROOT / 'stage'
@@ -49,7 +81,7 @@ def prepare():
             members.get('docker/supervisor.py') != Path('/opt/pod/supervisor.py').read_bytes()):
         raise RuntimeError('Bu sürüm temel imaj değişikliği içeriyor; yeni Pod açılması gerekiyor.')
     required = ['arsiv.py', 'auth.py', 'comfy_client.py', 'flex_store.py', 'image_graphs.py',
-                'image_utils.py', 'kasa.py', 'llm.py', 'pod_setup.py', 'app_update.py',
+                'image_utils.py', 'enhancement_graphs.py', 'kasa.py', 'llm.py', 'pod_setup.py', 'app_update.py',
                 'prompt_store.py', 'prompt_translation.py', 'server.py', 'index.html',
                 'setup.html', 'video_r2v_api.json', 'video_wan22_api.json', 'static/app.js', 'static/app.css',
                 'static/setup.js', 'static/setup.css', 'model_prompts/flux.json',

@@ -19,6 +19,7 @@ FLEX = "cmw3pwboc000008jp5i0j6vi8"
 NAME = "gallery-webui"
 DATA_PATH = "/opt/runtime/user-data"
 TEMPLATE_ID = "0ax45qxl0n"
+TEMPLATE_IDS = {"stable": "y5zxwbeo57", "beta": TEMPLATE_ID}
 
 
 def request(url, method="GET", data=None, key=None):
@@ -43,10 +44,10 @@ def cli_json(args):
     return json.loads(result.stdout)
 
 
-def current_image():
-    # The registry's latest tag advances only after the tested GitHub build
-    # succeeds. SHA-tagged images remain available for rollback.
-    return f"ghcr.io/{REPO}:latest"
+def current_image(channel="beta"):
+    if channel not in TEMPLATE_IDS:
+        raise ValueError("İmaj kanalı stable veya beta olmalı.")
+    return f"ghcr.io/{REPO}:{channel}"
 
 
 def runpod_key():
@@ -91,6 +92,8 @@ def main():
     parser.add_argument("--stop", action="store_true", help="Kasayı mühürledikten sonra bu Pod'u kapatır.")
     parser.add_argument("--restore", action="store_true", help="İlk kurulum parolası sormadan Flex kaydını açar.")
     parser.add_argument("--max-usd", type=float, default=0.32, help="Saatlik GPU fiyat sınırı.")
+    parser.add_argument("--channel", choices=("stable", "beta"), default="beta",
+                        help="Kullanılacak RunPod imaj kanalı.")
     parser.add_argument("--no-browser", action="store_true")
     options = parser.parse_args()
     if options.max_usd <= 0:
@@ -116,12 +119,13 @@ def main():
         return
     if request(f"{API}/global-volumes/{FLEX}", key=key).get("id") != FLEX:
         raise RuntimeError("Mevcut Flex diski doğrulanamadı.")
-    image = current_image()
+    image = current_image(options.channel)
     gpus = choose_gpu(options.max_usd)
     if not gpus:
         raise RuntimeError("Fiyat sınırı içinde boş ve uyumlu GPU bulunamadı.")
     env = {"POD_FLEX_PREFIX": NAME, "WEBUI_DATA_ROOT": DATA_PATH,
            "WEBUI_BOOTSTRAP_USER": "user",
+           "WEBUI_IMAGE_CHANNEL": options.channel,
            "HF_TOKEN": "{{ RUNPOD_SECRET_HfToken2 }}"}
     if not options.restore:
         password = getpass.getpass("İlk kullanım için WebUI parolası (en az 8 karakter): ")
@@ -132,7 +136,7 @@ def main():
         gpu_id, rate = gpu["gpuId"], gpu["securePricePerHr"]
         print(f"Deneniyor: {gpu_id}, {rate:.2f} USD/saat", flush=True)
         body = {
-            "name": NAME, "templateId": TEMPLATE_ID, "image": image,
+            "name": NAME, "templateId": TEMPLATE_IDS[options.channel], "image": image,
             "cloud": "SECURE", "disk": 200,
             "gpu": {"id": gpu_id, "count": 1, "minCudaVersion": "12.8"},
             "ports": ["8189/http", "8192/http"], "env": env,

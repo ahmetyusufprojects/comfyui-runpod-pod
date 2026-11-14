@@ -113,7 +113,7 @@ $('backupImportForm')?.addEventListener('submit',async event=>{
   try{
     const result=await api('/api/backup-import',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Backup-Password':password},body:file});
     $('backupPassword').value='';$('backupFile').value='';
-    status.textContent=`${result.kullanici_sayisi||0} kullanıcı hesabı ve genel ayarlar geri yüklendi. Yedekteki hesapla yeniden giriş yap.`;
+    status.textContent=`${result.kullanici_sayisi||0} kullanıcı, güncel model kataloğu ve ${result.lora_sayisi||0} LoRA kaydı geri yüklendi. Yedekteki hesapla yeniden giriş yap.`;
   }catch(error){status.textContent='İçe aktarma başarısız: '+error.message;}
   finally{button.disabled=false;}
 });
@@ -354,6 +354,12 @@ async function refresh() {
     }
     $('preparing').hidden=true; $('loginPanel').hidden=true; $('dashboard').hidden=false;
     const info=await api('/api/pod-kurulum'); draw(info);
+    try {
+      const update=await api('/api/app-update');
+      const channel=update.kanal==='beta'?'beta':'stable';
+      $('updateChannel').textContent=`Güncelleme kanalı: ${channel}`;
+      $('updateApp').textContent=`${channel==='beta'?'Beta':'Stable'} sürümünü güncelle`;
+    } catch(_) {}
   } catch(error) {
     $('connection').textContent='Bağlantı yeniden deneniyor';
     if(error.status===401) { currentUser=null; $('preparing').hidden=true; $('loginPanel').hidden=false; $('dashboard').hidden=true; }
