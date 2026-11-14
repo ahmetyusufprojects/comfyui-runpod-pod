@@ -100,7 +100,8 @@ def cancel(group):
         _ctx._pause_requested.discard(group)
         dependents = _ctx._transitive_dependents(group)
         queued_dependents = dependents.intersection(_ctx._queue)
-        _ctx._queue[:] = [queued for queued in _queue if queued not in queued_dependents]
+        _ctx._queue[:] = [queued for queued in _ctx._queue
+                          if queued not in queued_dependents]
         for queued in queued_dependents:
             _ctx._state[queued] = ("cancelled", "Bağımlı model iptal edildi.")
         if group == _ctx._active:
