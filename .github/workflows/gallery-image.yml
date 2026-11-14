@@ -232,7 +232,11 @@ jobs:
           payload = json.dumps({"kullanici": "synthetic", "sifre": password}).encode()
           request = urllib.request.Request("http://127.0.0.1:8189/api/kurulum",
               data=payload, headers={"Content-Type": "application/json"}, method="POST")
-          created = json.load(urllib.request.urlopen(request, timeout=10))
+          try:
+              created = json.load(urllib.request.urlopen(request, timeout=10))
+          except Exception:
+              subprocess.run(["docker", "logs", "gallery-check"], check=False)
+              raise
           assert created["kullanici"] == "synthetic" and created["rol"] == "admin", created
           opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(
               http.cookiejar.CookieJar()))
