@@ -8,7 +8,7 @@
     "dev:main": "vite --mode main",
     "dev:setup": "vite --mode setup",
     "build": "tsc -b && vite build",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=1",
     "test:watch": "vitest"
   },
   "dependencies": {

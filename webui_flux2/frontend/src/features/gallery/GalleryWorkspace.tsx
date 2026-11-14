@@ -5,6 +5,7 @@ import "./GalleryWorkspace.css";
 
 export type GalleryTab = "archive" | "library" | "history";
 type Source = { tur?: string; ad?: string };
+type GalleryView = "izgara" | "akis";
 type MediaItem = {
   hash?: string;
   ad?: string;
@@ -138,6 +139,13 @@ function Pagination({ page, total, perPage, label, onChange }: {
   </nav>;
 }
 
+function GalleryViewButtons({ value, onChange, label }: { value: GalleryView; onChange: (value: GalleryView) => void; label: string }) {
+  return <div className="gallery-view-toggle" role="group" aria-label={`${label} görünümü`}>
+    <button type="button" className={value === "izgara" ? "is-active" : ""} aria-pressed={value === "izgara"} onClick={() => onChange("izgara")}>Izgara</button>
+    <button type="button" className={value === "akis" ? "is-active" : ""} aria-pressed={value === "akis"} onClick={() => onChange("akis")}>Akış</button>
+  </div>;
+}
+
 function MediaCard({ item, selected, selectable, onOpen, onToggle }: {
   item: MediaItem; selected?: boolean; selectable?: boolean; onOpen: () => void; onToggle?: () => void;
 }) {
@@ -157,10 +165,11 @@ function MediaCard({ item, selected, selectable, onOpen, onToggle }: {
   </article>;
 }
 
-function MediaDialog({ item, list, index, onClose, onStep, onUseReference, onFavorite, onRemove, busy }: {
-  item: MediaItem; list: MediaItem[]; index: number; onClose: () => void; onStep: (delta: number) => void;
+function MediaDialog({ item, list, index, onClose, onStep, hasPrevious, hasNext, onUseReference, onFavorite, onRemove, removeLabel, busy }: {
+  item: MediaItem; list: MediaItem[]; index: number; onClose: () => void; onStep: (delta: -1 | 1) => void | Promise<void>;
+  hasPrevious: boolean; hasNext: boolean;
   onUseReference?: (reference: GalleryReference) => void | Promise<void>;
-  onFavorite?: (item: MediaItem) => Promise<void>; onRemove?: (item: MediaItem) => Promise<void>; busy?: boolean;
+  onFavorite?: (item: MediaItem) => Promise<void>; onRemove?: (item: MediaItem) => Promise<void>; removeLabel?: string; busy?: boolean;
 }) {
   const dimensions = imageDimensions(item);
   const isVideo = item.tur === "video";
@@ -189,14 +198,14 @@ function MediaDialog({ item, list, index, onClose, onStep, onUseReference, onFav
       </div>
       <footer className="gallery-dialog__footer">
         <div className="gallery-dialog__navigation">
-          <button type="button" className="gallery-button gallery-button--quiet" disabled={index <= 0} onClick={() => onStep(-1)} aria-label="Önceki öğe">‹</button>
+          <button type="button" className="gallery-button gallery-button--quiet" disabled={!hasPrevious || busy} onClick={() => void onStep(-1)} aria-label="Önceki öğe">‹</button>
           <span>{index + 1} / {list.length}</span>
-          <button type="button" className="gallery-button gallery-button--quiet" disabled={index >= list.length - 1} onClick={() => onStep(1)} aria-label="Sonraki öğe">›</button>
+          <button type="button" className="gallery-button gallery-button--quiet" disabled={!hasNext || busy} onClick={() => void onStep(1)} aria-label="Sonraki öğe">›</button>
         </div>
         <div className="gallery-dialog__actions">
           {!isVideo && onUseReference && <button type="button" className="gallery-button gallery-button--primary" onClick={() => void onUseReference({ url: item.url, name: itemTitle(item), width: dimensions?.[0], height: dimensions?.[1] })}>Üretimde kullan</button>}
           {onFavorite && <button type="button" className="gallery-button" aria-pressed={!!item.yildiz} disabled={busy} onClick={() => void onFavorite(item)}>{item.yildiz ? "★ Favori" : "☆ Favori"}</button>}
-          {onRemove && <button type="button" className="gallery-button gallery-button--danger" disabled={busy} onClick={() => void onRemove(item)}>Kaldır</button>}
+          {onRemove && <button type="button" className="gallery-button gallery-button--danger" disabled={busy} onClick={() => void onRemove(item)}>{removeLabel || "Kaldır"}</button>}
         </div>
       </footer>
     </section>
@@ -209,6 +218,7 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
   const [archivePage, setArchivePage] = useState(1);
   const [archiveTotal, setArchiveTotal] = useState(0);
   const [archiveQuery, setArchiveQuery] = useState("");
+  const [archiveView, setArchiveView] = useState<GalleryView>("izgara");
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [archiveError, setArchiveError] = useState("");
@@ -218,6 +228,7 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
 
   const [libraryItems, setLibraryItems] = useState<MediaItem[]>([]);
   const [libraryQuery, setLibraryQuery] = useState("");
+  const [libraryView, setLibraryView] = useState<GalleryView>("izgara");
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState("");
 
@@ -225,6 +236,7 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
   const [historyPage, setHistoryPage] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [historyViewMode, setHistoryViewMode] = useState<GalleryView>("izgara");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [groupAlbums, setGroupAlbums] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -238,16 +250,31 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
   const [dialogList, setDialogList] = useState<MediaItem[] | null>(null);
   const [dialogIndex, setDialogIndex] = useState(-1);
   const [dialogBusy, setDialogBusy] = useState(false);
+  const historyPerPage = 12;
+
+  useEffect(() => {
+    let active = true;
+    void api.get<JsonRecord>("/api/ayarlar").then((data) => {
+      if (!active) return;
+      const settings = data.ayarlar && typeof data.ayarlar === "object" ? data.ayarlar as JsonRecord : {};
+      const ui = settings.ui && typeof settings.ui === "object" ? settings.ui as JsonRecord : {};
+      if (ui.history_view === "izgara" || ui.history_view === "akis") setHistoryViewMode(ui.history_view);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [api]);
 
   const loadArchive = useCallback(async (page: number, query: string, signal?: AbortSignal) => {
     setArchiveLoading(true);
     setArchiveError("");
     try {
       const data = await api.get<GalleryResponse>(`/api/arsiv?${queryString({ sayfa: page, adet: 24, q: query.trim() })}`, signal);
-      setArchiveItems(data.kayitlar ?? []);
+      const items = data.kayitlar ?? [];
+      setArchiveItems(items);
       setArchiveTotal(Number(data.toplam) || 0);
+      return items;
     } catch (error) {
       if (!signal?.aborted) { setArchiveItems([]); setArchiveTotal(0); setArchiveError(errorMessage(error)); }
+      return [];
     } finally {
       if (!signal?.aborted) setArchiveLoading(false);
     }
@@ -277,9 +304,12 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
       const data = await api.get<GalleryResponse>(`/api/gecmis?${queryString({
         sayfa: page, adet: 12, q: historyQuery.trim(), favoriler: favoritesOnly ? 1 : 0, albume_gore: groupAlbums ? 1 : 0,
       })}`, signal);
-      setHistoryItems(data.kayitlar ?? []); setHistoryTotal(Number(data.toplam) || 0);
+      const items = data.kayitlar ?? [];
+      setHistoryItems(items); setHistoryTotal(Number(data.toplam) || 0);
+      return items;
     } catch (error) {
       if (!signal?.aborted) { setHistoryItems([]); setHistoryTotal(0); setHistoryError(errorMessage(error)); }
+      return [];
     } finally { if (!signal?.aborted) setHistoryLoading(false); }
   }, [api, favoritesOnly, groupAlbums, historyQuery]);
 
@@ -290,20 +320,22 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [tab, activeAlbum, historyPage, historyQuery, loadHistory]);
 
-  const loadAlbum = useCallback(async (album: MediaItem, page: number) => {
-    if (!album.album_id) return;
+  const loadAlbum = useCallback(async (album: MediaItem, page: number): Promise<MediaItem[]> => {
+    if (!album.album_id) return [];
     setAlbumLoading(true); setHistoryError("");
     try {
       const data = await api.get<GalleryResponse>(`/api/gecmis?${queryString({ album_id: album.album_id, sayfa: page, adet: 12 })}`);
-      setAlbumItems(data.kayitlar ?? []); setAlbumTotal(Number(data.toplam) || Number(album.album_count) || 0); setAlbumPage(page);
-    } catch (error) { setHistoryError(errorMessage(error)); }
+      const items = data.kayitlar ?? [];
+      setAlbumItems(items); setAlbumTotal(Number(data.toplam) || Number(album.album_count) || 0); setAlbumPage(page);
+      return items;
+    } catch (error) { setHistoryError(errorMessage(error)); return []; }
     finally { setAlbumLoading(false); }
   }, [api]);
 
   const openAlbum = useCallback(async (album: MediaItem) => {
     setActiveAlbum(album);
     const initialPage = Math.max(1, Math.floor(Number(album.album_index ?? 0) / 12) + 1);
-    await loadAlbum(album, initialPage);
+    return loadAlbum(album, initialPage);
   }, [loadAlbum]);
 
   const setPage = (value: number) => {
@@ -397,6 +429,22 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
     finally { setLibraryLoading(false); }
   };
 
+  const removeHistoryItem = async (item: MediaItem) => {
+    if (!item.kayit || !window.confirm("Bu üretim geçmişi kaydı ve ona bağlı medya geçmişten silinsin mi?")) return;
+    setDialogBusy(true); setHistoryError("");
+    try {
+      await api.post("/api/gecmis/sil", { kayit: item.kayit });
+      setDialogList(null); setDialogIndex(-1);
+      await loadHistory(historyPage);
+    } catch (error) { setHistoryError(`Geçmiş kaydı silinemedi: ${errorMessage(error)}`); }
+    finally { setDialogBusy(false); }
+  };
+
+  const changeHistoryView = (value: GalleryView) => {
+    setHistoryViewMode(value);
+    void api.post("/api/ayarlar", { ui: { history_view: value } }).catch(() => setHistoryError("Görünüm tercihi kaydedilemedi."));
+  };
+
   const favoriteHistoryItem = async (item: MediaItem) => {
     if (!item.kayit) return;
     setDialogBusy(true);
@@ -416,6 +464,68 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
 
   const openDialog = (list: MediaItem[], index: number) => { setDialogList(list); setDialogIndex(index); };
   const dialogItem = dialogList && dialogIndex >= 0 ? dialogList[dialogIndex] : null;
+  const adjacentAlbum = (direction: -1 | 1): MediaItem | undefined => {
+    if (!activeAlbum?.album_id) return undefined;
+    const current = historyItems.findIndex(item => item.album_id === activeAlbum.album_id);
+    if (current < 0) return undefined;
+    const items = direction > 0 ? historyItems.slice(current + 1) : historyItems.slice(0, current).reverse();
+    return items.find(item => item.album && item.album_id && item.album_id !== activeAlbum.album_id);
+  };
+  const dialogHasPrevious = Boolean(dialogIndex > 0 || (tab === "archive" && archivePage > 1)
+    || (tab === "history" && (activeAlbum ? albumPage > 1 || Boolean(adjacentAlbum(-1)) || historyPage > 1 : historyPage > 1)));
+  const dialogHasNext = Boolean(dialogList && dialogIndex < dialogList.length - 1
+    || (tab === "archive" && archivePage < Math.ceil(archiveTotal / 24))
+    || (tab === "history" && (activeAlbum
+      ? albumPage < Math.ceil(albumTotal / historyPerPage) || Boolean(adjacentAlbum(1)) || historyPage < Math.ceil(historyTotal / historyPerPage)
+      : historyPage < Math.ceil(historyTotal / historyPerPage))));
+
+  const stepDialog = async (direction: -1 | 1) => {
+    if (!dialogList || dialogBusy || archiveBusy) return;
+    const nextIndex = dialogIndex + direction;
+    if (nextIndex >= 0 && nextIndex < dialogList.length) { setDialogIndex(nextIndex); return; }
+    setDialogBusy(true);
+    try {
+      if (tab === "archive") {
+        const nextPage = archivePage + direction;
+        if (nextPage < 1 || nextPage > Math.ceil(archiveTotal / 24)) return;
+        const items = await loadArchive(nextPage, archiveQuery);
+        if (items.length) { setArchivePage(nextPage); setDialogList(items); setDialogIndex(direction > 0 ? 0 : items.length - 1); }
+        return;
+      }
+      if (tab !== "history") return;
+      if (activeAlbum) {
+        const albumPages = Math.max(1, Math.ceil(albumTotal / historyPerPage));
+        const nextAlbumPage = albumPage + direction;
+        if (nextAlbumPage >= 1 && nextAlbumPage <= albumPages) {
+          const items = await loadAlbum(activeAlbum, nextAlbumPage);
+          if (items.length) { setDialogList(items); setDialogIndex(direction > 0 ? 0 : items.length - 1); }
+          return;
+        }
+        const samePageAlbum = adjacentAlbum(direction);
+        let target = samePageAlbum;
+        if (!target) {
+          const nextHistoryPage = historyPage + direction;
+          const pages = Math.max(1, Math.ceil(historyTotal / historyPerPage));
+          if (nextHistoryPage < 1 || nextHistoryPage > pages) return;
+          const topLevel = await loadHistory(nextHistoryPage);
+          setHistoryPage(nextHistoryPage);
+          target = direction > 0 ? topLevel.find(item => item.album && item.album_id !== activeAlbum.album_id) : [...topLevel].reverse().find(item => item.album && item.album_id !== activeAlbum.album_id);
+        }
+        if (target?.album_id) {
+          setActiveAlbum(target);
+          const targetPage = direction > 0 ? Math.max(1, Math.floor(Number(target.album_index ?? 0) / historyPerPage) + 1) : Math.max(1, Math.ceil(Number(target.album_count ?? 1) / historyPerPage));
+          const items = await loadAlbum(target, targetPage);
+          if (items.length) { setDialogList(items); setDialogIndex(direction > 0 ? 0 : items.length - 1); }
+        }
+        return;
+      }
+      const nextPage = historyPage + direction;
+      const pages = Math.max(1, Math.ceil(historyTotal / historyPerPage));
+      if (nextPage < 1 || nextPage > pages) return;
+      const items = await loadHistory(nextPage);
+      if (items.length) { setHistoryPage(nextPage); setDialogList(items); setDialogIndex(direction > 0 ? 0 : items.length - 1); }
+    } finally { setDialogBusy(false); }
+  };
   const filteredLibrary = useMemo(() => {
     const query = libraryQuery.trim().toLocaleLowerCase("tr-TR");
     return libraryItems.filter((item) => !query || itemTitle(item).toLocaleLowerCase("tr-TR").includes(query));
@@ -425,17 +535,16 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
     if (!dialogItem) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setDialogList(null);
-      if (event.key === "ArrowLeft") setDialogIndex((index) => Math.max(0, index - 1));
-      if (event.key === "ArrowRight") setDialogIndex((index) => Math.min((dialogList?.length ?? 1) - 1, index + 1));
+      if (event.key === "ArrowLeft" && dialogHasPrevious) { event.preventDefault(); void stepDialog(-1); }
+      if (event.key === "ArrowRight" && dialogHasNext) { event.preventDefault(); void stepDialog(1); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dialogItem, dialogList?.length]);
+  }, [dialogItem, dialogHasNext, dialogHasPrevious, stepDialog]);
 
   const historyView = activeAlbum ? albumItems : historyItems;
   const historyViewTotal = activeAlbum ? albumTotal : historyTotal;
   const historyViewPage = activeAlbum ? albumPage : historyPage;
-  const historyPerPage = 12;
 
   return <main className="gallery-page">
     <header className="gallery-heading">
@@ -451,6 +560,7 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
       <div className="gallery-toolbar">
         <label className="gallery-search"><span className="sr-only">Arşivde ara</span><input type="search" placeholder="Ad veya tarihe göre ara…" value={archiveQuery} onChange={(event) => { setArchiveQuery(event.target.value); setArchivePage(1); setSelectedHashes(new Set()); }} /></label>
         <div className="gallery-toolbar__actions">
+          <GalleryViewButtons value={archiveView} onChange={setArchiveView} label="Arşiv" />
           <label className="gallery-button gallery-button--upload">Görsel ekle<input type="file" accept="image/*" multiple disabled={archiveBusy} onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void importFiles(files); }} /></label>
           <button type="button" className={`gallery-button${selectionMode ? " is-active" : ""}`} aria-pressed={selectionMode} onClick={() => { setSelectionMode((active) => !active); setSelectedHashes(new Set()); }}>{selectionMode ? "Seçimi bitir" : "Seç"}</button>
         </div>
@@ -460,29 +570,29 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
       {archiveError && <p className="gallery-alert" role="alert">{archiveError}</p>}
       {archiveLoading && <p className="gallery-loading" role="status"><LoaderCircle size={16} className="gallery-spin" /> Arşiv yükleniyor…</p>}
       {!archiveLoading && archiveItems.length === 0 && <div className="gallery-empty"><ImageIcon size={25} /><h2>{archiveQuery ? "Eşleşen görsel yok" : "Arşiv henüz boş"}</h2><p>Üretimler, kütüphane öğeleri ve eklediğin görseller burada birlikte görünür.</p></div>}
-      <div className="gallery-grid">{archiveItems.map((item, index) => <MediaCard key={item.hash ?? `${item.ad}-${index}`} item={item} selectable={selectionMode} selected={!!item.hash && selectedHashes.has(item.hash)} onToggle={() => toggleSelected(item.hash)} onOpen={() => selectionMode ? toggleSelected(item.hash) : openDialog(archiveItems, index)} />)}</div>
+      <div className={`gallery-grid${archiveView === "akis" ? " gallery-grid--flow" : ""}`}>{archiveItems.map((item, index) => <MediaCard key={item.hash ?? `${item.ad}-${index}`} item={item} selectable={selectionMode} selected={!!item.hash && selectedHashes.has(item.hash)} onToggle={() => toggleSelected(item.hash)} onOpen={() => selectionMode ? toggleSelected(item.hash) : openDialog(archiveItems, index)} />)}</div>
       {!archiveLoading && <Pagination page={archivePage} total={archiveTotal} perPage={24} label="Arşiv" onChange={setPage} />}
     </section>}
 
     {tab === "library" && <section aria-label="Kütüphane">
-      <div className="gallery-toolbar"><label className="gallery-search"><span className="sr-only">Kütüphanede ara</span><input type="search" placeholder="Görsel adına göre ara…" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} /></label><div className="gallery-toolbar__actions"><button type="button" className="gallery-button gallery-button--danger" disabled={!libraryItems.length || libraryLoading} onClick={() => void clearLibrary()}>Kütüphaneyi temizle</button><button type="button" className="gallery-button" disabled={libraryLoading} onClick={() => void loadLibrary()}>Yenile</button></div></div>
+      <div className="gallery-toolbar"><label className="gallery-search"><span className="sr-only">Kütüphanede ara</span><input type="search" placeholder="Görsel adına göre ara…" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} /></label><div className="gallery-toolbar__actions"><GalleryViewButtons value={libraryView} onChange={setLibraryView} label="Kütüphane"/><button type="button" className="gallery-button gallery-button--danger" disabled={!libraryItems.length || libraryLoading} onClick={() => void clearLibrary()}>Kütüphaneyi temizle</button><button type="button" className="gallery-button" disabled={libraryLoading} onClick={() => void loadLibrary()}>Yenile</button></div></div>
       {libraryError && <p className="gallery-alert" role="alert">{libraryError}</p>}
       {libraryLoading && <p className="gallery-loading" role="status"><LoaderCircle size={16} className="gallery-spin" /> Kütüphane yükleniyor…</p>}
       {!libraryLoading && filteredLibrary.length === 0 && <div className="gallery-empty"><ImageIcon size={25} /><h2>{libraryQuery ? "Eşleşen görsel yok" : "Kütüphane henüz boş"}</h2><p>Üretimlerde kullanılan veya kaydedilen görseller burada bulunur.</p></div>}
-      <div className="gallery-grid">{filteredLibrary.map((item, index) => <MediaCard key={`${item.ad}-${index}`} item={item} onOpen={() => openDialog(filteredLibrary, index)} />)}</div>
+      <div className={`gallery-grid${libraryView === "akis" ? " gallery-grid--flow" : ""}`}>{filteredLibrary.map((item, index) => <MediaCard key={`${item.ad}-${index}`} item={item} onOpen={() => openDialog(filteredLibrary, index)} />)}</div>
       <p className="gallery-footnote">Kütüphaneden silme işlemi yalnızca seçtiğin dosyayı ve onun küçük/orijinal kopyasını kaldırır.</p>
     </section>}
 
     {tab === "history" && <section aria-label="Üretim geçmişi">
-      <div className="gallery-toolbar"><label className="gallery-search"><span className="sr-only">Geçmişte ara</span><input type="search" placeholder="Prompt, model veya tarihe göre ara…" value={historyQuery} onChange={(event) => { setHistoryQuery(event.target.value); setHistoryPage(1); }} /></label><div className="gallery-toolbar__actions"><label className="gallery-filter"><input type="checkbox" checked={favoritesOnly} onChange={(event) => { setFavoritesOnly(event.target.checked); setHistoryPage(1); setActiveAlbum(null); }} /> Favoriler</label><label className="gallery-filter"><input type="checkbox" checked={groupAlbums} onChange={(event) => { setGroupAlbums(event.target.checked); setHistoryPage(1); setActiveAlbum(null); }} /> Albümleri grupla</label></div></div>
+      <div className="gallery-toolbar"><label className="gallery-search"><span className="sr-only">Geçmişte ara</span><input type="search" placeholder="Prompt, model veya tarihe göre ara…" value={historyQuery} onChange={(event) => { setHistoryQuery(event.target.value); setHistoryPage(1); }} /></label><div className="gallery-toolbar__actions"><GalleryViewButtons value={historyViewMode} onChange={changeHistoryView} label="Geçmiş"/><label className="gallery-filter"><input type="checkbox" checked={favoritesOnly} onChange={(event) => { setFavoritesOnly(event.target.checked); setHistoryPage(1); setActiveAlbum(null); }} /> Favoriler</label><label className="gallery-filter"><input type="checkbox" checked={groupAlbums} onChange={(event) => { setGroupAlbums(event.target.checked); setHistoryPage(1); setActiveAlbum(null); }} /> Albümleri grupla</label></div></div>
       {activeAlbum && <div className="gallery-album-banner"><button type="button" className="gallery-button gallery-button--quiet" onClick={() => { setActiveAlbum(null); setAlbumItems([]); }}>← Albümlere dön</button><div><h2>{activeAlbum.prompt || "Üretim albümü"}</h2><p>{albumTotal} öğe · sayfa {albumPage} / {Math.max(1, Math.ceil(albumTotal / historyPerPage))}</p></div></div>}
       {historyError && <p className="gallery-alert" role="alert">{historyError}</p>}
       {(historyLoading || albumLoading) && <p className="gallery-loading" role="status"><LoaderCircle size={16} className="gallery-spin" /> Geçmiş yükleniyor…</p>}
       {!historyLoading && !albumLoading && historyView.length === 0 && <div className="gallery-empty"><ImageIcon size={25} /><h2>{historyQuery || favoritesOnly ? "Eşleşen kayıt yok" : "Henüz üretim yok"}</h2><p>Ürettiğin görseller ve videolar burada listelenir.</p></div>}
-      <div className="gallery-grid">{historyView.map((item, index) => item.album && !activeAlbum ? <button type="button" key={item.album_id ?? item.kayit ?? index} className="gallery-album-card" onClick={() => void openAlbum(item)}><span className="gallery-card__image"><img src={mediaUrl(item)} loading="lazy" alt="" /><span className="gallery-album-card__count">{item.album_count} öğe</span></span><span><strong>{item.prompt || "Üretim albümü"}</strong><small>{dateLabel(item.tarih)}</small></span></button> : <MediaCard key={`${item.kayit}-${item.dosya}-${index}`} item={item} onOpen={() => openDialog(historyView, index)} />)}</div>
+      <div className={`gallery-grid${historyViewMode === "akis" ? " gallery-grid--flow" : ""}`}>{historyView.map((item, index) => item.album && !activeAlbum ? <button type="button" key={item.album_id ?? item.kayit ?? index} className="gallery-album-card" onClick={() => void openAlbum(item)}><span className="gallery-card__image"><img src={mediaUrl(item)} loading="lazy" alt="" /><span className="gallery-album-card__count">{item.album_count} öğe</span></span><span><strong>{item.prompt || "Üretim albümü"}</strong><small>{dateLabel(item.tarih)}</small></span></button> : <MediaCard key={`${item.kayit}-${item.dosya}-${index}`} item={item} onOpen={() => openDialog(historyView, index)} />)}</div>
       {!historyLoading && !albumLoading && <Pagination page={historyViewPage} total={historyViewTotal} perPage={historyPerPage} label={activeAlbum ? "Albüm" : "Geçmiş"} onChange={(page) => activeAlbum ? void loadAlbum(activeAlbum, page) : setHistoryPage(page)} />}
     </section>}
 
-    {dialogItem && dialogList && <MediaDialog item={dialogItem} list={dialogList} index={dialogIndex} onClose={() => setDialogList(null)} onStep={(delta) => setDialogIndex((index) => Math.max(0, Math.min(dialogList.length - 1, index + delta)))} onUseReference={onUseReference} onFavorite={tab === "history" ? favoriteHistoryItem : undefined} onRemove={tab === "archive" ? (item) => removeArchiveItems(item.hash ? [item.hash] : []) : tab === "library" ? removeLibraryItem : undefined} busy={dialogBusy || archiveBusy} />}
+    {dialogItem && dialogList && <MediaDialog item={dialogItem} list={dialogList} index={dialogIndex} onClose={() => setDialogList(null)} onStep={stepDialog} hasPrevious={dialogHasPrevious} hasNext={dialogHasNext} onUseReference={onUseReference} onFavorite={tab === "history" ? favoriteHistoryItem : undefined} onRemove={tab === "archive" ? (item) => removeArchiveItems(item.hash ? [item.hash] : []) : tab === "library" ? removeLibraryItem : tab === "history" ? removeHistoryItem : undefined} removeLabel={tab === "history" ? "Geçmişten sil" : undefined} busy={dialogBusy || archiveBusy} />}
   </main>;
 }

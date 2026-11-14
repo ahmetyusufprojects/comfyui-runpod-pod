@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { LoaderCircle, Square, X } from "lucide-react";
 import type { JsonRecord, ProductionApi } from "../../lib/api/client";
 import "./ChatWorkspace.css";
 
 type ChatRole = "user" | "assistant";
 type ChatImage = { name: string; dataUrl: string };
-type ChatMessage = { role: ChatRole; content: string; images?: string[]; thinking?: string };
+type ChatMessage = { role: ChatRole; content: string; images?: string[]; thinking?: string; requestExtra?: JsonRecord };
 type SavedChat = { id: string; baslik?: string; mesajlar?: ChatMessage[]; guncelleme?: string };
 type ModelOption = { id: string; ad: string; hazir?: boolean; gorsel_hazir?: boolean };
 type JobState = "queued" | "running" | "stopping" | "done" | "error" | "cancelled";
 type ActiveJob = { id: string; state: JobState; message: string };
+type LibraryImage = { ad: string; url: string; thumb?: string };
+
+const MAX_IMAGES = 6;
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+const PROMPT_CONVERSION_INSTRUCTION = 'Bu sohbette konuşulan son konuyu, fotoğraf üretimi için kullanılacak ayrıntılı ve uzun bir üretim promptuna dönüştür. Konunun özünü ve kullanıcının niyetini koru; sohbette geçen ayrıntıları prompta taşı. Prompt İngilizce, tek paragraf ve üretmeye hazır olsun; sahne, kompozisyon, kamera, ışık, renk paleti, malzeme/doku, stil ve ruh hali ayrıntılarını içersin. Promptun bittiği yerde ayrı bir satırda yalnızca "Aspect ratio: Genişlik:Yükseklik" biçiminde, bu sahne için önerdiğin en uygun en-boy oranını yaz (örn. Aspect ratio: 16:9). Başka açıklama ekleme.';
 
 interface Props {
   api: ProductionApi;
@@ -17,10 +22,41 @@ interface Props {
   onPromptFromChat?: (prompt: string) => void;
 }
 
-function messageText(value: unknown): string {
+export function messageText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.filter((part) => part && typeof part.text === "string").map((part) => part.text).join("\n");
   return "";
+}
+
+export function restoreSavedMessage(message: ChatMessage & { resim?: string }): ChatMessage {
+  const content = message.content as unknown;
+  const imageParts = Array.isArray(content) ? content.flatMap((part) => {
+    if (!part || typeof part !== "object") return [];
+    const item = part as { type?: unknown; image_url?: { url?: unknown } };
+    const url = item.type === "image_url" ? item.image_url?.url : undefined;
+    return typeof url === "string" ? [url] : [];
+  }) : [];
+  return { ...message, content: messageText(content), images: imageParts.length ? imageParts : typeof message.resim === "string" ? [message.resim] : message.images };
+}
+
+export function acceptedChatFiles(files: FileList | File[], alreadyAttached: number) {
+  const accepted: File[] = [];
+  const errors: string[] = [];
+  let slots = Math.max(0, MAX_IMAGES - alreadyAttached);
+  for (const file of Array.from(files)) {
+    if (!file.type.startsWith("image/")) continue;
+    if (file.size > MAX_IMAGE_BYTES) { errors.push(`${file.name}: Görsel 6 MB sınırını aşıyor.`); continue; }
+    if (slots <= 0) { errors.push("Bir mesaja en fazla 6 görsel eklenebilir."); continue; }
+    accepted.push(file); slots -= 1;
+  }
+  return { accepted, errors };
+}
+
+function apiMessages(messages: ChatMessage[]) {
+  return messages.slice(-40).map((message) => ({ role: message.role, content: message.images?.length ? [
+    { type: "text", text: message.content },
+    ...message.images.map((url) => ({ type: "image_url", image_url: { url } })),
+  ] : message.content }));
 }
 
 function titleFor(chat: SavedChat): string {
@@ -28,7 +64,7 @@ function titleFor(chat: SavedChat): string {
   return messageText(chat.mesajlar?.find((message) => message.role === "user")?.content).slice(0, 54) || "Yeni sohbet";
 }
 
-function readImages(files: FileList | null): Promise<ChatImage[]> {
+function readImages(files: FileList | File[] | null): Promise<ChatImage[]> {
   if (!files?.length) return Promise.resolve([]);
   const selected = Array.from(files).filter((file) => file.type.startsWith("image/")).slice(0, 6);
   return Promise.all(selected.map((file) => new Promise<ChatImage>((resolve, reject) => {
@@ -48,7 +84,7 @@ function mapJobStatus(value: unknown): JobState {
   return "running";
 }
 
-export function ChatWorkspace({ api, initialModel, onPromptFromChat }: Props) {
+export function ChatWorkspace({ api, initialModel }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [savedChats, setSavedChats] = useState<SavedChat[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -64,6 +100,9 @@ export function ChatWorkspace({ api, initialModel, onPromptFromChat }: Props) {
   const [search, setSearch] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
+  const [library, setLibrary] = useState<LibraryImage[]>([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const history = useMemo(() => savedChats.filter((chat) => titleFor(chat).toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr"))), [savedChats, search]);
 
@@ -89,6 +128,20 @@ export function ChatWorkspace({ api, initialModel, onPromptFromChat }: Props) {
     return () => { alive = false; };
   }, [api, initialModel]);
 
+  useEffect(() => {
+    let alive = true;
+    api.get<JsonRecord>("/api/isler").then((data) => {
+      if (!alive) return;
+      const jobs = Array.isArray(data.isler) ? data.isler as Array<JsonRecord> : [];
+      const job = jobs.filter((item) => item.tur === "llm_chat" && (item.durum === "kuyrukta" || item.durum === "calisiyor")).at(-1);
+      if (typeof job?.is_id !== "string") return;
+      setMessages((current) => current.length && current.at(-1)?.role === "assistant" ? current : [...current, { role: "assistant", content: "" }]);
+      setBusy(true);
+      setActiveJob({ id: job.is_id, state: mapJobStatus(job.durum), message: "Devam eden sohbet işi yeniden bağlandı" });
+    }).catch(() => { /* Best-effort recovery; chat remains usable if discovery is unavailable. */ });
+    return () => { alive = false; };
+  }, [api]);
+
   const newChat = () => {
     if (busy) return;
     setSelectedChatId(null);
@@ -106,10 +159,7 @@ export function ChatWorkspace({ api, initialModel, onPromptFromChat }: Props) {
     try {
       const chat = await api.post<SavedChat>(`/api/sohbetler?id=${encodeURIComponent(id)}`, {});
       setSelectedChatId(chat.id);
-      setMessages((chat.mesajlar ?? []).map((message) => ({
-        ...message,
-        content: messageText(message.content),
-      })));
+      setMessages((chat.mesajlar ?? []).map((message) => restoreSavedMessage(message as ChatMessage & { resim?: string })));
       setNotice("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Sohbet açılamadı.");
@@ -140,6 +190,15 @@ export function ChatWorkspace({ api, initialModel, onPromptFromChat }: Props) {
       setError(reason instanceof Error ? reason.message : "Sohbet durdurulamadı.");
       setActiveJob((job) => job ? { ...job, state: "running", message: "Yanıt bekleniyor" } : null);
     }
+  };
+
+  const enqueueChat = async (chatMessages: ChatMessage[], extra: JsonRecord = {}, chatId = selectedChatId) => {
+    const queued = await api.post<JsonRecord>("/api/sohbet", {
+      mesajlar: apiMessages(chatMessages), yaraticilik: 0.7,
+      llm_model: modelId || undefined, sohbet_id: chatId || undefined, ...extra,
+    });
+    if (typeof queued.is_id !== "string") throw new Error("Sunucu iş numarası döndürmedi.");
+    setActiveJob({ id: queued.is_id, state: "queued", message: queued.sira ? `Kuyrukta · sıra ${queued.sira}` : "Yanıt bekleniyor" });
   };
 
   useEffect(() => {
@@ -203,21 +262,7 @@ export function ChatWorkspace({ api, initialModel, onPromptFromChat }: Props) {
     setDraft("");
     setImages([]);
     try {
-      const payload = nextMessages.slice(-40).map((message) => ({
-        role: message.role,
-        content: message.images?.length ? [
-          { type: "text", text: message.content },
-          ...message.images.map((url) => ({ type: "image_url", image_url: { url } })),
-        ] : message.content,
-      }));
-      const queued = await api.post<JsonRecord>("/api/sohbet", {
-        mesajlar: payload,
-        yaraticilik: 0.7,
-        llm_model: modelId || undefined,
-        sohbet_id: selectedChatId || undefined,
-      });
-      if (typeof queued.is_id !== "string") throw new Error("Sunucu iş numarası döndürmedi.");
-      setActiveJob({ id: queued.is_id, state: "queued", message: queued.sira ? `Kuyrukta · sıra ${queued.sira}` : "Yanıt bekleniyor" });
+      await enqueueChat(nextMessages);
     } catch (reason) {
       setBusy(false);
       setMessages((current) => current.slice(0, -1));
@@ -225,18 +270,84 @@ export function ChatWorkspace({ api, initialModel, onPromptFromChat }: Props) {
     }
   };
 
-  const handleFiles = async (files: FileList | null) => {
+  const convertChatToPrompt = async () => {
+    if (busy || !messages.length) return;
+    setBusy(true); setError(""); setNotice("");
+    setMessages((current) => [...current, { role: "assistant", content: "", requestExtra: { ek_talimat: PROMPT_CONVERSION_INSTRUCTION } }]);
+    try { await enqueueChat(messages, { ek_talimat: PROMPT_CONVERSION_INSTRUCTION }); }
+    catch (reason) {
+      setBusy(false); setMessages((current) => current.slice(0, -1));
+      setError(reason instanceof Error ? reason.message : "Prompt dönüşümü başlatılamadı.");
+    }
+  };
+
+  const regenerate = async (index: number) => {
+    if (busy || messages[index]?.role !== "assistant") return;
+    const before = messages.slice(0, index);
+    if (!before.length) return;
+    setBusy(true); setError(""); setMessages([...before, { role: "assistant", content: "" }]);
+    try { await enqueueChat(before, messages[index].requestExtra ?? {}, index === messages.length - 1 ? selectedChatId : null); }
+    catch (reason) {
+      setBusy(false); setMessages(before);
+      setError(reason instanceof Error ? reason.message : "Yanıt yeniden üretilemedi.");
+    }
+  };
+
+  const handleFiles = async (files: FileList | File[] | null) => {
+    if (!files?.length) return;
+    const { accepted, errors } = acceptedChatFiles(files, images.length);
+    if (errors.length) setError(errors.join(" "));
+    if (!accepted.length) return;
     setImageBusy(true);
-    setError("");
     try {
-      const next = await readImages(files);
-      setImages((current) => [...current, ...next].slice(0, 6));
+      const next = await readImages(accepted);
+      setImages((current) => [...current, ...next].slice(0, MAX_IMAGES));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Görsel eklenemedi.");
     } finally {
       setImageBusy(false);
       if (fileInput.current) fileInput.current.value = "";
     }
+  };
+
+  const openLibrary = async () => {
+    const opening = !libraryOpen;
+    setLibraryOpen(opening);
+    if (!opening) return;
+    try {
+      const data = await api.get<JsonRecord>("/api/kutuphane");
+      setLibrary(Array.isArray(data.fotograflar) ? data.fotograflar as LibraryImage[] : []);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Kütüphane yüklenemedi."); }
+  };
+
+  const selectLibraryImage = async (image: LibraryImage) => {
+    if (images.length >= MAX_IMAGES) { setError("Bir mesaja en fazla 6 görsel eklenebilir."); return; }
+    setImageBusy(true);
+    try {
+      const response = await fetch(image.url, { credentials: "same-origin" });
+      if (!response.ok) throw new Error("Kütüphane görseli yüklenemedi.");
+      const blob = await response.blob();
+      if (blob.size > MAX_IMAGE_BYTES) throw new Error("Görsel 6 MB sınırını aşıyor.");
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error("Görsel okunamadı.")); reader.readAsDataURL(blob);
+      });
+      setImages((current) => current.length < MAX_IMAGES ? [...current, { name: image.ad, dataUrl }] : current);
+      setLibraryOpen(false);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Kütüphane görseli yüklenemedi."); }
+    finally { setImageBusy(false); }
+  };
+
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if ((event.clipboardData.getData("text/plain") || "").trim()) return;
+    const files = Array.from(event.clipboardData.items).map((item) => item.getAsFile()).filter((file): file is File => !!file && file.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    void handleFiles(files);
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault(); setDragging(false);
+    void handleFiles(event.dataTransfer.files);
   };
 
   return <section className="chat-workspace" aria-labelledby="chat-title">
@@ -280,20 +391,24 @@ export function ChatWorkspace({ api, initialModel, onPromptFromChat }: Props) {
               ? <div className="chat-thinking"><LoaderCircle size={15} className="chat-spinner"/> Yanıt hazırlanıyor…</div>
               : <p className="chat-message__text">{message.content}</p>}
             {message.thinking && <details className="chat-thinking-details"><summary>Düşünme kaydı</summary><p>{message.thinking}</p></details>}
+            {message.role === "assistant" && message.content && !busy && <button className="chat-message__retry" onClick={() => void regenerate(index)}>↻ Yeniden üret</button>}
           </div>
         </article>)}
         {activeJob && <div className="chat-job-state" role="status"><LoaderCircle size={14} className="chat-spinner"/>{activeJob.message}</div>}
       </div>
 
-      <div className="chat-composer-wrap">
+      <div className={`chat-composer-wrap${dragging ? " chat-composer-wrap--dragging" : ""}`} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={onDrop}>
         {images.length > 0 && <div className="chat-attachments" aria-label="Eklenecek görseller">{images.map((image, index) => <div className="chat-attachment" key={`${image.name}-${index}`}>
           <img src={image.dataUrl} alt=""/><span>{image.name}</span><button className="chat-icon-btn" onClick={() => setImages((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`${image.name} görselini kaldır`}><X size={14}/></button>
         </div>)}</div>}
-        <div className="chat-composer"><label className="sr-only" htmlFor="chat-message">Mesaj</label><textarea id="chat-message" rows={2} placeholder="Mesajını yaz…" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} disabled={busy}/>
+        {libraryOpen && <div className="chat-library" role="dialog" aria-label="Kütüphaneden görsel seç">{library.length ? library.map((item) => <button key={item.ad} onClick={() => void selectLibraryImage(item)} disabled={imageBusy || images.length >= MAX_IMAGES}><img src={item.thumb || item.url} alt=""/><span>{item.ad}</span></button>) : <p>Kütüphanede görsel yok.</p>}</div>}
+        {dragging && <div className="chat-drop-hint">Görselleri mesaja eklemek için bırak</div>}
+        <div className="chat-composer"><label className="sr-only" htmlFor="chat-message">Mesaj</label><textarea id="chat-message" rows={2} placeholder="Mesajını yaz…" value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} disabled={busy}/>
           <div className="chat-composer__actions"><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => void handleFiles(event.target.files)}/>
-            <button className="chat-icon-btn" onClick={() => fileInput.current?.click()} aria-label="Sohbete görsel ekle" disabled={busy || imageBusy || images.length >= 6}>＋</button>
-            {images.length > 0 && <span className="chat-composer__hint">{images.length}/6 görsel</span>}
-            {onPromptFromChat && <button className="chat-text-action" onClick={() => onPromptFromChat(messages.map((message) => `${message.role === "user" ? "Kullanıcı" : "Asistan"}: ${message.content}`).join("\n"))} disabled={!messages.length}>Sohbetten prompt hazırla</button>}
+            <button className="chat-icon-btn" onClick={() => fileInput.current?.click()} aria-label="Sohbete görsel ekle" disabled={busy || imageBusy || images.length >= MAX_IMAGES}>＋</button>
+            {images.length > 0 && <span className="chat-composer__hint">{images.length}/{MAX_IMAGES} görsel</span>}
+            <button className="chat-text-action" onClick={() => void openLibrary()} disabled={busy || imageBusy || images.length >= MAX_IMAGES}>Kütüphaneden ekle</button>
+            <button className="chat-text-action" onClick={() => void convertChatToPrompt()} disabled={busy || !messages.length}>Sohbetten prompt üret</button>
             {busy ? <button className="chat-send chat-send--stop" onClick={() => void cancelJob()} disabled={!activeJob || activeJob.state === "stopping"} aria-label="Yanıtı durdur"><Square size={14} fill="currentColor"/> Durdur</button> : <button className="chat-send" onClick={() => void send()} disabled={(!draft.trim() && !images.length) || imageBusy}>↑ Gönder</button>}
           </div>
         </div>

@@ -48,12 +48,24 @@ export function InstallerWorkspace({ api }: InstallerWorkspaceProps) {
   const [error, setError] = useState(""), [busy, setBusy] = useState(false), [loginName, setLoginName] = useState(""), [loginPass, setLoginPass] = useState("");
   const [status, setStatus] = useState<Dict>({}), [settings, setSettings] = useState<Dict>({}), [logs, setLogs] = useState("");
   const [logSource, setLogSource] = useState("setup"), [backupList, setBackupList] = useState<Dict>({}), [backupStatus, setBackupStatus] = useState("");
-  const [restorePassword, setRestorePassword] = useState(""), [backupPassword, setBackupPassword] = useState(""), [restoreProgress, setRestoreProgress] = useState(0);
+  const [restorePassword, setRestorePassword] = useState(""), [backupPassword, setBackupPassword] = useState(""), [restoreProgress, setRestoreProgress] = useState(0), [defaultOrder, setDefaultOrder] = useState<string[]>([]);
   const [modelFamily, setModelFamily] = useState(""), [optionalFiles, setOptionalFiles] = useState<Record<string, boolean>>({}), [loraModel, setLoraModel] = useState("z_image"), [modelName, setModelName] = useState("");
   const groups: Dict[] = status.gruplar || [];
   const groupMap = useMemo(() => new Map(groups.map(g => [g.id, g])), [groups]);
   const loadStatus = useCallback(async () => setStatus(await api.get("/api/pod-kurulum")), [api]);
-  const loadSettings = useCallback(async () => setSettings(await api.get("/api/system-settings")), [api]);
+  const applySettings = (data: Dict) => {
+    setSettings(data);
+    const ids = (data.gruplar || []).map((group: Dict) => String(group.id));
+    const selected = data.ayarlar?.default_download_order || [];
+    setDefaultOrder([...selected.filter((id: string) => ids.includes(id)), ...ids.filter((id: string) => !selected.includes(id))]);
+  };
+  const loadSettings = useCallback(async () => {
+    const data = await api.get<Dict>("/api/system-settings");
+    setSettings(data);
+    const ids = (data.gruplar || []).map((group: Dict) => String(group.id));
+    const selected = data.ayarlar?.default_download_order || [];
+    setDefaultOrder([...selected.filter((id: string) => ids.includes(id)), ...ids.filter((id: string) => !selected.includes(id))]);
+  }, [api]);
   const refresh = useCallback(async () => {
     setError("");
     try {
@@ -70,7 +82,7 @@ export function InstallerWorkspace({ api }: InstallerWorkspaceProps) {
   useEffect(() => { if (user?.rol === "admin" && tab === "backups") void api.get<Dict>("/api/r2-backups").then(setBackupList).catch(e => setBackupStatus(String(e))); }, [api, user, tab]);
 
   const action = async (islem: string, data: Dict = {}) => { setBusy(true); setError(""); try { setStatus(await api.post("/api/pod-kurulum", { ...data, islem })); } catch (e) { setError(e instanceof Error ? e.message : "İşlem başarısız."); } finally { setBusy(false); } };
-  const postSettings = async (payload: Dict, message = "Kaydedildi.") => { setBusy(true); setError(""); try { setSettings(await api.post("/api/system-settings", payload)); setBackupStatus(message); } catch (e) { setError(e instanceof Error ? e.message : "Ayar kaydedilemedi."); } finally { setBusy(false); } };
+  const postSettings = async (payload: Dict, message = "Kaydedildi.") => { setBusy(true); setError(""); try { applySettings(await api.post<Dict>("/api/system-settings", payload)); setBackupStatus(message); } catch (e) { setError(e instanceof Error ? e.message : "Ayar kaydedilemedi."); } finally { setBusy(false); } };
   const login = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setError(""); try { const result = await api.post<Dict>("/api/giris", { kullanici: loginName.trim(), sifre: loginPass }); setLoginPass(""); if (result.rol !== "admin") throw new Error("Bu panel yönetici girişi gerektiriyor."); setUser(result); await loadStatus(); } catch (e) { setError(e instanceof Error ? e.message : "Giriş başarısız."); } finally { setBusy(false); } };
   const logout = async () => { try { await api.post("/api/cikis", {}); } finally { setUser(null); } };
 
@@ -95,7 +107,7 @@ export function InstallerWorkspace({ api }: InstallerWorkspaceProps) {
       <section className="installer-subsection"><h3>İndirme sırası</h3><p>Bu oturumdaki sırayı değiştirmek için yukarı/aşağı düğmelerini kullan. Kalıcı varsayılan sıra Genel ayarlar bölümündedir.</p><ol>{queued.map(id => <li key={id}>{groupMap.get(id)?.ad || id}</li>)}</ol></section>
     </section>}
     {tab === "settings" && <section className="installer-section" data-state={busy?"submitting":"idle"} aria-busy={busy}><div className="installer-section-heading"><div><h2>Evrensel ayarlar</h2><p>Bu tercihler kullanıcıya özel değildir; bağlı volume varsa orada korunur.</p></div></div>{busy&&<p role="status">Kaydediliyor…</p>}<nav className="installer-subtabs" aria-label="Ayar kategorileri">{[["startup","Başlangıç"],["models","Modeller"],["links","Bağlantılar"],["loras","LoRA"],["system","Genel"]].map(([id,label])=><button type="button" key={id} aria-pressed={pane===id} onClick={()=>setPane(id)}>{label}</button>)}</nav>
-      {pane === "startup" && <div className="installer-panel"><label className="installer-check"><input type="checkbox" checked={settings.ayarlar?.auto_download === true} onChange={e => setSettings((s: Dict) => ({...s, ayarlar:{...s.ayarlar, auto_download:e.target.checked}}))}/> Pod açıldığında varsayılan model indirme sırasını otomatik başlat</label><h3>Varsayılan indirme sırası</h3>{(settings.gruplar || []).map((g: Dict) => <label className="installer-check" key={g.id}><input type="checkbox" checked={(settings.ayarlar?.default_download_order || []).includes(g.id)} onChange={e => { const prev = settings.ayarlar?.default_download_order || []; setSettings((s: Dict) => ({...s, ayarlar:{...s.ayarlar, default_download_order:e.target.checked ? [...prev,g.id] : prev.filter((id: string)=>id!==g.id)}})); }}/>{g.label || g.ad}</label>)}<button onClick={() => void postSettings({islem:"kaydet", auto_download:settings.ayarlar?.auto_download, default_download_order:settings.ayarlar?.default_download_order || []})}>Varsayılanları kaydet</button></div>}
+      {pane === "startup" && <div className="installer-panel"><label className="installer-check"><input type="checkbox" checked={settings.ayarlar?.auto_download === true} onChange={e => setSettings((s: Dict) => ({...s, ayarlar:{...s.ayarlar, auto_download:e.target.checked}}))}/> Pod açıldığında varsayılan model indirme sırasını otomatik başlat</label><h3>Varsayılan indirme sırası</h3><p>Seçili grupların indirme sırasını oklarla değiştir. Bu, bu oturumdaki kuyruk sırasından ayrıdır.</p>{defaultOrder.map((id,index) => { const group=(settings.gruplar||[]).find((item:Dict)=>item.id===id); if(!group)return null; const selected=(settings.ayarlar?.default_download_order||[]).includes(id); return <div className="installer-row" key={id}><label className="installer-check"><input type="checkbox" checked={selected} onChange={e=>{const previous=settings.ayarlar?.default_download_order||[];const next=defaultOrder.filter(item=>e.target.checked?item===id||previous.includes(item):item!==id&&previous.includes(item));setSettings((s:Dict)=>({...s,ayarlar:{...s.ayarlar,default_download_order:next}}));}}/>{group.label||group.ad}</label><div className="installer-actions"><button type="button" disabled={index===0} aria-label={`${group.label||group.ad} yukarı taşı`} onClick={()=>setDefaultOrder(order=>{const next=[...order];[next[index-1],next[index]]=[next[index],next[index-1]];return next;})}>↑</button><button type="button" disabled={index===defaultOrder.length-1} aria-label={`${group.label||group.ad} aşağı taşı`} onClick={()=>setDefaultOrder(order=>{const next=[...order];[next[index+1],next[index]]=[next[index],next[index+1]];return next;})}>↓</button></div></div>; })}<button onClick={() => void postSettings({islem:"kaydet", auto_download:settings.ayarlar?.auto_download, default_download_order:defaultOrder.filter(id=>(settings.ayarlar?.default_download_order||[]).includes(id))})}>Varsayılanları kaydet</button></div>}
       {pane === "models" && <ModelManagementPanel settings={settings} busy={busy} modelFamily={modelFamily} setModelFamily={value => { setModelFamily(value); setOptionalFiles({}); }} optionalFiles={optionalFiles} setOptionalFiles={setOptionalFiles} modelName={modelName} setModelName={setModelName} postSettings={postSettings}/>}
       {pane === "links" && <div className="installer-panel"><h3>Model dosyası bağlantıları</h3>{(settings.gruplar||[]).flatMap((g:Dict)=>(g.files||[]).filter((f:Dict)=>f.link).map((f:Dict)=><LinkRow key={`${g.id}-${f.name}`} group={g} file={f} save={link=>void postSettings({islem:"baglanti",grup:g.id,dosya:f.name,baglanti:link},"Bağlantı kaydedildi.")} reset={()=>void postSettings({islem:"varsayilan",grup:g.id,dosya:f.name},"Varsayılan bağlantı yüklendi.")}/>))}</div>}
       {pane === "loras" && <div className="installer-panel"><h3>LoRA kayıtları</h3>{(settings.ayarlar?.loras||[]).map((l:Dict)=><LoraRow key={l.id} lora={l} status={(settings.lora_durum||[]).find((s:Dict)=>s.id===l.id)} save={payload=>void postSettings({islem:"lora_ayar",id:l.id,...payload})} remove={()=>{if(window.confirm("LoRA kaydı silinsin mi?"))void postSettings({islem:"lora_sil",id:l.id});}}/>)}<h3>LoRA ekle</h3><form className="installer-form" onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const data=new FormData(form);void postSettings({islem:"lora_ekle",name:data.get("name"),model:data.get("model"),link:data.get("link")},"LoRA eklendi.");form.reset();}}><label>Ad<input name="name" required/></label><label>Görsel modeli<select name="model" value={loraModel} onChange={e=>setLoraModel(e.target.value)}>{[["z_image","Z-Image"],["flux2","Flux 2 Klein"],["flux3","Flux 3 Klein"],["krea2","Krea 2"],["illustrious","Illustrious"]].map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label><label>Hugging Face veya Civitai indirme bağlantısı<input name="link" type="url" required/></label><button disabled={busy}>LoRA kaydet</button></form></div>}
@@ -107,8 +119,22 @@ export function InstallerWorkspace({ api }: InstallerWorkspaceProps) {
 }
 
 function SystemTools({api,ready,busy,logSource,setLogSource,logs,setLogs}:{api:InstallerApi;ready:Dict;busy:boolean;logSource:string;setLogSource:(value:string)=>void;logs:string;setLogs:(value:string)=>void}) {
-  const [working,setWorking]=useState(false),[message,setMessage]=useState("");
+  const [working,setWorking]=useState(false),[message,setMessage]=useState(""),[channel,setChannel]=useState("");
   const pending = working || busy;
+  const loadLogs = useCallback(async()=>{
+    try { const data=await api.get<Dict>(`/api/log?kaynak=${encodeURIComponent(logSource)}&satir=200`); setLogs((data.satirlar||[]).join("\n")); }
+    catch(error) { setMessage(error instanceof Error?error.message:"Loglar alınamadı."); }
+  },[api,logSource,setLogs]);
+  useEffect(()=>{
+    let alive=true;
+    void api.get<Dict>("/api/app-update").then(state=>{if(alive)setChannel(String(state.kanal||""));}).catch(()=>{if(alive)setChannel("");});
+    return ()=>{alive=false;};
+  },[api]);
+  useEffect(()=>{
+    void loadLogs();
+    const id=window.setInterval(()=>void loadLogs(),8000);
+    return ()=>window.clearInterval(id);
+  },[loadLogs]);
   const update = async () => {
     setWorking(true); setMessage("Güncelleme hazırlanıyor…");
     try {
@@ -124,6 +150,7 @@ function SystemTools({api,ready,busy,logSource,setLogSource,logs,setLogs}:{api:I
           disconnected=true; setMessage("Uygulama yeniden açılıyor; bağlantı bekleniyor…"); continue;
         }
         disconnected=false;
+        if(state.kanal)setChannel(String(state.kanal));
         if(state.status==="error") throw new Error(state.message||"Güncelleme başarısız.");
         if(state.status==="ready"){setMessage("Güncelleme tamamlandı; sayfa yenileniyor…");window.location.reload();return;}
         setMessage(state.status==="restarting"?"Kasalar mühürlendi; uygulama yeniden açılıyor…":`Güncelleme sürüyor${state.status?` · ${state.status}`:"…"}`);
@@ -154,8 +181,8 @@ function SystemTools({api,ready,busy,logSource,setLogSource,logs,setLogs}:{api:I
     finally { setWorking(false); }
   };
   return <section className="installer-section" data-state={pending?"submitting":"idle"} aria-busy={pending}><h2>Sistem araçları</h2><p>Bakım işlemleri model dosyalarını korur; depolama temizliği indirilen modelleri ve önbelleği kaldırır.</p>
-    <div className="installer-panel"><label>Log kaynağı<select value={logSource} onChange={event=>setLogSource(event.target.value)}>{[["setup","Kurucu"],["comfy","ComfyUI"],["webui","WebUI"],["llama","LLM"]].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><button disabled={pending} onClick={()=>void api.get<Dict>(`/api/log?kaynak=${logSource}&satir=200`).then(data=>setLogs((data.satirlar||[]).join("\n"))).catch(error=>setMessage(error instanceof Error?error.message:"Loglar alınamadı."))}>Logları getir</button><pre className="installer-log">{logs||"Logları görüntülemek için kaynak seçip düğmeye bas."}</pre></div>
-    <div className="installer-panel"><h3>Uygulama</h3><p>Kanal: {ready.kanal||"seçilen sürüm"}</p><button disabled={pending} onClick={()=>void update()}>Uygulamayı güncelle</button><button disabled={pending} onClick={()=>void restart()}>Servisleri yeniden başlat</button></div>
+    <div className="installer-panel"><label>Log kaynağı<select value={logSource} onChange={event=>setLogSource(event.target.value)}>{[["setup","Kurucu"],["comfy","ComfyUI"],["webui","WebUI"],["llama","LLM"]].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><button disabled={pending} onClick={()=>void loadLogs()}>Logları getir</button><pre className="installer-log">{logs||"Loglar alınırken bekleyin…"}</pre></div>
+    <div className="installer-panel"><h3>Uygulama</h3><p>Kanal: {channel||ready.kanal||"yükleniyor…"}</p><button disabled={pending} onClick={()=>void update()}>Uygulamayı güncelle</button><button disabled={pending} onClick={()=>void restart()}>Servisleri yeniden başlat</button></div>
     <div className="installer-panel"><h3>Depolama temizliği</h3><p>İndirilen modelleri ve önbelleği siler. Kullanıcı hesapları, kasa ve genel ayarlar korunur.</p><button className="installer-danger" disabled={pending} onClick={()=>void clearStorage()}>Depolamayı temizle</button></div>
     {message&&<p role="status">{message}</p>}
   </section>;
@@ -197,14 +224,34 @@ function ModelManagementPanel({settings,busy,modelFamily,setModelFamily,optional
 }
 
 function ModelRow({model,onSave,onDelete}:{model:Dict;onSave:(name:string)=>void;onDelete:()=>void}) { const [name,setName]=useState(model.name||""); return <article className="installer-row"><span>{model.family} · {model.ready?"Dosyalar hazır":"İndirilmedi"}</span><input aria-label={`Model adı: ${model.name}`} value={name} onChange={e=>setName(e.target.value)}/><button onClick={()=>onSave(name)}>Adı kaydet</button>{!model.builtin&&<button onClick={onDelete}>Model kaydını sil</button>}</article>; }
-function LinkRow({group,file,save,reset}:{group:Dict;file:Dict;save:(v:string)=>void;reset:()=>void}) { const [value,setValue]=useState(file.link||""); return <div className="installer-link-row"><label>{group.label||group.ad} · {file.name}<input type="url" value={value} onChange={e=>setValue(e.target.value)}/></label><button onClick={()=>save(value)}>Kaydet</button><button onClick={reset}>Varsayılan</button></div>; }
+function LinkRow({group,file,save,reset}:{group:Dict;file:Dict;save:(v:string)=>void;reset:()=>void}) { const [value,setValue]=useState(file.link||""); useEffect(()=>setValue(file.link||""),[file.link]); return <div className="installer-link-row"><label>{group.label||group.ad} · {file.name}<input type="url" value={value} onChange={e=>setValue(e.target.value)}/></label><button onClick={()=>save(value)}>Kaydet</button><button onClick={reset}>Varsayılan</button></div>; }
 function LoraRow({lora,status,save,remove}:{lora:Dict;status?:Dict;save:(v:Dict)=>void;remove:()=>void}) { const [enabled,setEnabled]=useState(!!lora.enabled),[selected,setSelected]=useState(!!lora.default_selected),[auto,setAuto]=useState(!!lora.auto_download),[weight,setWeight]=useState(Number(lora.weight||1)); return <article className="installer-lora"><b>{lora.name}</b><small>{status?.hazir?"Dosya hazır":status?.durum==="running"?"İndiriliyor":"İndirilmemiş"}</small><div><label><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/> Kullanılabilir</label><label><input type="checkbox" checked={selected} onChange={e=>setSelected(e.target.checked)}/> Varsayılan seç</label><label><input type="checkbox" checked={auto} onChange={e=>setAuto(e.target.checked)}/> Otomatik indir</label><label>Ağırlık<input type="number" min="0" max="2" step="0.05" value={weight} onChange={e=>setWeight(Number(e.target.value))}/></label></div><button onClick={()=>save({enabled,default_selected:selected,auto_download:auto,weight})}>Ayarları kaydet</button>{!lora.built_in&&<button onClick={remove}>LoRA kaydını sil</button>}</article>; }
 
 function BackupPanel({backupList,setBackupList,status,setStatus,password,setPassword,restorePassword,setRestorePassword,progress,setProgress}:{backupList:Dict;setBackupList:(v:Dict)=>void;status:string;setStatus:(v:string)=>void;password:string;setPassword:(v:string)=>void;restorePassword:string;setRestorePassword:(v:string)=>void;progress:number;setProgress:(v:number)=>void}) {
   const [excludeMedia,setExcludeMedia]=useState(false),[name,setName]=useState("webui-system"),[file,setFile]=useState<File|null>(null),[fileToken,setFileToken]=useState(""),[selected,setSelected]=useState<Dict|null>(null),[working,setWorking]=useState(false);
-  const poll=async (id:string)=>{for(let i=0;i<240;i++){const s=await rawJson<Dict>(`/api/backup-progress?token=${encodeURIComponent(id)}`);setStatus(`${s.stage||s.status}${s.bytes?` · ${humanBytes(Number(s.bytes))}`:""}`);if(s.status==="complete"){setProgress(100);return s;}if(s.status==="error")throw new Error(s.error||"İşlem başarısız.");setProgress(s.total?Math.round(100*Number(s.bytes||0)/Number(s.total)):0);await wait(900);}throw new Error("İşlem beklenenden uzun sürdü.");};
+  const poll=async (id:string)=>{while(true){let s:Dict;try{s=await rawJson<Dict>(`/api/backup-progress?token=${encodeURIComponent(id)}`);}catch(error){const code=(error as Error&{status?:number}).status;if(code===401||code===403||code===404)throw error;setStatus("Bağlantı geçici olarak kesildi; yedek işlemi sürüyor ve durum yeniden denenecek…");await wait(2500);continue;}setStatus(`${s.stage||s.status}${s.bytes?` · ${humanBytes(Number(s.bytes))}`:""}`);if(s.status==="complete"){setProgress(100);return s;}if(s.status==="error")throw new Error(s.error||s.stage||"İşlem başarısız.");setProgress(s.total?Math.round(100*Number(s.bytes||0)/Number(s.total)):0);await wait(900);}};
   const getFileToken=async()=>{if(!file)throw new Error("Şifreli yedek dosyası seç.");const key=backupFileStorageKey(file);let id=fileToken||localValue(key);if(!id){const body=await uploadEncryptedBackup(file,p=>{setProgress(p);setStatus(`Şifreli dosya bu Pod’a yükleniyor · %${p}`);});id=String(body.token||"");if(!/^[a-f0-9]{32}$/.test(id))throw new Error("Sunucu yükleme kimliği döndürmedi.");setFileToken(id);setLocalValue(key,id);}return {id,key};};
-  const importToken=async(id:string)=>{let done=false;const pending=rawJson<Dict>("/api/backup-import",{method:"POST",headers:{...jsonHeaders,"X-Backup-Password":restorePassword},body:JSON.stringify({token:id})}).then(value=>({value}),error=>({error})).then(result=>{done=true;return result;});for(let i=0;i<300&&!done;i++){try{const state=await rawJson<Dict>(`/api/backup-progress?token=${encodeURIComponent(id)}`);setStatus(`${state.stage||"Geri yükleniyor"}${state.files?` · ${state.files} dosya`:""}`);if(state.total)setProgress(Math.round(100*Number(state.bytes||0)/Number(state.total)));}catch{/* Upload or import status can briefly be unavailable while services restart. */}await wait(850);}if(!done)throw new Error("Geri yükleme sunucuda sürüyor. Yedek korunuyor; aynı dosyayı yeniden seçerek devam edebilirsin.");const result=await pending;if("error" in result){if((result.error as Error & {status?:number})?.status===404)throw Object.assign(result.error as Error,{clearUpload:true});throw result.error;}return result.value;};
+  const importToken=async(id:string)=>{
+    let existing:Dict|undefined;
+    try{existing=await rawJson<Dict>(`/api/backup-progress?token=${encodeURIComponent(id)}`);}catch(error){const code=(error as Error&{status?:number}).status;if(code===401||code===403)throw error;}
+    const importAlreadyComplete=(state?:Dict)=>state?.status==="complete"&&/geri yükleme tamamlandı/i.test(String(state.stage||""));
+    if(importAlreadyComplete(existing))return existing?.result||{};
+    if(existing?.status==="running"){
+      const finished=await poll(id);
+      if(!/geri yükleme tamamlandı/i.test(String(finished.stage||"")))throw new Error("Önceki yedek işlemi tamamlandı; durumunu kontrol edip tekrar deneyin.");
+      return finished.result||{};
+    }
+    let done=false;
+    const pending=rawJson<Dict>("/api/backup-import",{method:"POST",headers:{...jsonHeaders,"X-Backup-Password":restorePassword},body:JSON.stringify({token:id})}).then(value=>({value}),error=>({error})).then(result=>{done=true;return result;});
+    while(!done){
+      try{const state=await rawJson<Dict>(`/api/backup-progress?token=${encodeURIComponent(id)}`);setStatus(`${state.stage||"Geri yükleniyor"}${state.files?` · ${state.files} dosya`:""}`);if(state.total)setProgress(Math.round(100*Number(state.bytes||0)/Number(state.total)));if(state.status==="error"&&existing?.status==="running")throw new Error(state.error||state.stage||"Geri yükleme başarısız.");}
+      catch(error){const code=(error as Error&{status?:number}).status;if(code===401||code===403||code===404)throw error;setStatus("Bağlantı geçici olarak kesildi; aynı yedek yüklemesi korunuyor ve durum yeniden denenecek…");}
+      await wait(850);
+    }
+    const result=await pending;
+    if("error" in result){if((result.error as Error & {status?:number})?.status===404)throw Object.assign(result.error as Error,{clearUpload:true});throw result.error;}
+    return result.value||{};
+  };
   const exportLocal=async()=>{if(!password)throw new Error("Yedek parolası gerekli.");const res=await fetch("/api/backup-export",{method:"POST",credentials:"same-origin",headers:{"X-Backup-Password":password,...(excludeMedia?{"X-Backup-Media":"exclude"}:{})}});if(!res.ok){const body=await res.json().catch(()=>({}));throw new Error(body.hata||"Yedek dışa aktarılamadı.");}const url=URL.createObjectURL(await res.blob()),a=document.createElement("a");a.href=url;a.download="webui-system.wuis.gpg";a.click();window.setTimeout(()=>URL.revokeObjectURL(url),1000);setStatus(excludeMedia?"Medyasız, şifreli yedek indirildi.":"Tam sistem yedeği şifrelenerek indirildi.");};
   const importLocal=async()=>{if(!restorePassword)throw new Error("Yedek parolası gerekli.");const {id,key}=await getFileToken();try{await importToken(id);setLocalValue(key,null);setFileToken("");setProgress(100);setStatus("Yedek geri yüklendi. Yedekteki hesapla yeniden giriş yap.");}catch(error){if((error as Error & {clearUpload?:boolean})?.clearUpload){setLocalValue(key,null);setFileToken("");}throw error;}};
   const refresh=async()=>{const data=await rawJson<Dict>("/api/r2-backups");setBackupList(data);setStatus(data.connected?`R2 bağlı · ${data.bucket}`:data.error||"R2 yapılandırılmamış.");};

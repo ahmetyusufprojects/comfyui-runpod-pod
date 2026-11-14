@@ -53,6 +53,68 @@ describe("React kurucu alanı", () => {
     })));
   });
 
+  it("varsayılan indirme sırasını grup seçimini değiştirmeden yeniden sıralar", async () => {
+    const api = fakeApi();
+    const settings = {
+      ayarlar: { auto_download: true, default_download_order: ["model-a", "model-b"] },
+      gruplar: [{ id: "model-a", label: "Model A", files: [] }, { id: "model-b", label: "Model B", files: [] }],
+      model_families: [], model_instances: [], lora_durum: [],
+    };
+    api.get = vi.fn(async (path: string) => {
+      if (path === "/api/setup-state") return { hazir: true, parolasiz: true };
+      if (path === "/api/pod-kurulum") return { gruplar: [] };
+      if (path === "/api/system-settings") return settings;
+      return {};
+    }) as unknown as InstallerApi["get"];
+    render(<InstallerWorkspace api={api}/>);
+    await screen.findByRole("heading", { name: "Kurulum ve sistem yönetimi" });
+    fireEvent.click(screen.getByRole("button", { name: "Genel ayarlar" }));
+    await screen.findByRole("heading", { name: "Varsayılan indirme sırası" });
+    fireEvent.click(screen.getByRole("button", { name: "Model A aşağı taşı" }));
+    fireEvent.click(screen.getByRole("button", { name: "Varsayılanları kaydet" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/api/system-settings", expect.objectContaining({
+      islem: "kaydet", default_download_order: ["model-b", "model-a"],
+    })));
+  });
+
+  it("varsayılan bağlantıyı yükleyince alandaki adresi de yeniler", async () => {
+    const api = fakeApi();
+    const initial = {
+      ayarlar: {}, model_families: [], model_instances: [], lora_durum: [],
+      gruplar: [{ id: "krea", label: "Krea", files: [{ name: "model.safetensors", link: "https://host/current.safetensors", default_link: "https://host/default.safetensors" }] }],
+    };
+    const reset = { ...initial, gruplar: [{ ...initial.gruplar[0], files: [{ ...initial.gruplar[0].files[0], link: "https://host/default.safetensors" }] }] };
+    api.get = vi.fn(async (path: string) => {
+      if (path === "/api/setup-state") return { hazir: true, parolasiz: true };
+      if (path === "/api/pod-kurulum") return { gruplar: [] };
+      if (path === "/api/system-settings") return initial;
+      return {};
+    }) as unknown as InstallerApi["get"];
+    api.post = vi.fn(async (path: string) => path === "/api/system-settings" ? reset : {}) as unknown as InstallerApi["post"];
+    render(<InstallerWorkspace api={api}/>);
+    await screen.findByRole("heading", { name: "Kurulum ve sistem yönetimi" });
+    fireEvent.click(screen.getByRole("button", { name: "Genel ayarlar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Bağlantılar" }));
+    const field = await screen.findByDisplayValue("https://host/current.safetensors");
+    fireEvent.click(screen.getByRole("button", { name: "Varsayılan" }));
+    await waitFor(() => expect(field).toHaveValue("https://host/default.safetensors"));
+  });
+
+  it("sistem panelinde kanal bilgisini app-update durumundan okur", async () => {
+    const api = fakeApi();
+    api.get = vi.fn(async (path: string) => {
+      if (path === "/api/setup-state") return { hazir: true, parolasiz: true };
+      if (path === "/api/pod-kurulum") return { gruplar: [] };
+      if (path === "/api/app-update") return { kanal: "beta", status: "idle" };
+      return {};
+    }) as unknown as InstallerApi["get"];
+    render(<InstallerWorkspace api={api}/>);
+    await screen.findByRole("heading", { name: "Kurulum ve sistem yönetimi" });
+    fireEvent.click(screen.getByRole("button", { name: "Genel ayarlar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sistem" }));
+    expect(await screen.findByText("Kanal: beta")).toBeInTheDocument();
+  });
+
   it("R2 geri yüklemede yerel yükleme tokenını yeniden kullanmaz", async () => {
     const api = fakeApi();
     const backup = { id: "r2-backup-1", name: "Sentetik R2", modified: "bugün", size: 7 };

@@ -58,6 +58,14 @@
 .prompt-save input { flex:1; }
 .prompt-save span { color:#93ddb7; font-size:9px; }
 .prompt-history { position:sticky; top:12px; max-height:calc(100dvh - 90px); display:flex; flex-direction:column; }
+.prompt-saved-presets { flex:0 0 auto; max-height:42%; display:flex; flex-direction:column; margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid #252d3a; }
+.prompt-saved-presets__list { min-height:0; overflow:auto; display:grid; align-content:start; gap:7px; }
+.prompt-saved-preset { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:5px; padding:8px; background:#0e1219; border:1px solid #252d3a; border-radius:8px; }
+.prompt-saved-preset>div { min-width:0; }
+.prompt-saved-preset b { display:block; overflow:hidden; color:#e0e5ee; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.prompt-saved-preset p { display:-webkit-box; overflow:hidden; margin:4px 0; color:#aab4c4; font-size:9px; line-height:1.4; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.prompt-saved-preset small { color:#7f8ba0; font-size:8px; }
+.prompt-saved-preset__delete { width:26px; height:27px; color:#d899a0; }
 .prompt-history__head { margin-bottom:8px; }
 .prompt-history__search { width:100%; margin-bottom:8px; }
 .prompt-history__filters { display:flex; gap:6px; margin-bottom:8px; }

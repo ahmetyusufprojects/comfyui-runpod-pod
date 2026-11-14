@@ -69,4 +69,57 @@ describe("React galeri", () => {
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining("album_id="));
     expect(screen.getByRole("heading", { name: "A two-image set" })).toBeInTheDocument();
   });
+
+  it("üretim geçmişi kaydını eski silme API sözleşmesiyle kaldırır", async () => {
+    const api = fakeApi();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    api.get = vi.fn(async (path: string) => {
+      if (path === "/api/ayarlar") return {};
+      if (path.startsWith("/api/gecmis")) return { toplam: 1, kayitlar: [
+        { kayit: "synthetic-job.json", dosya: "result.png", url: "/gecmis/result.png", prompt: "synthetic prompt", tur: "goruntu" },
+      ] };
+      return {};
+    }) as ProductionApi["get"];
+    render(<GalleryWorkspace api={api} initialTab="history"/>);
+    fireEvent.click(await screen.findByRole("button", { name: "result.png ayrıntılarını aç" }));
+    fireEvent.click(screen.getByRole("button", { name: "Geçmişten sil" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/api/gecmis/sil", { kayit: "synthetic-job.json" }));
+  });
+
+  it("üretim geçmişi görünüm tercihini kullanıcı ayarlarında saklar", async () => {
+    const api = fakeApi();
+    api.get = vi.fn(async (path: string) => {
+      if (path === "/api/ayarlar") return { ayarlar: { ui: { history_view: "izgara" } } };
+      if (path.startsWith("/api/gecmis")) return { toplam: 0, kayitlar: [] };
+      return {};
+    }) as ProductionApi["get"];
+    render(<GalleryWorkspace api={api} initialTab="history"/>);
+    fireEvent.click(await screen.findByRole("button", { name: "Akış" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/api/ayarlar", { ui: { history_view: "akis" } }));
+  });
+
+  it("albümün son görselinden sonraki albümün ilk görseline geçer", async () => {
+    const firstId = "a".repeat(64), secondId = "b".repeat(64);
+    const api = fakeApi({
+      get: vi.fn().mockImplementation(async (path: string) => {
+        if (path === "/api/ayarlar") return {};
+        if (path.includes(`album_id=${firstId}`)) return { toplam: 1, kayitlar: [
+          { kayit: "first.json", dosya: "first.png", url: "/gecmis/first.png", prompt: "First album", tur: "goruntu", album_id: firstId },
+        ] };
+        if (path.includes(`album_id=${secondId}`)) return { toplam: 1, kayitlar: [
+          { kayit: "second.json", dosya: "second.png", url: "/gecmis/second.png", prompt: "Second album", tur: "goruntu", album_id: secondId },
+        ] };
+        if (path.startsWith("/api/gecmis")) return { toplam: 2, kayitlar: [
+          { kayit: "first.json", dosya: "first.png", url: "/gecmis/first.png", prompt: "First album", tur: "goruntu", album: true, album_id: firstId, album_count: 1, album_index: 0 },
+          { kayit: "second.json", dosya: "second.png", url: "/gecmis/second.png", prompt: "Second album", tur: "goruntu", album: true, album_id: secondId, album_count: 1, album_index: 1 },
+        ] };
+        return {};
+      }),
+    });
+    render(<GalleryWorkspace api={api} initialTab="history"/>);
+    fireEvent.click(await screen.findByRole("button", { name: /First album/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "first.png ayrıntılarını aç" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sonraki öğe" }));
+    expect(await screen.findByRole("heading", { name: "second.png" })).toBeInTheDocument();
+  });
 });

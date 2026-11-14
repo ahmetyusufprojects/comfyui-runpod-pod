@@ -14,7 +14,8 @@ interface Props {
   initialPrompt?: string;
   initialNegative?: string;
   referenceFile?: File | null;
-  onOpenPromptStudio?: (prompt: string, editMode: boolean, negative: string) => void;
+  onOpenPromptStudio?: (prompt: string, editMode: boolean, negative: string, presetDefaults?: JsonRecord) => void;
+  initialPreset?: JsonRecord;
 }
 
 const DEFAULT_OPTIONS: GenerationOptionsValue = {
@@ -112,7 +113,7 @@ function Composer({ mode, setMode, prompt, setPrompt, busy, onSubmit, onCancel, 
   </div></section>;
 }
 
-export function ProductionWorkspace({ api, embedded = false, initialPrompt = "", initialNegative = "", referenceFile = null, onOpenPromptStudio }: Props) {
+export function ProductionWorkspace({ api, embedded = false, initialPrompt = "", initialNegative = "", referenceFile = null, onOpenPromptStudio, initialPreset }: Props) {
   const [phase, setPhase] = useState<Phase>(embedded ? "ready" : "loading");
   const [instances, setInstances] = useState<ModelInstance[]>([]);
   const [llmModels, setLlmModels] = useState<GenerationModelOption[]>([]);
@@ -230,6 +231,42 @@ export function ProductionWorkspace({ api, embedded = false, initialPrompt = "",
   useEffect(() => { if (initialPrompt) setPrompt(initialPrompt); }, [initialPrompt]);
   useEffect(() => { if (initialNegative) setNegative(initialNegative); }, [initialNegative]);
   useEffect(() => { if (referenceFile) setFiles(current => current.length ? [referenceFile, ...current.slice(1)] : [referenceFile]); }, [referenceFile]);
+  useEffect(() => {
+    if (!initialPreset || !Object.keys(initialPreset).length || !instances.length) return;
+    setPrompt(current => typeof initialPreset.prompt === "string" ? initialPreset.prompt : current);
+    setNegative(current => typeof initialPreset.negative === "string" ? initialPreset.negative : current);
+    setOptions(current => {
+      const next = { ...current };
+      const presetModel = typeof initialPreset.model === "string" ? initialPreset.model : "";
+      const presetWorkflow = String(initialPreset.workflow ?? "");
+      if (presetWorkflow === "video") next.mode = "video";
+      else if (presetWorkflow) next.mode = "image";
+      if (next.mode === "image" && presetModel) {
+        const presetId = savedInstance(presetModel, instances, item => item.engine === "comfy" && !isVideoModel(item));
+        if (presetId) next.imageModelId = presetId;
+      }
+      const presetVideoId = String(initialPreset.video_model_instance ?? (next.mode === "video" ? presetModel : ""));
+      if (next.mode === "video" && ["video", "wan22"].includes(presetVideoId)) next.videoModelId = presetVideoId;
+      for (const [key, property] of [["steps", "steps"], ["cfg", "cfg"], ["width", "width"], ["height", "height"], ["max_side", "referenceMaxSide"]] as const) {
+        const value = Number(initialPreset[key]);
+        if (Number.isFinite(value) && value > 0) Object.assign(next, { [property]: value });
+      }
+      if (typeof initialPreset.sampler === "string") next.sampler = initialPreset.sampler;
+      if (typeof initialPreset.max_olcek === "boolean") next.scaleToMax = initialPreset.max_olcek;
+      if (typeof initialPreset.video_profile === "string" && ["fast", "quality", "normal"].includes(initialPreset.video_profile)) next.videoProfile = initialPreset.video_profile as GenerationOptionsValue["videoProfile"];
+      const videoSeconds = Number(initialPreset.suresn), videoFps = Number(initialPreset.fps), videoMaxSide = Number(initialPreset.video_max_side);
+      if (Number.isFinite(videoSeconds) && videoSeconds > 0) next.videoSeconds = videoSeconds;
+      if (Number.isFinite(videoFps) && videoFps > 0) next.videoFps = videoFps;
+      if (Number.isFinite(videoMaxSide) && videoMaxSide > 0) next.videoMaxSide = videoMaxSide;
+      if (Array.isArray(initialPreset.loras)) {
+        next.loraWeights = Object.fromEntries((initialPreset.loras as Array<{ id?: unknown; weight?: unknown }>)
+          .filter(item => typeof item?.id === "string" && Number.isFinite(Number(item.weight)))
+          .map(item => [String(item.id), Number(item.weight)]));
+      }
+      if (Number.isFinite(next.width) && Number.isFinite(next.height)) next.resolutionPreset = `${next.width}x${next.height}`;
+      return next;
+    });
+  }, [initialPreset, instances]);
 
   useEffect(() => {
     if (!currentFamily || options.mode !== "image") { setLoras([]); return; }
@@ -350,12 +387,25 @@ export function ProductionWorkspace({ api, embedded = false, initialPrompt = "",
   }, [api, job?.id, job?.status, options.promptAssist, options.promptRepeat, phase]);
 
   const submit = () => {
-    if (options.promptEdit && onOpenPromptStudio) { onOpenPromptStudio(prompt, true, negative); return; }
+    if (options.promptEdit && onOpenPromptStudio) { onOpenPromptStudio(prompt, true, negative, promptPresetDefaults()); return; }
     continuousRef.current = options.continuous;
     promptAssistUsedRef.current = false;
     completedJobRef.current = "";
     void queueJob(options.promptAssist);
   };
+
+  const promptPresetDefaults = () => ({
+    model: options.mode === "image" ? selectedImage?.family ?? "auto" : options.videoModelId,
+    workflow: options.mode === "video" ? "video" : "otomatik",
+    steps: options.steps, cfg: options.cfg, sampler: options.sampler,
+    width: options.width, height: options.height,
+    max_side: referenceCount ? options.referenceMaxSide : Math.max(options.width, options.height),
+    max_olcek: options.scaleToMax,
+    video_model_instance: options.videoModelId, video_profile: options.videoProfile,
+    video_max_side: options.videoMaxSide, suresn: options.videoSeconds, fps: options.videoFps,
+    image_model: selectedImage?.family ?? "auto", model_instance: selectedImage?.id ?? "",
+    loras: Object.entries(options.loraWeights).map(([id, weight]) => ({ id, weight })),
+  });
   const cancel = async () => {
     continuousRef.current = false;
     if (!job?.id) return;
@@ -385,7 +435,7 @@ export function ProductionWorkspace({ api, embedded = false, initialPrompt = "",
   return <main id="production" className="production-main production-main--workspace">
     <div className="workspace-heading"><div><p className="eyebrow">YENİ ÇALIŞMA</p><h1>Üretim alanı</h1></div><span className="connection-state"><i/> Bağlı</span></div>
     <div className="workspace-grid workspace-grid--integrated"><div className="workspace-center"><MediaCanvas mode={options.mode} job={job}/>{loadingError && <p className="workspace-error" role="alert">{loadingError}</p>}{notice && <p className="production-settings-saved" role="status">{notice}</p>}
-      <Composer mode={options.mode} setMode={mode => changeOptions({ mode })} prompt={prompt} setPrompt={setPrompt} busy={busy} onSubmit={submit} onCancel={() => void cancel()} files={files} setFiles={setFiles} onControls={() => setControlsOpen(true)} onOpenPromptStudio={() => onOpenPromptStudio?.(prompt, options.promptEdit, negative)}/>
+      <Composer mode={options.mode} setMode={mode => changeOptions({ mode })} prompt={prompt} setPrompt={setPrompt} busy={busy} onSubmit={submit} onCancel={() => void cancel()} files={files} setFiles={setFiles} onControls={() => setControlsOpen(true)} onOpenPromptStudio={() => onOpenPromptStudio?.(prompt, options.promptEdit, negative, promptPresetDefaults())}/>
     </div></div>
     <GenerationOptions value={options} onChange={changeOptions} imageModels={imageModels} videoModels={videoModels} llmModels={llmModels} loras={loras} referenceCount={referenceCount} open={controlsOpen} onClose={() => setControlsOpen(false)}/>
     {!embedded && <footer className="workspace-footer"><span>Çalışma alanı</span><a href={legacy}>Önceki arayüz ↗</a></footer>}

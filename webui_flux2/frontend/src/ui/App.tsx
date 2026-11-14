@@ -35,6 +35,8 @@ function MainWorkspace({ api }: { api: ProductionApi }) {
   const [studioInput, setStudioInput] = useState("");
   const [studioNegative, setStudioNegative] = useState("");
   const [studioEditMode, setStudioEditMode] = useState(false);
+  const [studioPreset, setStudioPreset] = useState<JsonRecord>({});
+  const [productionPreset, setProductionPreset] = useState<JsonRecord>({});
   const [studioSession, setStudioSession] = useState(0);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
 
@@ -131,13 +133,19 @@ function MainWorkspace({ api }: { api: ProductionApi }) {
   const applyPrompt = (result: PromptResult) => {
     setStudioInput(String(result.positive || result.positive_tr || ""));
     setStudioNegative(String(result.negative || ""));
+    const preset = { ...studioPreset };
+    for (const key of ["model", "workflow", "steps", "cfg", "sampler", "width", "height", "max_side", "max_olcek", "video_model_instance", "video_profile", "video_max_side", "suresn", "fps", "image_model", "model_instance", "loras"]) {
+      if (result[key] !== undefined && result[key] !== null && result[key] !== "") preset[key] = result[key];
+    }
+    setProductionPreset(preset);
     navigate("production");
   };
 
-  const openPromptStudio = (prompt: string, editMode: boolean, negative: string) => {
+  const openPromptStudio = (prompt: string, editMode: boolean, negative: string, presetDefaults: JsonRecord = {}) => {
     setStudioInput(prompt);
     setStudioNegative(negative);
     setStudioEditMode(editMode);
+    setStudioPreset(presetDefaults);
     setStudioSession((value) => value + 1);
     navigate("studio");
   };
@@ -145,9 +153,9 @@ function MainWorkspace({ api }: { api: ProductionApi }) {
   if (phase !== "ready" || !user) return <AuthScreen phase={phase} error={error} vaultMissing={vaultMissing} vaultRecover={vaultRecover} onSubmit={submitAuth} onRetry={() => void refreshSession()}/>;
 
   return <WorkspaceShell active={section} onNavigate={navigate} userName={user.name} isAdmin={user.role === "admin"} onLock={() => void lock()}>
-    {visited.has("production") && <div hidden={section !== "production"}><ProductionWorkspace api={api} embedded initialPrompt={studioInput} initialNegative={studioNegative} referenceFile={referenceFile} onOpenPromptStudio={openPromptStudio}/></div>}
-    {visited.has("studio") && <div hidden={section !== "studio"}><PromptStudio key={`studio-${studioSession}`} api={api} initialPrompt={studioInput} initialNegative={studioNegative} editMode={studioEditMode} onApply={applyPrompt}/></div>}
-    {visited.has("chat") && <div hidden={section !== "chat"}><ChatWorkspace api={api} onPromptFromChat={(prompt) => { setStudioInput(prompt); setStudioNegative(""); setStudioEditMode(false); setStudioSession((value) => value + 1); navigate("studio"); }}/></div>}
+    {visited.has("production") && <div hidden={section !== "production"}><ProductionWorkspace api={api} embedded initialPrompt={studioInput} initialNegative={studioNegative} initialPreset={productionPreset} referenceFile={referenceFile} onOpenPromptStudio={openPromptStudio}/></div>}
+    {visited.has("studio") && <div hidden={section !== "studio"}><PromptStudio key={`studio-${studioSession}`} api={api} initialPrompt={studioInput} initialNegative={studioNegative} editMode={studioEditMode} presetDefaults={studioPreset} onApply={applyPrompt}/></div>}
+    {visited.has("chat") && <div hidden={section !== "chat"}><ChatWorkspace api={api} onPromptFromChat={(prompt) => { setStudioInput(prompt); setStudioNegative(""); setStudioEditMode(false); setStudioPreset(productionPreset); setStudioSession((value) => value + 1); navigate("studio"); }}/></div>}
     {visited.has("library") && <div hidden={section !== "library"}><GalleryWorkspace api={api} initialTab={"library" satisfies GalleryTab} onUseReference={useReference}/></div>}
     {visited.has("archive") && <div hidden={section !== "archive"}><GalleryWorkspace api={api} initialTab={"archive" satisfies GalleryTab} onUseReference={useReference}/></div>}
     {visited.has("prompts") && <div hidden={section !== "prompts"}><PromptStudio key="prompt-history" api={api} onApply={applyPrompt}/></div>}
