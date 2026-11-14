@@ -167,6 +167,10 @@ jobs:
           PY
       - name: Build Linux image
         run: docker build -f docker/Dockerfile.gallery -t webui-gallery .
+      - name: Leave GPU selection to RunPod
+        run: |
+          set -eu
+          docker inspect webui-gallery --format '{{json .Config.Env}}' | python3 -c "import json,sys; env=json.load(sys.stdin); assert not any(item.startswith('NVIDIA_VISIBLE_DEVICES=') for item in env); assert 'NVIDIA_DRIVER_CAPABILITIES=compute,utility' in env; print('GPU visibility is assigned by the RunPod runtime')"
       - name: Verify no-volume first run and gallery HTTP start
         run: |
           set -eu
