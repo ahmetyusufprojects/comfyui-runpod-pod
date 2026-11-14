@@ -24,7 +24,8 @@ def handle_main_get(self, runtime):
         self._send(503, '{"hata":"WebUI güvenli biçimde kapanıyor"}')
         return
     if parsed.path in ('/', '/index.html'):
-        if runtime.RUNPOD_MODE and parsed.query and (runtime.urllib.parse.parse_qs(parsed.query).get('ui') == ['next']):
+        query = runtime.urllib.parse.parse_qs(parsed.query or '')
+        if runtime.RUNPOD_MODE and query.get('ui') != ['legacy']:
             self._serve_react_preview(parsed)
         else:
             with open(runtime.os.path.join(runtime.BASE_DIR, 'index.html'), 'rb') as f:
@@ -356,6 +357,9 @@ def handle_main_get(self, runtime):
         ayar.setdefault('uretim_prompt_destek', False)
         ayar.setdefault('uretim_prompt_ceviri', False)
         ayar.setdefault('uretim_prompt_duzenle', False)
+        ayar.setdefault('uretim_prompt_tekrar', False)
+        ayar.setdefault('uretim_kesintisiz', False)
+        ayar.setdefault('uretim_llm_model', '')
         llm_varsayilanlar = {'sistem': runtime.llm.VARSAYILAN_SISTEM_PROMPTU, 'sohbet': runtime.llm.VARSAYILAN_SOHBET_SISTEM_PROMPTU, 'mod': dict(runtime.llm.VARSAYILAN_MOD_TALIMATI)}
         self._send(200, runtime.json.dumps({'ayarlar': ayar, 'llm_varsayilanlar': llm_varsayilanlar}, ensure_ascii=False))
     elif parsed.path == '/api/isler':

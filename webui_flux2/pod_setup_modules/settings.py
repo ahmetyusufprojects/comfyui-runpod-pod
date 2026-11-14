@@ -385,6 +385,11 @@ def model_options():
     for record in records:
         group = _ctx.CATALOG.get(record.get("group")) or {}
         workflow = _ctx.WORKFLOWS.get(record["id"]) or {}
+        generation_defaults = {key: workflow[key] for key in
+                              ("steps", "cfg", "sampler", "scheduler", "shift",
+                               "default_profile") if key in workflow}
+        if isinstance(workflow.get("profiles"), dict):
+            generation_defaults["profiles"] = _ctx.copy.deepcopy(workflow["profiles"])
         primary_name = next((workflow.get(key) for key in
                              ("diffusion_file", "checkpoint_file", "unet_file", "model_file")
                              if workflow.get(key)), None)
@@ -394,6 +399,7 @@ def model_options():
                        "ready": _ctx.workflow_ready(record["id"]),
                        "builtin": bool(record.get("builtin")),
                        "primary_file": primary_name,
+                       "generation_defaults": generation_defaults,
                        "files": [{"name": file["name"], "dir": file["dir"],
                                   "optional": bool(file.get("optional")),
                                   "workflow_key": next((key for key, value in workflow.items()

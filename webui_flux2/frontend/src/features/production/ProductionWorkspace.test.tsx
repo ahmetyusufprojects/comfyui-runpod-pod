@@ -49,9 +49,12 @@ describe("React üretim alanı",()=>{
     expect(screen.getByRole("tab",{name:/Görsel/})).toHaveAttribute("aria-selected","true");
     fireEvent.click(screen.getByRole("tab",{name:/Video/}));
     expect(screen.getByRole("tab",{name:/Video/})).toHaveAttribute("aria-selected","true");
+    fireEvent.click(screen.getByRole("button",{name:"Ayarlar"}));
     expect(screen.getByRole("option",{name:"Wan video · hazır"})).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button",{name:/Görsel/}));
-    expect(screen.getByRole("option",{name:/Krea.*Kuruluyor/})).toBeDisabled();
+    const pendingModel = screen.getByLabelText("Görsel modeli").querySelector('option[value="image-wait"]');
+    expect(pendingModel).toBeInTheDocument();
+    expect(pendingModel).toHaveTextContent("indirilmedi");
   });
 
   it("eski istek alanlarıyla kuyruğa gönderir ve durdurma çağrısı yapar",async()=>{

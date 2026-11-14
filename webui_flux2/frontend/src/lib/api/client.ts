@@ -16,6 +16,7 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 export interface ModelInstance {
   id: string; family: string; name: string; group?: string; engine?: string; ready: boolean;
   primary_file?: string;
+  generation_defaults?: Record<string, unknown>;
 }
 export interface ProductionApi {
   setup(signal?: AbortSignal): Promise<JsonRecord>;
@@ -61,7 +62,11 @@ async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
     credentials: "same-origin",
     signal,
   });
-  if (!response.ok) throw new Error(`Sunucu HTTP ${response.status} yanıtı verdi.`);
+  if (!response.ok) {
+    const error = new Error(`Sunucu HTTP ${response.status} yanıtı verdi.`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return (await response.json()) as T;
 }
 

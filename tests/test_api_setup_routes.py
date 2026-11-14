@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -52,6 +53,7 @@ class FakeHandler:
         self.wfile.write(body)
 
     def _serve_react_preview(self, parsed):
+        self.runtime._react_requests.append(parsed.path)
         self._send(404, '{"hata":"bulunamadi"}')
 
     def _setup_yetkili(self):
@@ -75,9 +77,11 @@ def make_runtime(tmp_path):
         _auth_store=SimpleNamespace(kurulu_mu=lambda: False),
         _setup_health_state=lambda: (200, {"hazir": True, "storage_mode": "ephemeral"}),
         _app_update_state={"status": "idle"},
+        _react_requests=[],
         _kapatma_istegi=threading.Event(),
         os=__import__("os"),
         json=json,
+        urllib=urllib,
     )
 
 
@@ -104,6 +108,18 @@ def test_setup_reports_not_ready_without_calling_storage(tmp_path):
     response = client.get("/api/kurulum-durumu")
     assert response.status_code == 503
     assert response.json() == {"hata": "Sistem hazırlanıyor."}
+
+
+def test_setup_uses_react_by_default_and_keeps_legacy_opt_in(tmp_path):
+    setup_html = tmp_path / "setup.html"
+    setup_html.write_text("legacy setup", encoding="utf-8")
+    _, client = client_for(tmp_path)
+
+    assert client.get("/").status_code == 404  # fake preview serves no bundle
+    assert FakeHandler.runtime._react_requests == ["/"]
+    legacy = client.get("/?ui=legacy")
+    assert legacy.status_code == 200
+    assert legacy.text == "legacy setup"
 
 
 def test_setup_settings_get_returns_existing_shape(tmp_path):

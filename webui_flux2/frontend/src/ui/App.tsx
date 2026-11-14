@@ -1,215 +1,180 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, ArrowUpRight, CircleAlert, Layers3, RefreshCw, Server } from "lucide-react";
-import { Button } from "../components/ui/Button";
-import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
-import { getWebUiPort, statusApi, type HealthStatus, type StatusApi, type WebUiPort } from "../lib/api/client";
+import { useCallback, useEffect, useState } from "react";
+import { InstallerWorkspace } from "../features/installer/InstallerWorkspace";
+import { ChatWorkspace } from "../features/chat/ChatWorkspace";
+import { GalleryWorkspace, type GalleryReference, type GalleryTab } from "../features/gallery/GalleryWorkspace";
+import { PromptStudio, type PromptResult } from "../features/prompts/PromptStudio";
+import { MonitorWorkspace } from "../features/system/MonitorWorkspace";
+import { QueueWorkspace } from "../features/system/QueueWorkspace";
 import { ProductionWorkspace } from "../features/production/ProductionWorkspace";
-import { productionApi, type ProductionApi } from "../lib/api/client";
+import { AdminWorkspace, SettingsWorkspace } from "../features/settings/SettingsWorkspace";
+import { productionApi, type JsonRecord, type ProductionApi, getWebUiPort, type WebUiPort } from "../lib/api/client";
+import { WorkspaceShell, type WorkspaceSection } from "./WorkspaceShell";
 
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "error"; message: string }
-  | { kind: "ready"; status: HealthStatus };
+type SessionPhase = "checking" | "setup" | "login" | "vault" | "ready" | "error";
+interface AppProps { api?: ProductionApi; port?: WebUiPort; }
+interface SessionUser { name: string; role: string; }
 
-interface AppProps {
-  api?: StatusApi;
-  port?: WebUiPort;
-  pollMs?: number;
-  production?: ProductionApi;
+function initialSection(): WorkspaceSection {
+  const value = new URLSearchParams(window.location.search).get("section");
+  const allowed: WorkspaceSection[] = ["production", "studio", "queue", "library", "archive", "prompts", "chat", "monitor", "settings", "admin"];
+  return allowed.includes(value as WorkspaceSection) ? value as WorkspaceSection : "production";
 }
 
-function surfaceUrl(target: WebUiPort): string {
-  const { protocol, hostname, port } = window.location;
-  if (port !== "8189" && port !== "8192") {
-    const query = new URLSearchParams(window.location.search);
-    query.set("surface", target === 8192 ? "setup" : "main");
-    return `${window.location.pathname}?${query.toString()}`;
-  }
-  const runpodHost = hostname.match(/^(.*)-\d+\.proxy\.runpod\.net$/i);
-  if (runpodHost) return `${protocol}//${runpodHost[1]}-${target}.proxy.runpod.net/?ui=next`;
-  return `${protocol}//${hostname}:${target}/?ui=next`;
+export function App({ api = productionApi, port = getWebUiPort() }: AppProps) {
+  return port === 8192 ? <InstallerWorkspace api={api}/> : <MainWorkspace api={api}/>;
 }
 
-function legacyUrl(): string {
-  return `${window.location.origin}/`;
-}
+function MainWorkspace({ api }: { api: ProductionApi }) {
+  const [phase, setPhase] = useState<SessionPhase>("checking");
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [vaultMissing, setVaultMissing] = useState(false);
+  const [vaultRecover, setVaultRecover] = useState(false);
+  const [error, setError] = useState("");
+  const [section, setSection] = useState<WorkspaceSection>(initialSection);
+  const [visited, setVisited] = useState<Set<WorkspaceSection>>(() => new Set(["production", initialSection()]));
+  const [studioInput, setStudioInput] = useState("");
+  const [studioNegative, setStudioNegative] = useState("");
+  const [studioEditMode, setStudioEditMode] = useState(false);
+  const [studioSession, setStudioSession] = useState(0);
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
 
-function statusTone(state: LoadState): StatusTone {
-  if (state.kind === "loading") return "loading";
-  if (state.kind === "error") return "error";
-  if (!state.status.hazir) return "loading";
-  return "ready";
-}
-
-function statusLabel(state: LoadState): string {
-  if (state.kind === "loading") return "Bağlanıyor";
-  if (state.kind === "error") return "Bağlantı sorunu";
-  return state.status.hazir ? "Hazır" : "Hazırlanıyor";
-}
-
-export function App({ api = statusApi, production = productionApi, port = getWebUiPort(), pollMs = 15_000 }: AppProps) {
-  if (port === 8189) return <ProductionWorkspace api={production} />;
-  return <StatusApp api={api} port={port} pollMs={pollMs} />;
-}
-
-function StatusApp({ api, port, pollMs }: Required<Pick<AppProps, "api" | "port" | "pollMs">>) {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const [attempt, setAttempt] = useState(0);
-  const label = port === 8192 ? "Kurucu" : "WebUI";
-  const status = state.kind === "ready" ? state.status : undefined;
-  const storageMode = status && "storage_mode" in status ? status.storage_mode : undefined;
-  const storageIsPersistent = status && "storage_persistent" in status ? status.storage_persistent : undefined;
-
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    setState((current) => current.kind === "ready" ? current : { kind: "loading" });
-    try {
-      const result = await api.health(port, signal);
-      if (!signal?.aborted) setState({ kind: "ready", status: result });
-    } catch (error) {
-      if (!signal?.aborted) {
-        setState({ kind: "error", message: error instanceof Error ? error.message : "Durum alınamadı." });
-      }
+  const checkVault = useCallback(async (sessionUser: SessionUser) => {
+    const vault = await api.vault();
+    setUser(sessionUser);
+    if (vault.acik) setPhase("ready");
+    else {
+      setVaultMissing(vault.kasa_var === false);
+      setVaultRecover(vault.kurtarma === true);
+      setPhase("vault");
     }
-  }, [api, port]);
+  }, [api]);
 
+  const refreshSession = useCallback(async () => {
+    setPhase("checking"); setError("");
+    try {
+      const install = await api.setup();
+      if (install.kurulu === false) { setPhase("setup"); return; }
+      try {
+        const me = await api.me();
+        const sessionUser = { name: String(me.kullanici || "Kullanıcı"), role: String(me.rol || "uye") };
+        await checkVault(sessionUser);
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message.toLocaleLowerCase("tr") : "";
+        if (message.includes("giris gerekli") || message.includes("giriş gerekli") || message.includes("401")) setPhase("login");
+        else throw reason;
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "WebUI durum bilgisi alınamadı.");
+      setPhase("error");
+    }
+  }, [api, checkVault]);
+
+  const navigate = useCallback((next: WorkspaceSection) => {
+    if (next === "admin" && user?.role !== "admin") return;
+    setSection(next);
+    setVisited((current) => new Set(current).add(next));
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", next);
+    window.history.replaceState({}, "", url);
+  }, [user?.role]);
+
+  useEffect(() => { void refreshSession(); }, [refreshSession]);
   useEffect(() => {
-    const controller = new AbortController();
-    void refresh(controller.signal);
-    const timer = window.setInterval(() => void refresh(), pollMs);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, [refresh, pollMs, attempt]);
+    if (phase === "ready" && user?.role !== "admin" && section === "admin") navigate("production");
+  }, [phase, user?.role, section, navigate]);
 
-  const navItems = useMemo(() => [
-    { port: 8189 as const, title: "Ana WebUI", icon: Server },
-    { port: 8192 as const, title: "Kurucu", icon: Layers3 },
-  ], []);
+  const submitAuth = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const name = String(form.get("username") || "").trim();
+    const password = String(form.get("password") || "");
+    const repeat = String(form.get("password-repeat") || "");
+    setError("");
+    try {
+      if (phase === "setup") {
+        if (password !== repeat) throw new Error("Parolalar eşleşmiyor.");
+        await api.post("/api/kurulum", { kullanici: name, sifre: password });
+        const result = await api.post<JsonRecord>("/api/giris", { kullanici: name, sifre: password });
+        await checkVault({ name: String(result.kullanici || name), role: String(result.rol || "uye") });
+      } else if (phase === "login") {
+        const result = await api.post<JsonRecord>("/api/giris", { kullanici: name, sifre: password });
+        await checkVault({ name: String(result.kullanici || name), role: String(result.rol || "uye") });
+      } else if (phase === "vault") {
+        if (vaultRecover) await api.post("/api/kasa/kurtar", { parola: password });
+        else if (vaultMissing) {
+          if (password !== repeat) throw new Error("Kasa parolaları eşleşmiyor.");
+          await api.post("/api/kasa/olustur", { parola: password, parola2: repeat, riski_anladim: form.get("risk") === "on" });
+        } else await api.post("/api/kasa/ac", { parola: password });
+        setPhase("ready");
+      }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "İşlem tamamlanamadı."); }
+    finally { formElement.reset(); }
+  };
 
-  return (
-    <div className="app-shell">
-      <a className="skip-link" href="#main-content">İçeriğe geç</a>
-      <aside className="sidebar" aria-label="Ana menü">
-        <a className="brand" href={surfaceUrl(port)} aria-label="ComfyUI WebUI ana sayfa">
-          <span className="brand__mark" aria-hidden="true"><Activity size={19} /></span>
-          <span><strong>ComfyUI</strong><small>RunPod WebUI</small></span>
-        </a>
-        <div className="nav-caption">ÇALIŞMA ALANI</div>
-        <nav className="surface-nav" aria-label="Uygulama bölümleri">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = port === item.port;
-            return (
-              <a
-                key={item.port}
-                className={`nav-link${active ? " nav-link--active" : ""}`}
-                href={surfaceUrl(item.port)}
-                aria-current={active ? "page" : undefined}
-              >
-                <Icon size={17} aria-hidden="true" />
-                <span>{item.title}</span>
-                {active && <span className="nav-link__port">:{item.port}</span>}
-              </a>
-            );
-          })}
-        </nav>
-        <div className="sidebar-footer">
-          <span className="sidebar-footer__label">Bağlı yüzey</span>
-          <span className="sidebar-footer__value">{label} · {port}</span>
-        </div>
-      </aside>
+  const lock = async () => {
+    setError("");
+    try { await api.post("/api/kasa/kapat", {}); await api.post("/api/cikis", {}); setUser(null); setPhase("login"); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Kasa kilitlenemedi."); }
+  };
 
-      <main id="main-content" className="main-area">
-        <header className="topbar">
-          <div className="breadcrumbs"><span>RunPod</span><span aria-hidden="true">/</span><strong>{label}</strong></div>
-          <div className="topbar__right"><span className="topbar__environment"><span /> Pod durumu</span></div>
-        </header>
+  const useReference = async (reference: GalleryReference) => {
+    try {
+      const response = await fetch(reference.url, { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error(`Fotoğraf alınamadı (HTTP ${response.status}).`);
+      const blob = await response.blob();
+      setReferenceFile(new File([blob], reference.name || "referans-gorsel", { type: blob.type || "image/jpeg" }));
+      navigate("production");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Referans fotoğraf kullanılamadı."); }
+  };
 
-        <div className="content-wrap">
-          <section className="page-heading" aria-labelledby="page-title">
-            <div>
-              <p className="eyebrow">SİSTEM DURUMU</p>
-              <h1 id="page-title">{label}</h1>
-              <p className="page-heading__copy">Servis bağlantısını ve başlangıç durumunu buradan kontrol et.</p>
-            </div>
-            <Button onClick={() => setAttempt((value) => value + 1)}
-              aria-label="Durumu yenile" disabled={state.kind === "loading"}>
-              <RefreshCw size={16} aria-hidden="true" /> Yenile
-            </Button>
-          </section>
+  const applyPrompt = (result: PromptResult) => {
+    setStudioInput(String(result.positive || result.positive_tr || ""));
+    setStudioNegative(String(result.negative || ""));
+    navigate("production");
+  };
 
-          <section className="status-panel" aria-labelledby="status-title">
-            <div className="status-panel__top">
-              <div className="service-icon" aria-hidden="true"><Server size={20} /></div>
-              <div className="status-panel__identity">
-                <div className="status-panel__label">AKTİF SERVİS</div>
-                <h2 id="status-title">{port === 8192 ? "Bağımsız kurucu" : "Ana WebUI"}</h2>
-                <p>HTTP bağlantısı · port {port}</p>
-              </div>
-              <StatusBadge tone={statusTone(state)}>{statusLabel(state)}</StatusBadge>
-            </div>
+  const openPromptStudio = (prompt: string, editMode: boolean, negative: string) => {
+    setStudioInput(prompt);
+    setStudioNegative(negative);
+    setStudioEditMode(editMode);
+    setStudioSession((value) => value + 1);
+    navigate("studio");
+  };
 
-            <div className="status-panel__body" aria-live="polite" aria-atomic="true">
-              {state.kind === "loading" && (
-                <div className="state-row"><span className="spinner" aria-hidden="true" />
-                  <span>Sunucudan durum alınıyor…</span></div>
-              )}
-              {state.kind === "error" && (
-                <div className="state-message state-message--error" role="alert">
-                  <CircleAlert size={18} aria-hidden="true" />
-                  <div><strong>Sunucuya ulaşılamadı</strong><p>{state.message}</p></div>
-                  <Button variant="ghost" onClick={() => setAttempt((value) => value + 1)}>Tekrar dene</Button>
-                </div>
-              )}
-              {state.kind === "ready" && !state.status.hazir && (
-                <div className="state-message state-message--pending" role="status">
-                  <span className="spinner" aria-hidden="true" />
-                  <div><strong>Sistem hazırlanıyor</strong><p>Hazır olduğunda bu ekran kendini günceller.</p></div>
-                </div>
-              )}
-              {state.kind === "ready" && state.status.hazir && (
-                <div className="state-message state-message--ready" role="status">
-                  <span className="ready-check" aria-hidden="true">✓</span>
-                  <div><strong>Bağlantı kuruldu</strong><p>{label} çalışıyor ve durum bilgisi güncel.</p></div>
-                  {port === 8192 && storageMode && (
-                    <span className="storage-chip">Depolama: {storageMode}{storageIsPersistent === false ? " · geçici" : ""}</span>
-                  )}
-                </div>
-              )}
-            </div>
+  if (phase !== "ready" || !user) return <AuthScreen phase={phase} error={error} vaultMissing={vaultMissing} vaultRecover={vaultRecover} onSubmit={submitAuth} onRetry={() => void refreshSession()}/>;
 
-            <div className="status-panel__foot">
-              <span><span className="pulse-dot" aria-hidden="true" /> Otomatik yenileme açık</span>
-              <span>15 saniyede bir</span>
-            </div>
-          </section>
+  return <WorkspaceShell active={section} onNavigate={navigate} userName={user.name} isAdmin={user.role === "admin"} onLock={() => void lock()}>
+    {visited.has("production") && <div hidden={section !== "production"}><ProductionWorkspace api={api} embedded initialPrompt={studioInput} initialNegative={studioNegative} referenceFile={referenceFile} onOpenPromptStudio={openPromptStudio}/></div>}
+    {visited.has("studio") && <div hidden={section !== "studio"}><PromptStudio key={`studio-${studioSession}`} api={api} initialPrompt={studioInput} initialNegative={studioNegative} editMode={studioEditMode} onApply={applyPrompt}/></div>}
+    {visited.has("chat") && <div hidden={section !== "chat"}><ChatWorkspace api={api} onPromptFromChat={(prompt) => { setStudioInput(prompt); setStudioNegative(""); setStudioEditMode(false); setStudioSession((value) => value + 1); navigate("studio"); }}/></div>}
+    {visited.has("library") && <div hidden={section !== "library"}><GalleryWorkspace api={api} initialTab={"library" satisfies GalleryTab} onUseReference={useReference}/></div>}
+    {visited.has("archive") && <div hidden={section !== "archive"}><GalleryWorkspace api={api} initialTab={"archive" satisfies GalleryTab} onUseReference={useReference}/></div>}
+    {visited.has("prompts") && <div hidden={section !== "prompts"}><PromptStudio key="prompt-history" api={api} onApply={applyPrompt}/></div>}
+    {visited.has("queue") && <div hidden={section !== "queue"}><QueueWorkspace api={api}/></div>}
+    {visited.has("monitor") && <div hidden={section !== "monitor"}><MonitorWorkspace api={api} isAdmin={user.role === "admin"}/></div>}
+    {visited.has("settings") && <div hidden={section !== "settings"}><SettingsWorkspace api={api} userName={user.name}/></div>}
+    {section === "admin" && user.role === "admin" && <AdminWorkspace api={api} />}
+    {error && <div className="workspace-global-error" role="alert">{error}<button onClick={() => setError("")} aria-label="Uyarıyı kapat">×</button></div>}
+  </WorkspaceShell>;
+}
 
-          <section className="quick-links" aria-labelledby="quick-links-title">
-            <div className="section-heading">
-              <div><p className="eyebrow">HIZLI ERİŞİM</p><h2 id="quick-links-title">Uygulama yüzeyleri</h2></div>
-              <p>İki servis ayrı portlarda çalışır.</p>
-            </div>
-            <div className="surface-grid">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <a className="surface-card" href={surfaceUrl(item.port)} key={item.port}>
-                    <span className="surface-card__icon"><Icon size={18} aria-hidden="true" /></span>
-                    <span className="surface-card__copy"><strong>{item.title}</strong><small>HTTP · {item.port}</small></span>
-                    <ArrowUpRight size={16} className="surface-card__arrow" aria-hidden="true" />
-                  </a>
-                );
-              })}
-            </div>
-          </section>
-
-          <footer className="page-footer">
-            <span>Yeni React arayüzü önizlemesi. Üretim, arşiv ve sohbet mevcut WebUI'de çalışmaya devam ediyor.</span>
-            <a href={legacyUrl()}>Mevcut arayüzü aç <ArrowUpRight size={14} aria-hidden="true" /></a>
-          </footer>
-        </div>
-      </main>
-    </div>
-  );
+function AuthScreen({ phase, error, vaultMissing, vaultRecover, onSubmit, onRetry }: {
+  phase: SessionPhase; error: string; vaultMissing: boolean; vaultRecover: boolean;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; onRetry: () => void;
+}) {
+  if (phase === "checking") return <main className="auth-page"><section className="auth-card" role="status"><span className="spinner" aria-hidden="true"/><h1>WebUI kontrol ediliyor</h1><p className="auth-copy">Hesap ve şifreli kasa durumu alınıyor.</p></section></main>;
+  if (phase === "error") return <main className="auth-page"><section className="auth-card"><span className="auth-mark">M</span><p className="eyebrow">MOODY STUDIO</p><h1>Bağlantı kurulamadı</h1><p className="auth-copy">{error || "WebUI hazırlık yanıtı vermedi."}</p><button className="primary-button" onClick={onRetry}>Yeniden dene</button></section></main>;
+  const setup = phase === "setup", login = phase === "login", vault = phase === "vault";
+  const title = setup ? "İlk hesabını oluştur" : login ? "Tekrar hoş geldin" : vaultRecover ? "Kasayı kurtar" : vaultMissing ? "Kasa oluştur" : "Kasayı aç";
+  const copy = setup ? "Kullanıcı adını ve giriş parolanı belirle. Ardından ayrı kasa parolanı oluştur." : login ? "WebUI hesabınla giriş yap." : vaultRecover ? "Tamamlanmamış kasa kurtarma işlemini sürdür." : vaultMissing ? "Şifreli dosyaların için yeni bir kasa parolası belirle." : "Şifreli çalışma alanına erişmek için kasa parolanı gir.";
+  return <main className="auth-page"><form className="auth-card" onSubmit={(event) => void onSubmit(event)}>
+    <span className="auth-mark">M</span><p className="eyebrow">MOODY STUDIO</p><h1>{title}</h1><p className="auth-copy">{copy}</p>
+    {(setup || login) && <label>Kullanıcı adı<input name="username" autoComplete="username" required autoFocus/></label>}
+    <label>{vault ? vaultMissing ? "Yeni kasa parolası" : "Kasa parolası" : "Giriş parolası"}<input name="password" type="password" autoComplete={login || (vault && !vaultMissing) ? "current-password" : "new-password"} required autoFocus={!setup && !login}/></label>
+    {(setup || (vault && vaultMissing)) && <label>{vault ? "Kasa parolasını doğrula" : "Giriş parolasını doğrula"}<input name="password-repeat" type="password" autoComplete="new-password" required/></label>}
+    {vault && vaultMissing && <label className="auth-check"><input type="checkbox" name="risk" required/> Kasa parolamı kaybetmemem gerektiğini anladım.</label>}
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <button className="primary-button">Devam et</button>
+  </form></main>;
 }

@@ -23,7 +23,7 @@ flowchart LR
 
 - `docker/Dockerfile.gallery` Ubuntu 24.04 tabanlı küçük uygulama imajı kurar; Python venv ve birkaç Python paketi içerir. `docker/supervisor.py`, WebUI sürecini başlatır ve hazır olma denetimi yapar.
 - RunPod'da 8189 ve 8192 aynı process içinde ayrı FastAPI uygulaması/Uvicorn dinleyicisi olarak çalışır. Sağlık uçları (`/api/sunucu-hazir`, `/api/setup-state`) FastAPI router'ına taşınmıştır; diğer API yolları mevcut Handler'a uyumluluk katmanından aktarılır ve response body/header/cookie biçimleri korunur.
-- Eski arayüz `index.html` + `static/app.js` + `static/app.css` ile; kurucu `setup.html` + `static/setup.js` + `static/setup.css` ile sunulmaya devam eder. React/TypeScript/Vite uygulaması `/?ui=next` ile açılır. 8189'daki ilk React dilimi hesap/kasa geçidi, geniş üretim alanı, görsel/video seçimi, hazır model seçimi, mobil ayar paneli, iş kuyruğu/ilerleme/iptal ve sonuç gösterimini içerir. Prompt stüdyosu, sohbet, albüm ve kurucu mevcut arayüzde kalır; geçiş sırasında bağlantılar korunur. 8192'de React durumu önizlemesi bulunur, asıl kurucu akışı mevcut kurucu ekranında çalışır. Windows portable `http.server` kullanmaya devam eder.
+- React/TypeScript/Vite uygulaması RunPod'da hem 8189 hem 8192 için varsayılandır. 8189'da ana çalışma alanı, 8192'de kurucu bölümleri aynı React bundle'ında açılır. `/?ui=legacy` ve `:8192/?ui=legacy` eski 8189 arayüzüne ve eski 8192 kurucusuna geri dönüş sağlar; `/?ui=next` React uygulamasını doğrudan açar. Windows portable `http.server` ve eski arayüz varsayılanı korunur.
 - `webui_flux2/api/legacy.py` geçiş adaptörüdür. `api/legacy_*_routes.py` dosyaları ana ve kurucu HTTP davranışını kimlik doğrulama, yönetim, medya, kuyruk ve yapay zekâ ailelerine ayırır; mevcut Handler JSON/HTTP sözleşmesi için geçici uyumluluk sınırı olmaya devam eder. Yeni uçlar native `APIRouter`/service sınırına eklenmeli, eski uçlar API contract testleriyle taşınmalıdır. Büyük gövde/yanıtlar belleğe tamamen alınmadan disk tabanlı geçici dosyaya akıtılır; başlık tekrarları (özellikle Set-Cookie) korunur.
 - Backend iş kuralları da ayrıştırılmaya başladı: `services/` üretim, kuyruk, içerik ve medya/video yükseltme işlerini; `kasa_modules/` hesap, kripto, yedek ve kasa akışlarını; `llm_runtime/` motor, metin hazırlama, metrik ve aktarımı; `pod_setup_modules/` katalog, indirme, kurulum, ayar ve depolamayı barındırır. `server.py`, `kasa.py`, `llm.py` ve `pod_setup.py` mevcut çağrılar için uyumluluk/facade katmanı olarak tutulur. Bu yüzden geçiş henüz bağımsız domain/adapter mimarisine tamamen ulaşmış değildir.
 - `docker/models.json` şema 2, model grupları, dosya indirme kaynakları, bağımlılıklar ve workflow profillerinin tek katalog kaynağıdır.
@@ -34,10 +34,18 @@ flowchart LR
 
 | Yüzey | Ana bölümler ve API sorumluluğu |
 | --- | --- |
-| 8189 ana WebUI | React ilk dilimi: ilk kurulum/giriş/kasa açma ve görsel/video üretimi. Eski arayüz: prompt stüdyosu ve sırası; sohbet; arşiv/kütüphane; sistem/iş logları; kullanıcı ve genel ayarlar |
-| 8192 kurucu | React ilk dilimi: servis/depolama durumu. Eski kurucu: model listesi/indirme kuyruğu ve işlem kontrolü; model bağlantıları/LoRA ve sistem ayarları; loglar; yedekleme/R2; depolama temizliği, restart ve imaj güncelleme |
+| 8189 ana WebUI | React: ilk kurulum/giriş/kasa; üretim; Prompt Stüdyosu/geçmişi; sohbet; sıra; kütüphane/arşiv; izleme; ayarlar ve kullanıcı yönetimi |
+| 8192 kurucu | React: model indirme kuyruğu ve işlem kontrolü; kurucu/genel ayarlar; yedekleme; sistem/bakım ve loglar |
 
-Eski ekranların uçları ve payload’ları `server.py`, `static/app.js` ve `static/setup.js` içinde tanımlıdır. Yeni React üretim akışı bu mevcut JSON sözleşmelerini `frontend/src/lib/api/client.ts` üzerinden kullanır. Taşıma sırasında sözleşmeler envanterlenip API testiyle kilitlenmelidir; UI metinlerinden yeni API şeması varsayılmamalıdır.
+Eski ekranların uçları ve payload’ları `server.py`, `static/app.js` ve `static/setup.js` içinde tanımlıdır. React ekranları aynı API'lere `frontend/src/lib/api/client.ts` üzerinden bağlanır. API ve servis davranışlarının çoğu legacy Handler uyumluluk köprüsünden geçmeye devam eder. Taşıma sırasında sözleşmeler envanterlenip API testiyle kilitlenmelidir; UI metinlerinden yeni API şeması varsayılmamalıdır.
+
+### React taşıma durumu
+
+- 8189 ve 8192 portlarında kök adres React’i açar. `/?ui=legacy` eski ana ekranı, `:8192/?ui=legacy` eski kurucuyu açar. İki istemci aynı API, oturum, kasa ve kayıtları kullanır.
+- Arayüz `frontend/src/features/` altında üretim/üretim ayarları, prompt stüdyosu, sohbet, galeri/arşiv, sıra/izleme, kullanıcı ayarları ve kurucu modüllerine ayrılmıştır. Üretim isteği mevcut `formVerisi()` alanlarını taşır; kurucu model ekleme, isteğe bağlı MTP/mmproj bileşenleri, yedek devam anahtarı ve uygulama güncelleme/yeniden başlatma durumlarını yönetir.
+- React bundle’ı Docker Node aşamasında derlenir ve imaja `frontend-dist/` olarak kopyalanır. Bu nedenle kaynakta React değişikliği yeni Actions imajı gerektirir; uygulama içindeki Python dosya güncellemesi bundle’ı değiştirmez.
+- Otomatik doğrulama sentetik istemci verisiyle çalışır. Bu taşıma diliminde 15 React testi, 40 Python testi, Python derlemesi ve Vite üretim derlemesi geçti. Görsel ve mobil son değerlendirme kullanıcıyla daha sonra yapılacak toplu inceleme için ertelendi; canlı RunPod doğrulaması ayrıca tamamlanmadı.
+- API uygulaması henüz bütünüyle FastAPI route/service mimarisine taşınmadı; legacy Handler uyumluluk köprüsü endpoint’lerin çoğunda duruyor. React geçişi backend’i bu köprüden çıkarmış sayılmaz.
 
 ## Hedeflenen ayrıştırma — geçiş sürüyor
 
@@ -50,7 +58,7 @@ flowchart LR
   Ports --> Adapters[Mevcut Python entegrasyonları]
 ```
 
-Taşıma önce JSON sözleşmesini koruyan uyumluluk katmanıyla başladı. Python servisleri ayrıştırıldı ve route aileleri ayrı modüllere alındı; FastAPI uygulaması henüz legacy Handler'ı çağıran köprüdür. React üretim ekranı çalışan bir ilk dilimdir; kalan ekranlar özellik bazında taşınacaktır. Her dilim API/auth/CSRF/iptal/ilerleme testlerinden geçtikten sonra aktif olmalıdır. JSON sözleşmesi, kullanıcı verisi, queue cancellation, upload progress, canlı log ve setup portunun bağımsız açılma özelliği korunmalıdır. FastAPI'nin [çok dosyalı uygulama/router](https://fastapi.tiangolo.com/tutorial/bigger-applications/) ve [lifespan](https://fastapi.tiangolo.com/advanced/events/) belgeleri yeni router ve servis yaşam döngüsü için başlangıç kaynağıdır.
+Taşıma önce JSON sözleşmesini koruyan uyumluluk katmanıyla başladı. Python servisleri ayrıştırıldı, route aileleri ayrı modüllere alındı ve RunPod ekranları React’e taşındı; FastAPI uygulaması hâlen legacy Handler’ı çağıran köprüdür. Sonraki backend işi bu köprüyü alan alan native router/service sınırına taşımaktır. JSON sözleşmesi, kullanıcı verisi, queue cancellation, upload progress, canlı log ve setup portunun bağımsız açılma özelliği korunmalıdır. FastAPI'nin [çok dosyalı uygulama/router](https://fastapi.tiangolo.com/tutorial/bigger-applications/) ve [lifespan](https://fastapi.tiangolo.com/advanced/events/) belgeleri yeni router ve servis yaşam döngüsü için başlangıç kaynağıdır.
 
 Önerilen gelecek paket yapısı:
 

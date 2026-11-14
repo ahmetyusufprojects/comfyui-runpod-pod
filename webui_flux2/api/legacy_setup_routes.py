@@ -9,7 +9,8 @@ from __future__ import annotations
 
 def handle_setup_get(self, parsed, runtime):
     if parsed.path in ('/', '/index.html'):
-        if parsed.query and runtime.urllib.parse.parse_qs(parsed.query).get('ui') == ['next']:
+        query = runtime.urllib.parse.parse_qs(parsed.query or '')
+        if query.get('ui') != ['legacy']:
             self._serve_react_preview(parsed)
             return
         with open(runtime.os.path.join(runtime.BASE_DIR, 'setup.html'), 'rb') as stream:

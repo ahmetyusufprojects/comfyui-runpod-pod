@@ -8,20 +8,21 @@ Bu depo yalnızca RunPod dağıtımını kapsar; Windows portable kurulumun kayn
 | API durumu/geriye uyumluluk | `webui_flux2/server.py` (Handler facade), `image_graphs.py`, `comfy_client.py` |
 | Üretim, kuyruk, içerik servisleri | `webui_flux2/services/` |
 | Kasa, LLM, kurucu servisleri | `webui_flux2/kasa_modules/`, `llm_runtime/`, `pod_setup_modules/`; eski `kasa.py`, `llm.py`, `pod_setup.py` facade'ları |
-| Eski ana arayüz | `webui_flux2/index.html`, `static/app.js`, `static/app.css` |
-| React ana üretim arayüzü | `webui_flux2/frontend/src/features/production/`, `webui_flux2/frontend/src/lib/api/`, `webui_flux2/frontend/src/ui/`, `webui_flux2/frontend/src/styles.css` (`/?ui=next`) |
-| Kurucu arayüzü (8192) | `webui_flux2/setup.html`, `static/setup.js`, `static/setup.css` |
+| Varsayılan 8189/8192 arayüzü | `webui_flux2/frontend/src/`; ana çalışma alanı 8189'da, kurucu aynı React uygulamasıyla 8192'de çalışır |
+| Eski 8189 arayüzü | `webui_flux2/index.html`, `static/app.js`, `static/app.css` (`/?ui=legacy`) |
+| Eski 8192 kurucusu | `webui_flux2/setup.html`, `static/setup.js`, `static/setup.css` (`:8192/?ui=legacy`) |
 | Model/workflow kataloğu | `docker/models.json` (şema 2) |
 | İmaj ve süreç yöneticisi | `docker/Dockerfile.gallery`, `docker/supervisor.py` |
 | Immutability/update path | `webui_flux2/app_update.py` |
 | İmaj build/release | `.github/workflows/gallery-image.yml`, `docker/stable-image.txt` |
 | Pod başlatma | `pod-launch.py` |
 
-## Güncel yapı ve planlanan geçiş
+## Güncel yapı ve kademeli geçiş
 
 - RunPod'da 8189 ve 8192 FastAPI/Uvicorn ASGI uygulamalarıdır. İki health ucu native router'da; kalan legacy API yolları `api/legacy.py` üzerinden aynı `server.py` Handler'ına gider. Windows portable `http.server` yolunu korur.
-- Ana sayfada hesap/kasa, üretim, prompt stüdyosu, sıra, arşiv/kütüphane, sohbet, izleme ve ayarlar akışları vardır. 8192 kurucusu model kuyruğu, sistem/model yönetimi, loglar, yedekleme ve bakım akışlarını sunar.
-- React/TypeScript/Vite, Tailwind ve Lucide durum önizlemesi `/?ui=next` adresinde paketlenir; eski tam arayüz varsayılandır ve tüm üretim/sohbet/kurucu akışları React'e henüz taşınmamıştır. Taşıma aşamalı olmalı; API sözleşmeleri, JSON çıktıları, oturum/kasa kuralları ve arka plan işlerinin iptal/ilerleme davranışı korunmalıdır. Ayrıntı `docs/architecture.md` içindedir.
+- RunPod'da React/TypeScript/Vite arayüzü 8189 ve 8192'de varsayılandır. `/?ui=legacy` ana eski arayüzü, `:8192/?ui=legacy` eski kurucuyu açar. `/?ui=next` React uygulamasına doğrudan erişim adresi olarak çalışır.
+- React'te taşınmış bölümler: hesap/kasa; görsel/video üretim alanı; Prompt Stüdyosu ve prompt geçmişi; sohbet; sıra; kütüphane/arşiv; izleme; ayarlar ve kullanıcı yönetimi; kurucu indirmeleri, genel ayarlar, yedekleme ve sistem/bakım. Bu, eski arayüzün tüm ayrıntılı kontrollerinin eşdeğer olduğu anlamına gelmez. Üretim dilimindeki bilinen farklar ve kalan işler `docs/architecture.md` içinde listelenmiştir.
+- API JSON sözleşmaları, oturum/kasa kuralları ve arka plan işlerinin iptal/ilerleme davranışı korunmalıdır. Uygulama API'si hâlen legacy Handler uyumluluk katmanını kullanır. Ayrıntı `docs/architecture.md` içindedir.
 - Yeni statik/modül dosyaları Dockerfile’ın açık `COPY` listesine ve uygulama güncellemesinin izinli dosya listesine eklenmelidir. İmaj sınırı değişiklikleri yalnız yeni imajla dağıtılır.
 
 ## Veri ve erişim sınırları

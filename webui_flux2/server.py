@@ -647,7 +647,7 @@ def _form_temizle(ham):
                         temiz[k] = n
             elif k == "sampler":
                 if v in ("euler", "euler_ancestral", "dpmpp_2m",
-                         "uni_pc", "res_multistep"):
+                         "dpmpp_2m_sde", "uni_pc", "res_multistep"):
                     temiz[k] = v
             elif k in _FORM_SAYI:
                 lo, hi = _FORM_SAYI[k]
@@ -884,6 +884,18 @@ def _ayar_degisikliklerini_uygula(ayar, req):
         if not isinstance(req.get("uretim_prompt_duzenle"), bool):
             raise ValueError("uretim_prompt_duzenle boolean olmalı")
         ayar["uretim_prompt_duzenle"] = req["uretim_prompt_duzenle"]
+    for key in ("uretim_prompt_tekrar", "uretim_kesintisiz"):
+        if key in req:
+            if not isinstance(req.get(key), bool):
+                raise ValueError(key + " boolean olmalı")
+            ayar[key] = req[key]
+    if "uretim_llm_model" in req:
+        model = req.get("uretim_llm_model")
+        allowed = ({item["id"] for item in llm.model_profilleri()}
+                   if RUNPOD_MODE else {"llama"})
+        if model not in (None, "") and (not isinstance(model, str) or model not in allowed):
+            raise ValueError("uretim_llm_model seçimi geçersiz")
+        ayar["uretim_llm_model"] = str(model or "")
     if (ayar.get("uretim_prompt_ceviri")
             and ayar.get("uretim_prompt_destek")):
         raise ValueError(
