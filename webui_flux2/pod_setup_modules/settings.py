@@ -553,7 +553,7 @@ def system_settings():
                 continue
             files = []
             originals = {source.get("name"): source
-                         for source in (_CATALOG_DATA.get("groups", {}).get(group, {})
+                         for source in (_ctx._CATALOG_DATA.get("groups", {}).get(group, {})
                                         .get("files", []))}
             for file in item.get("files", []):
                 original = (originals.get(file["name"])
@@ -571,7 +571,7 @@ def system_settings():
                 "model_families": [
                     {"id": family, "name": (_ctx.CATALOG.get(workflow.get("group")) or {}).get("label", family),
                      "engine": (_ctx.CATALOG.get(workflow.get("group")) or {}).get("engine")}
-                    for family, workflow in _CATALOG_DATA.get("workflows", {}).items()
+                    for family, workflow in _ctx._CATALOG_DATA.get("workflows", {}).items()
                     if workflow.get("group") in _ctx.CATALOG
                     and _ctx.CATALOG[workflow["group"]].get("enabled", True)
                     and _ctx.CATALOG[workflow["group"]].get("engine") in ("comfy", "llama")
