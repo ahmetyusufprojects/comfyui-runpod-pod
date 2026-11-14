@@ -63,6 +63,11 @@
 .settings-grid--wide { grid-template-columns: minmax(0, 1fr); }
 .settings-field { min-width: 0; display: grid; gap: 6px; margin: 0 0 12px; color: #bcc4d2; font-size: 10px; font-weight: 600; }
 .settings-field small { color: #7f8a9d; font-size: 9px; font-weight: 400; }
+.settings-reset { justify-self: start; padding: 5px 8px; border: 1px solid #343c4c; border-radius: 7px; color: #b5bfd0; background: #151a23; font-size: 9px; cursor: pointer; }
+.settings-reset:hover { border-color: #c28a6b77; color: #f1c3a5; }
+.settings-global-context { max-width: 420px; margin-bottom: 16px; }
+.settings-prompt-override { min-width: 0; }
+.settings-prompt-override .settings-field { margin-bottom: 6px; }
 .settings-field input, .settings-field select, .settings-field textarea, .settings-inline input, .admin-user-row input { width: 100%; min-width: 0; min-height: 36px; padding: 8px 10px; border: 1px solid #343c4c; border-radius: 8px; outline: 0; color: #e8ebf2; background: #0e1219; font: inherit; font-weight: 400; }
 .settings-field textarea { resize: vertical; line-height: 1.55; }
 .settings-field input:focus, .settings-field select:focus, .settings-field textarea:focus { border-color: #c28a6b; box-shadow: 0 0 0 2px #d58d6817; }

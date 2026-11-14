@@ -25,6 +25,12 @@
 .prompt-ref__add { width:100%; min-height:72px; display:grid; place-content:center; justify-items:center; gap:4px; border:0; color:#bcc5d5; background:transparent; cursor:pointer; font-size:10px; }
 .prompt-ref__add svg { color:#aab8ff; }
 .prompt-ref__add small { color:#788397; font-size:9px; }
+.prompt-ref-actions { display:flex; align-items:center; gap:9px; margin:-5px 0 12px; color:#818b9d; font-size:9px; }
+.prompt-library { max-height:220px; overflow:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:7px; margin:-4px 0 12px; padding:8px; background:#0d1118; border:1px solid #303848; border-radius:8px; }
+.prompt-library button { min-width:0; display:grid; gap:5px; padding:5px; color:#cbd1dc; background:#171d27; border:1px solid #293243; border-radius:7px; text-align:left; cursor:pointer; font-size:9px; }
+.prompt-library img { width:100%; height:72px; object-fit:cover; border-radius:4px; }
+.prompt-library span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.prompt-library p { margin:4px; color:#929bad; font-size:10px; }
 .prompt-field--wide { margin-bottom:12px; }
 .prompt-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
 .prompt-check { display:flex; align-items:center; gap:9px; margin-top:12px; padding:10px; color:#c3cad6; background:#161c27; border:1px solid #283348; border-radius:8px; cursor:pointer; }
@@ -51,6 +57,10 @@
 .prompt-details { margin:-2px 0 12px; color:#9aa4b6; font-size:10px; }
 .prompt-details summary { cursor:pointer; }
 .prompt-details p { margin:8px 0 0; line-height:1.55; white-space:pre-wrap; }
+.prompt-details dl { display:grid; grid-template-columns:minmax(90px,auto) minmax(0,1fr); gap:4px 9px; margin:8px 0 0; }
+.prompt-details dl>div { display:contents; }
+.prompt-details dt { color:#788397; }
+.prompt-details dd { min-width:0; margin:0; color:#c0c7d3; overflow-wrap:anywhere; }
 .prompt-caption { margin:10px 0 0; color:#a6b0c1; font-size:10px; line-height:1.5; }
 .prompt-tags { display:flex; flex-wrap:wrap; gap:5px; margin-top:9px; }
 .prompt-tags span { padding:4px 7px; color:#bdc7dc; background:#1b2232; border-radius:999px; font-size:9px; }

@@ -29,6 +29,9 @@
 .chat-model { width:min(300px,38%); margin-left:auto; display:flex; flex-direction:column; gap:4px; color:#8791a4; font-size:9px; }
 .chat-model select { width:100%; min-width:0; height:36px; padding:0 10px; border:1px solid #2c3241; border-radius:8px; outline:0; color:#e1e5ed; background:#171b25; font-size:11px; }
 .chat-model select:focus { border-color:#d58d68; }
+.chat-context { flex:none; display:grid; gap:1px; padding-left:10px; border-left:1px solid #ffffff14; color:#c4cbd7; text-align:right; }
+.chat-context span,.chat-context small { color:#7f899b; font-size:8px; }
+.chat-context b { font-size:11px; font-variant-numeric:tabular-nums; }
 .chat-transcript { min-height:0; flex:1; display:flex; flex-direction:column; gap:16px; overflow-y:auto; padding:26px clamp(0px,2vw,20px); overscroll-behavior:contain; }
 .chat-welcome { width:min(560px,100%); margin:auto; padding:35px 20px; text-align:center; }
 .chat-welcome>span { width:56px; height:56px; margin:0 auto 17px; display:grid; place-items:center; border:1px solid #d58d6838; border-radius:18px; color:#e0a17e; background:#d58d6810; }
@@ -47,6 +50,7 @@
 .chat-message__text { margin:0; overflow-wrap:anywhere; color:#e2e5ec; font-size:12px; line-height:1.65; white-space:pre-wrap; }
 .chat-message__retry { margin-top:9px; padding:4px 8px; border:1px solid #303543; border-radius:7px; color:#aeb7c7; background:#171a22; font-size:9px; cursor:pointer; }
 .chat-message__retry:hover { border-color:#d58d684d; color:#f1c3a5; }
+.chat-message__actions { display:flex; gap:6px; }
 .chat-message--assistant .chat-message__text { color:#d9dce5; }
 .chat-message__image { display:block; max-width:min(360px,100%); max-height:250px; margin:5px 0 10px; border:1px solid #ffffff16; border-radius:9px; object-fit:contain; }
 .chat-thinking { display:flex; align-items:center; gap:8px; color:#9ca5b6; font-size:11px; }
@@ -97,6 +101,9 @@
   .chat-heading .eyebrow { font-size:7px; }
   .chat-model { width:min(185px,43%); }
   .chat-model select { height:33px; padding:0 7px; font-size:9px; }
+  .chat-context { padding-left:6px; }
+  .chat-context span { display:none; }
+  .chat-context small { font-size:7px; }
   .chat-transcript { gap:13px; padding:15px 0; }
   .chat-welcome { padding:24px 10px; }
   .chat-message { grid-template-columns:25px minmax(0,1fr); gap:8px; }

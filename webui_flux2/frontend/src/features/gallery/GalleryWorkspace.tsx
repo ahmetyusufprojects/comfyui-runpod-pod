@@ -340,8 +340,6 @@ export function GalleryWorkspace({ api, initialTab = "archive", onUseReference }
 
   const setPage = (value: number) => {
     setArchivePage(value);
-    setSelectionMode(false);
-    setSelectedHashes(new Set());
   };
 
   const toggleSelected = (hash?: string) => {

@@ -15,6 +15,7 @@ interface Props {
   initialNegative?: string;
   referenceFile?: File | null;
   onOpenPromptStudio?: (prompt: string, editMode: boolean, negative: string, presetDefaults?: JsonRecord) => void;
+  registerQuickGenerate?: (handler: ((prompt: string, negative: string, files: File[]) => void) | null) => void;
   initialPreset?: JsonRecord;
 }
 
@@ -113,7 +114,7 @@ function Composer({ mode, setMode, prompt, setPrompt, busy, onSubmit, onCancel, 
   </div></section>;
 }
 
-export function ProductionWorkspace({ api, embedded = false, initialPrompt = "", initialNegative = "", referenceFile = null, onOpenPromptStudio, initialPreset }: Props) {
+export function ProductionWorkspace({ api, embedded = false, initialPrompt = "", initialNegative = "", referenceFile = null, onOpenPromptStudio, registerQuickGenerate, initialPreset }: Props) {
   const [phase, setPhase] = useState<Phase>(embedded ? "ready" : "loading");
   const [instances, setInstances] = useState<ModelInstance[]>([]);
   const [llmModels, setLlmModels] = useState<GenerationModelOption[]>([]);
@@ -312,37 +313,41 @@ export function ProductionWorkspace({ api, embedded = false, initialPrompt = "",
     return () => window.clearTimeout(timer);
   }, [api, files.length, instances, negative, options, prompt, settingsLoaded]);
 
-  const queueJob = useCallback(async (assist: boolean) => {
-    if (!prompt.trim()) return;
+  const queueJob = useCallback(async (assist: boolean, override?: { prompt?: string; negative?: string; files?: File[] }) => {
+    const activePrompt = override?.prompt ?? prompt;
+    const activeNegative = override?.negative ?? negative;
+    const activeFiles = override?.files ?? files;
+    const activeReferenceCount = options.mode === "video" && options.videoModelId === "wan22" ? 0 : activeFiles.length;
+    if (!activePrompt.trim()) return;
     const selected = options.mode === "image" ? instances.find(item => item.id === options.imageModelId) : instances.find(item => options.videoModelId === "wan22"
       ? (item.family.toLowerCase().includes("wan") || item.id === "wan22")
       : ((item.family.toLowerCase().includes("video") && !item.family.toLowerCase().includes("wan")) || item.id === "video"));
     if (!selected?.ready) { setLoadingError("Önce hazır bir model seç."); setControlsOpen(true); return; }
-    if (options.mode === "video" && options.videoModelId === "wan22" && files.length) { setLoadingError("Wan 2.2 metinden video üretir. Referans fotoğraflarını kaldır veya MiniMax H3 seç."); setControlsOpen(true); return; }
+    if (options.mode === "video" && options.videoModelId === "wan22" && activeFiles.length) { setLoadingError("Wan 2.2 metinden video üretir. Referans fotoğraflarını kaldır veya MiniMax H3 seç."); setControlsOpen(true); return; }
     setLoadingError("");
     const toBase64 = (file: File) => new Promise<string>((resolve, reject) => {
       const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || ""); reader.onerror = reject; reader.readAsDataURL(file);
     });
     try {
-      const [image, image2] = await Promise.all([files[0] ? toBase64(files[0]) : "", files[1] ? toBase64(files[1]) : ""]);
+      const [image, image2] = await Promise.all([activeFiles[0] ? toBase64(activeFiles[0]) : "", activeFiles[1] ? toBase64(activeFiles[1]) : ""]);
       const requestedLoras = Object.entries(options.loraWeights).map(([id, weight]) => ({ id, weight }));
       const enhanceEnabled = options.mode === "image" ? options.imageEnhance : options.videoEnhance;
       const payload: JsonRecord = {
-        prompt, negative, model: options.mode === "image" ? selected.family : "auto",
+        prompt: activePrompt, negative: activeNegative, model: options.mode === "image" ? selected.family : "auto",
         image_model: options.mode === "image" ? selected.family : "auto",
         model_instance: options.mode === "image" ? selected.id : null,
         llm_model: options.llmModelId || undefined,
         width: options.width, height: options.height,
-        max_side: referenceCount ? options.referenceMaxSide : Math.max(options.width, options.height),
+        max_side: activeReferenceCount ? options.referenceMaxSide : Math.max(options.width, options.height),
         max_olcek: options.scaleToMax, video_max_side: options.videoMaxSide,
         video_profile: options.videoProfile === "fast" ? "fast" : options.videoProfile,
         video_model_instance: options.mode === "video" ? options.videoModelId : null,
         flux3_bbox_mode: options.fluxBbox, edit_strength: options.kreaEditStrength,
         steps: options.steps, cfg: options.cfg, sampler: options.sampler, seed: options.seed,
-        workflow: options.mode === "video" ? "video" : files.length > 1 ? "cift" : "tek",
+        workflow: options.mode === "video" ? "video" : activeFiles.length > 1 ? "cift" : "tek",
         image_base64: image, image2_base64: image2,
-        image_mime: files[0]?.type || "image/jpeg", image2_mime: files[1]?.type || "image/jpeg",
-        is_tipi: options.mode === "video" ? "video-uretim" : referenceCount ? "goruntu-duzenleme" : "goruntu-uretim",
+        image_mime: activeFiles[0]?.type || "image/jpeg", image2_mime: activeFiles[1]?.type || "image/jpeg",
+        is_tipi: options.mode === "video" ? "video-uretim" : activeReferenceCount ? "goruntu-duzenleme" : "goruntu-uretim",
         suresn: options.videoSeconds, fps: options.videoFps,
         prompt_destek: assist, prompt_ceviri: options.mode === "image" && options.promptTranslate,
         enhance_after: enhanceEnabled ? { enabled: true, type: options.mode,
@@ -357,8 +362,21 @@ export function ProductionWorkspace({ api, embedded = false, initialPrompt = "",
       setJob({ id, status: "queued", progress: 0, message: "İstek kuyruğa alındı" });
       if (assist) promptAssistUsedRef.current = true;
     } catch (reason) { setLoadingError(reason instanceof Error ? reason.message : "İstek gönderilemedi."); continuousRef.current = false; }
-  }, [api, files, instances, options, prompt, referenceCount]);
+  }, [api, files, instances, options, prompt]);
   submitJobRef.current = queueJob;
+
+  useEffect(() => {
+    if (!registerQuickGenerate) return;
+    registerQuickGenerate((nextPrompt, nextNegative, nextFiles) => {
+      setPrompt(nextPrompt);
+      setNegative(nextNegative);
+      setFiles(nextFiles);
+      continuousRef.current = false;
+      promptAssistUsedRef.current = false;
+      void queueJob(false, { prompt: nextPrompt, negative: nextNegative, files: nextFiles });
+    });
+    return () => registerQuickGenerate(null);
+  }, [queueJob, registerQuickGenerate]);
 
   useEffect(() => {
     if (phase !== "ready" || !job?.id || !["queued", "running", "stopping"].includes(job.status)) return;

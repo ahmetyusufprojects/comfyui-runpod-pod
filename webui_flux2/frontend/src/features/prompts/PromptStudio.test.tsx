@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { PromptStudio } from "./PromptStudio";
+import { PromptStudio, resolvePromptProfile } from "./PromptStudio";
 import type { ProductionApi } from "../../lib/api/client";
 
 afterEach(() => { cleanup(); localStorage.clear(); });
@@ -25,6 +25,13 @@ function fakeApi(overrides: Partial<ProductionApi> = {}): ProductionApi {
 }
 
 describe("Prompt Studio kayıtları ve yeniden bağlanma", () => {
+  it("otomatik prompt profilini etkin üretim modeline göre çözer", () => {
+    expect(resolvePromptProfile("auto", { model: "krea2-instance", workflow: "krea2" })).toBe("krea2");
+    expect(resolvePromptProfile("auto", { model: "z_image" })).toBe("z_image");
+    expect(resolvePromptProfile("auto", { workflow: "video", video_model_instance: "wan22" })).toBe("wan22");
+    expect(resolvePromptProfile("auto", { workflow: "video", video_model_instance: "video" })).toBe("minimaxh3");
+  });
+
   it("yüklenen kayıtları üretim değerleriyle uygular ve /api/promptlar/sil ile siler", async () => {
     const onApply = vi.fn();
     const api = fakeApi({
@@ -66,7 +73,7 @@ describe("Prompt Studio kayıtları ve yeniden bağlanma", () => {
     await screen.findByDisplayValue("A tiny meadow");
     expect(post).toHaveBeenCalledWith("/api/prompt-uret", {
       mod: "fikir", metin: "meadow", dil: "en", yaraticilik: 0.7, gorseller: [],
-      model_prompt_profile: "auto", llm_model: "llm-test", bbox_mode: false,
+      model_prompt_profile: "krea2", llm_model: "llm-test", bbox_mode: false,
     });
     fireEvent.change(screen.getByLabelText("Prompt kayıt adı"), { target: { value: "Test preset" } });
     fireEvent.click(screen.getByRole("button", { name: "Kaydet" }));

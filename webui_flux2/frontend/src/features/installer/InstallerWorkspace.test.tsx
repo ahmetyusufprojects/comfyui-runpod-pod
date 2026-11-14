@@ -28,6 +28,44 @@ function fakeApi(): InstallerApi {
 }
 
 describe("React kurucu alanı", () => {
+  it("LoRA listesini yalnızca kurulu görsel model aileleriyle sınırlar", async () => {
+    const api = fakeApi();
+    api.get = vi.fn(async (path: string) => {
+      if (path === "/api/setup-state") return { hazir: true, parolasiz: true };
+      if (path === "/api/pod-kurulum") return { gruplar: [{ id: "zimage", ad: "Z-Image" }, { id: "krea2", ad: "Krea 2" }] };
+      if (path === "/api/system-settings") return {
+        ayarlar: { loras: [
+          { id: "lora-z", name: "Z LoRA", model: "z_image", enabled: true },
+          { id: "lora-flux", name: "Flux LoRA", model: "flux3", enabled: true },
+        ] },
+        gruplar: [{ id: "zimage", label: "Z-Image", files: [] }, { id: "krea2", label: "Krea 2", files: [] }],
+        lora_durum: [], model_families: [], model_instances: [],
+      };
+      return {};
+    }) as unknown as InstallerApi["get"];
+    render(<InstallerWorkspace api={api}/>);
+    await screen.findByRole("heading", { name: "Kurulum ve sistem yönetimi" });
+    fireEvent.click(screen.getByRole("button", { name: "Genel ayarlar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "LoRA" }));
+    expect(await screen.findByText("Z LoRA")).toBeInTheDocument();
+    expect(screen.queryByText("Flux LoRA")).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Z-Image" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Krea 2" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Flux 3 Klein" })).not.toBeInTheDocument();
+  });
+
+  it("yeni yedek parolasında sekiz karakter şartını gösterir", async () => {
+    const api = fakeApi();
+    render(<InstallerWorkspace api={api}/>);
+    await screen.findByRole("heading", { name: "Kurulum ve sistem yönetimi" });
+    fireEvent.click(screen.getByRole("button", { name: "Yedekler" }));
+    const password = (await screen.findAllByLabelText("Yedek parolası"))[0];
+    expect(password).toHaveAttribute("minLength", "8");
+    expect(screen.getByRole("button", { name: "Şifreli dosyayı indir" })).toBeDisabled();
+    fireEvent.change(password, { target: { value: "12345678" } });
+    expect(screen.getByRole("button", { name: "Şifreli dosyayı indir" })).toBeEnabled();
+  });
+
   it("isteğe bağlı model dosyalarını seçime göre API'ye gönderir", async () => {
     const api = fakeApi();
     render(<InstallerWorkspace api={api}/>);

@@ -49,6 +49,33 @@ describe("React galeri", () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith("/api/arsiv/sil-coklu", { hashes: ["a".repeat(64), "b".repeat(64)] }));
   });
 
+  it("arşivde sayfa değiştirirken önceki seçimleri korur", async () => {
+    const firstHash = "a".repeat(64), secondHash = "b".repeat(64);
+    const api = fakeApi({
+      get: vi.fn().mockImplementation(async (path: string) => {
+        if (path.startsWith("/api/arsiv?")) {
+          const page = new URLSearchParams(path.split("?")[1]).get("sayfa");
+          return page === "2"
+            ? { toplam: 25, kayitlar: [{ hash: secondHash, ad: "page-two.png", url: "/page-two.png" }] }
+            : { toplam: 25, kayitlar: [{ hash: firstHash, ad: "page-one.png", url: "/page-one.png" }] };
+        }
+        if (path === "/api/ayarlar") return {};
+        return {};
+      }),
+    });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(<GalleryWorkspace api={api}/>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Seç" }));
+    fireEvent.click(await screen.findByRole("button", { name: "page-one.png seç" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sonraki sayfa" }));
+    fireEvent.click(await screen.findByRole("button", { name: "page-two.png seç" }));
+    expect(screen.getByText("2 görsel seçildi")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Arşivden kaldır" }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/api/arsiv/sil-coklu", { hashes: [firstHash, secondHash] }));
+  });
+
   it("kütüphane görselini açıp referans olarak aktarır", async () => {
     const api = fakeApi();
     const useReference = vi.fn();

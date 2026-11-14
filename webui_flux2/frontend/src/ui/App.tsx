@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallerWorkspace } from "../features/installer/InstallerWorkspace";
 import { ChatWorkspace } from "../features/chat/ChatWorkspace";
 import { GalleryWorkspace, type GalleryReference, type GalleryTab } from "../features/gallery/GalleryWorkspace";
@@ -39,6 +39,8 @@ function MainWorkspace({ api }: { api: ProductionApi }) {
   const [productionPreset, setProductionPreset] = useState<JsonRecord>({});
   const [studioSession, setStudioSession] = useState(0);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const quickGenerateRef = useRef<((prompt: string, negative: string, files: File[]) => void) | null>(null);
+  const registerQuickGenerate = useCallback((handler: ((prompt: string, negative: string, files: File[]) => void) | null) => { quickGenerateRef.current = handler; }, []);
 
   const checkVault = useCallback(async (sessionUser: SessionUser) => {
     const vault = await api.vault();
@@ -141,6 +143,15 @@ function MainWorkspace({ api }: { api: ProductionApi }) {
     navigate("production");
   };
 
+  const quickGeneratePrompt = (result: PromptResult, files: File[]) => {
+    const prompt = String(result.positive || result.positive_tr || "");
+    const negative = String(result.negative || "");
+    setStudioInput(prompt);
+    setStudioNegative(negative);
+    quickGenerateRef.current?.(prompt, negative, files);
+    navigate("production");
+  };
+
   const openPromptStudio = (prompt: string, editMode: boolean, negative: string, presetDefaults: JsonRecord = {}) => {
     setStudioInput(prompt);
     setStudioNegative(negative);
@@ -153,8 +164,8 @@ function MainWorkspace({ api }: { api: ProductionApi }) {
   if (phase !== "ready" || !user) return <AuthScreen phase={phase} error={error} vaultMissing={vaultMissing} vaultRecover={vaultRecover} onSubmit={submitAuth} onRetry={() => void refreshSession()}/>;
 
   return <WorkspaceShell active={section} onNavigate={navigate} userName={user.name} isAdmin={user.role === "admin"} onLock={() => void lock()}>
-    {visited.has("production") && <div hidden={section !== "production"}><ProductionWorkspace api={api} embedded initialPrompt={studioInput} initialNegative={studioNegative} initialPreset={productionPreset} referenceFile={referenceFile} onOpenPromptStudio={openPromptStudio}/></div>}
-    {visited.has("studio") && <div hidden={section !== "studio"}><PromptStudio key={`studio-${studioSession}`} api={api} initialPrompt={studioInput} initialNegative={studioNegative} editMode={studioEditMode} presetDefaults={studioPreset} onApply={applyPrompt}/></div>}
+    {visited.has("production") && <div hidden={section !== "production"}><ProductionWorkspace api={api} embedded initialPrompt={studioInput} initialNegative={studioNegative} initialPreset={productionPreset} referenceFile={referenceFile} onOpenPromptStudio={openPromptStudio} registerQuickGenerate={registerQuickGenerate}/></div>}
+    {visited.has("studio") && <div hidden={section !== "studio"}><PromptStudio key={`studio-${studioSession}`} api={api} initialPrompt={studioInput} initialNegative={studioNegative} editMode={studioEditMode} presetDefaults={studioPreset} onApply={applyPrompt} onQuickGenerate={quickGeneratePrompt}/></div>}
     {visited.has("chat") && <div hidden={section !== "chat"}><ChatWorkspace api={api} onPromptFromChat={(prompt) => { setStudioInput(prompt); setStudioNegative(""); setStudioEditMode(false); setStudioPreset(productionPreset); setStudioSession((value) => value + 1); navigate("studio"); }}/></div>}
     {visited.has("library") && <div hidden={section !== "library"}><GalleryWorkspace api={api} initialTab={"library" satisfies GalleryTab} onUseReference={useReference}/></div>}
     {visited.has("archive") && <div hidden={section !== "archive"}><GalleryWorkspace api={api} initialTab={"archive" satisfies GalleryTab} onUseReference={useReference}/></div>}

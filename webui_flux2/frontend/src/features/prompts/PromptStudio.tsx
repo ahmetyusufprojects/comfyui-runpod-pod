@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import { ArrowUp, Check, LoaderCircle, X } from "lucide-react";
 import type { JsonRecord, ProductionApi } from "../../lib/api/client";
 import "./PromptStudio.css";
@@ -40,7 +40,7 @@ export interface SavedPromptPreset extends JsonRecord {
   prompt: string;
   negative?: string;
 }
-type PromptRef = { name: string; mime: string; data: string; preview: string };
+export type PromptRef = { name: string; mime: string; data: string; preview: string };
 type PendingPrompt = { id: string; mode: PromptMode; text: string; refs: PromptRef[] };
 type HistoryEntry = PromptResult & { id: string; yildiz?: boolean; tarih?: string; mod?: string; metin?: string };
 type LlmOption = { id: string; ad: string; hazir?: boolean };
@@ -53,6 +53,7 @@ interface Props {
   initialNegative?: string;
   editMode?: boolean;
   onApply?: (result: PromptResult) => void;
+  onQuickGenerate?: (result: PromptResult, refs: File[]) => void;
   presetDefaults?: PromptPresetDefaults;
 }
 
@@ -61,6 +62,29 @@ const PROFILE_OPTIONS: Array<[PromptProfile, string]> = [
   ["flux3", "Flux 3 Klein"], ["krea2", "Krea 2"], ["illustrious", "Illustrious"],
   ["minimaxh3", "MiniMax H3 · video"], ["wan22", "Wan 2.2 · sessiz video"],
 ];
+
+function readPreference(key: string): string {
+  try { return localStorage.getItem(key) || ""; } catch { return ""; }
+}
+
+export function resolvePromptProfile(profile: PromptProfile, defaults?: PromptPresetDefaults): Exclude<PromptProfile, "auto"> {
+  if (profile !== "auto") return profile;
+  const video = `${defaults?.workflow ?? ""} ${defaults?.video_model_instance ?? ""} ${defaults?.video_profile ?? ""}`.toLowerCase();
+  if (video.includes("video") || video.includes("wan") || video.includes("minimax")) return video.includes("wan") ? "wan22" : "minimaxh3";
+  const model = `${defaults?.model ?? ""} ${defaults?.image_model ?? ""} ${defaults?.model_instance ?? ""} ${defaults?.workflow ?? ""}`.toLowerCase();
+  if (model.includes("flux3") || model.includes("flux 3")) return "flux3";
+  if (model.includes("krea")) return "krea2";
+  if (model.includes("illustrious")) return "illustrious";
+  if (model.includes("zimage") || model.includes("z-image") || model.includes("z_image")) return "z_image";
+  return "general";
+}
+
+function dataUrlToFile(ref: PromptRef): File {
+  const binary = atob(ref.data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new File([bytes], ref.name, { type: ref.mime });
+}
 
 function bytesToData(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -96,17 +120,20 @@ function buildRequest(item: PendingPrompt, profile: PromptProfile, llmModel: str
   };
 }
 
-export function PromptStudio({ api, initialPrompt = "", initialNegative = "", editMode = false, onApply, presetDefaults }: Props) {
+export function PromptStudio({ api, initialPrompt = "", initialNegative = "", editMode = false, onApply, onQuickGenerate, presetDefaults }: Props) {
   const [mode, setMode] = useState<PromptMode>(editMode ? "duzenle" : "fikir");
-  const [profile, setProfile] = useState<PromptProfile>("auto");
+  const [profile, setProfile] = useState<PromptProfile>(() => PROFILE_OPTIONS.some(([value]) => value === readPreference("ps_prompt_profile")) ? readPreference("ps_prompt_profile") as PromptProfile : "auto");
   const [language, setLanguage] = useState("en");
   const [creativity, setCreativity] = useState(0.7);
   const [repeat, setRepeat] = useState(1);
   const [llms, setLlms] = useState<LlmOption[]>([]);
-  const [llmModel, setLlmModel] = useState("");
-  const [bbox, setBbox] = useState(false);
+  const [llmModel, setLlmModel] = useState(() => readPreference("ps_llm_model"));
+  const [bbox, setBbox] = useState(() => readPreference("ps_flux3_bbox") === "true");
   const [draft, setDraft] = useState("");
   const [refs, setRefs] = useState<PromptRef[]>([]);
+  const [library, setLibrary] = useState<Array<{ ad: string; url: string; thumb?: string }>>([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   const pendingRef = useRef<PendingPrompt[]>([]);
   const runner = useRef(false);
@@ -171,12 +198,20 @@ export function PromptStudio({ api, initialPrompt = "", initialNegative = "", ed
   useEffect(() => { setNegative(initialNegative); }, [initialNegative]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem("ps_prompt_profile", profile);
+      localStorage.setItem("ps_flux3_bbox", String(bbox));
+      if (llmModel) localStorage.setItem("ps_llm_model", llmModel);
+    } catch { /* Browser storage may be disabled. */ }
+  }, [profile, bbox, llmModel]);
+
+  useEffect(() => {
     let alive = true;
     api.get<JsonRecord>("/api/durum").then((data) => {
       if (!alive) return;
       const models = Array.isArray(data.llm_models) ? data.llm_models as LlmOption[] : [];
       setLlms(models);
-      setLlmModel((current) => current || models.find((item) => item.hazir)?.id || models[0]?.id || "");
+      setLlmModel((current) => models.some((item) => item.id === current) ? current : models.find((item) => item.hazir)?.id || models[0]?.id || "");
     }).catch((reason: unknown) => { if (alive) setError(reason instanceof Error ? reason.message : "LLM modelleri yüklenemedi."); });
     return () => { alive = false; };
   }, [api]);
@@ -311,7 +346,8 @@ export function PromptStudio({ api, initialPrompt = "", initialNegative = "", ed
       pendingRef.current = rest;
       setPending(rest);
       try {
-        const queued = await api.post<JsonRecord>("/api/prompt-uret", buildRequest(item, profile, llmModel, creativity, language, bbox, currentEditContext, currentPrompt));
+        const effectiveProfile = resolvePromptProfile(profile, presetDefaults);
+        const queued = await api.post<JsonRecord>("/api/prompt-uret", buildRequest(item, effectiveProfile, llmModel, creativity, language, bbox, currentEditContext, currentPrompt));
         if (typeof queued.is_id !== "string") throw new Error("Sunucu iş numarası döndürmedi.");
         if (taskKey) { try { localStorage.setItem(taskKey, queued.is_id); } catch { /* storage may be disabled */ } }
         setActiveJob({ id: queued.is_id, status: "queued", message: queued.sira ? `LLM kuyruğunda · sıra ${queued.sira}` : "Prompt hazırlanıyor" });
@@ -353,9 +389,7 @@ export function PromptStudio({ api, initialPrompt = "", initialNegative = "", ed
     catch (reason) { setError(reason instanceof Error ? reason.message : "Prompt durdurulamadı."); }
   };
 
-  const addImages = async (index: number, files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
+  const addImageFile = async (index: number, file: File) => {
     setError("");
     try {
       const dataUrl = await bytesToData(file);
@@ -366,7 +400,46 @@ export function PromptStudio({ api, initialPrompt = "", initialNegative = "", ed
     finally { const input = fileInputs.current[index]; if (input) input.value = ""; }
   };
 
+  const addImages = async (index: number, files: FileList | null) => {
+    const file = files?.[0];
+    if (file) await addImageFile(index, file);
+  };
+
   const removeImage = (index: number) => setRefs((current) => current.filter((_, itemIndex) => itemIndex !== index));
+
+  const openLibrary = async () => {
+    const opening = !libraryOpen;
+    setLibraryOpen(opening);
+    if (!opening) return;
+    setLibraryLoading(true);
+    setError("");
+    try {
+      const data = await api.get<JsonRecord>("/api/kutuphane");
+      setLibrary(Array.isArray(data.fotograflar) ? data.fotograflar as Array<{ ad: string; url: string; thumb?: string }> : []);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Kütüphane yüklenemedi."); }
+    finally { setLibraryLoading(false); }
+  };
+
+  const addLibraryImage = async (image: { ad: string; url: string }) => {
+    const slot = refs[0] ? (refs[1] ? 0 : 1) : 0;
+    try {
+      const response = await fetch(image.url, { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error("Kütüphane görseli yüklenemedi.");
+      const blob = await response.blob();
+      const file = new File([blob], image.ad, { type: blob.type || "image/jpeg" });
+      await addImageFile(slot, file);
+      setLibraryOpen(false);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Kütüphane görseli yüklenemedi."); }
+  };
+
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if ((event.clipboardData.getData("text/plain") || "").trim()) return;
+    const file = Array.from(event.clipboardData.items).map((item) => item.getAsFile()).find((item) => !!item && item.type.startsWith("image/"));
+    if (!file) return;
+    event.preventDefault();
+    const slot = refs[0] ? (refs[1] ? 0 : 1) : 0;
+    void addImageFile(slot, file);
+  };
 
   const toggleFavorite = async (entry: HistoryEntry) => {
     try {
@@ -395,6 +468,13 @@ export function PromptStudio({ api, initialPrompt = "", initialNegative = "", ed
   const applyResult = (value: PromptResult) => {
     onApply?.({ ...value, negative });
     setStatus(editMode ? "Düzenleme üretim promptuna uygulandı." : "Prompt üretim alanına aktarıldı.");
+  };
+
+  const quickGenerate = () => {
+    if (!result?.positive) return;
+    if (!onQuickGenerate) { applyResult(result); return; }
+    onQuickGenerate({ ...result, negative }, refs.map(dataUrlToFile));
+    setStatus("Prompt ve referanslar üretime gönderildi.");
   };
 
   const savePreset = async () => {
@@ -437,14 +517,16 @@ export function PromptStudio({ api, initialPrompt = "", initialNegative = "", ed
             </select></label>
             <label className="prompt-field">Sistem promptu<select value={profile} onChange={(event) => setProfile(event.target.value as PromptProfile)}>{PROFILE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           </div>
-          <p className="prompt-helper" role="status">{profile === "auto" ? "Otomatik seçim üretim modelini izler; modelin kendisini değiştirmez." : `${PROFILE_OPTIONS.find(([value]) => value === profile)?.[1]} prompt yönergesi kullanılır.`}</p>
+          <p className="prompt-helper" role="status">{profile === "auto" ? `Otomatik seçim: ${PROFILE_OPTIONS.find(([value]) => value === resolvePromptProfile(profile, presetDefaults))?.[1]} · üretim modelini değiştirmez.` : `${PROFILE_OPTIONS.find(([value]) => value === profile)?.[1]} prompt yönergesi kullanılır.`}</p>
           <div className="prompt-ref-grid">
             {[0, 1].map((index) => <div className={`prompt-ref${refs[index] ? " prompt-ref--filled" : ""}`} key={index}>
               <input ref={(element) => { fileInputs.current[index] = element; }} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => void addImages(index, event.target.files)}/>
               {refs[index] ? <><img src={refs[index].preview} alt={`Referans ${index + 1}: ${refs[index].name}`}/><span>{refs[index].name}</span><button className="prompt-icon-btn" aria-label={`Referans ${index + 1} fotoğrafını kaldır`} onClick={() => removeImage(index)}><X size={14}/></button></> : <button className="prompt-ref__add" onClick={() => fileInputs.current[index]?.click()}><span aria-hidden="true">＋</span><span>Referans {index + 1}</span><small>Fotoğraf ekle</small></button>}
             </div>)}
           </div>
-          <label className="prompt-field prompt-field--wide">İsteğin<textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={4} placeholder={mode === "video" ? "Sahneyi, hareketi ve kamera davranışını anlat…" : mode === "gorsel" ? "Fotoğrafta ne değişsin?" : mode === "duzenle" ? "Mevcut promptta neyi değiştirelim?" : "Ne üretmek istiyorsun?"}/></label>
+          <div className="prompt-ref-actions"><button className="prompt-secondary" type="button" onClick={() => void openLibrary()}>{libraryOpen ? "Kütüphaneyi kapat" : "Kütüphaneden görsel ekle"}</button>{refs.length > 0 && <span>{refs.length}/2 referans</span>}</div>
+          {libraryOpen && <div className="prompt-library" role="dialog" aria-label="Kütüphaneden referans görseli seç">{libraryLoading ? <p>Görseller yükleniyor…</p> : library.length ? library.map(image => <button type="button" key={image.ad} onClick={() => void addLibraryImage(image)}><img src={image.thumb || image.url} alt=""/><span>{image.ad}</span></button>) : <p>Kütüphanede görsel yok.</p>}</div>}
+          <label className="prompt-field prompt-field--wide">İsteğin<textarea value={draft} onPaste={onPaste} onChange={(event) => setDraft(event.target.value)} rows={4} placeholder={mode === "video" ? "Sahneyi, hareketi ve kamera davranışını anlat…" : mode === "gorsel" ? "Fotoğrafta ne değişsin?" : mode === "duzenle" ? "Mevcut promptta neyi değiştirelim?" : "Ne üretmek istiyorsun?"}/></label>
           <div className="prompt-options">
             <label>Çıktı dili<select value={language} onChange={(event) => setLanguage(event.target.value)}><option value="en">İngilizce</option><option value="tr">Türkçe</option></select></label>
             <label>Yaratıcılık<input type="number" min={0.2} max={1.2} step={0.1} value={creativity} onChange={(event) => setCreativity(Math.min(1.2, Math.max(0.2, Number(event.target.value))))}/></label>
@@ -471,7 +553,7 @@ export function PromptStudio({ api, initialPrompt = "", initialNegative = "", ed
           {result.caption_tr && <p className="prompt-caption">{result.caption_tr}</p>}
           {!!result.tags?.length && <div className="prompt-tags">{result.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>}
           {result.uyari && <p className="prompt-warning">{result.uyari}</p>}
-          <div className="prompt-actions"><button className="prompt-primary" onClick={() => applyResult(result)}><Check size={15}/>{editMode ? "Düzenlemeyi uygula" : "Üretime aktar"}</button><button className="prompt-secondary" onClick={() => void copyResult()}>⧉ Kopyala</button></div>
+          <div className="prompt-actions"><button className="prompt-primary" onClick={() => applyResult(result)}><Check size={15}/>{editMode ? "Düzenlemeyi uygula" : "Üretime aktar"}</button>{onQuickGenerate && <button className="prompt-primary" onClick={quickGenerate}>✳ Hızlı üret</button>}<button className="prompt-secondary" onClick={() => void copyResult()}>⧉ Kopyala</button></div>
           <div className="prompt-save"><input value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="Prompt kayıt adı" aria-label="Prompt kayıt adı"/><button className="prompt-secondary" onClick={() => void savePreset()}>Kaydet</button>{saveStatus && <span role="status">{saveStatus}</span>}</div>
         </section>}
       </main>
@@ -497,6 +579,7 @@ export function PromptStudio({ api, initialPrompt = "", initialNegative = "", ed
           {history.filter((item) => !favoritesOnly || item.yildiz).map((entry) => <article className="prompt-history-item" key={entry.id}>
             <div className="prompt-history-item__meta"><span>{entry.tarih?.replace("T", " ") ?? entry.mod ?? "Prompt"}</span><div><button className="prompt-icon-btn" onClick={() => void toggleFavorite(entry)} aria-label={entry.yildiz ? "Favoriden çıkar" : "Favoriye ekle"}>{entry.yildiz ? "★" : "☆"}</button><button className="prompt-icon-btn" onClick={() => void deleteHistory(entry)} aria-label="Geçmiş kaydını sil">×</button></div></div>
             <button className="prompt-history-item__open" onClick={() => { setResult(entry); setNegative(String(entry.negative ?? "")); }}>{entry.positive || entry.caption_tr || entry.metin || "Prompt"}</button>
+            <details className="prompt-details"><summary>İstek ve üretim bilgileri</summary><dl>{([ ["İstek", entry.metin], ["Mod", entry.mod], ["Sistem yönergesi", entry.model_prompt_profile], ["Referans görsel", entry.gorsel_sayisi], ["Süre", entry.sure_ms ? `${(Number(entry.sure_ms) / 1000).toFixed(1)} sn` : ""], ["Token", entry.token], ["Token/sn", entry.tok_s], ["Bağlam", entry.ctx], ["Model yükleme", entry.yukleme_ms ? `${(Number(entry.yukleme_ms) / 1000).toFixed(1)} sn` : ""], ["Deneme", entry.deneme] ] as Array<[string, unknown]>).filter(([, value]) => value !== undefined && value !== null && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}</dl></details>
             <button className="prompt-history-item__apply" onClick={() => applyResult(entry)}>{editMode ? "Düzenleme alanına uygula" : "Üretime aktar"}</button>
           </article>)}
         </div>

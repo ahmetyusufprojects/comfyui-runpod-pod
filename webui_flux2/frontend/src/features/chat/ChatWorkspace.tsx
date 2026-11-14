@@ -7,7 +7,7 @@ type ChatRole = "user" | "assistant";
 type ChatImage = { name: string; dataUrl: string };
 type ChatMessage = { role: ChatRole; content: string; images?: string[]; thinking?: string; requestExtra?: JsonRecord };
 type SavedChat = { id: string; baslik?: string; mesajlar?: ChatMessage[]; guncelleme?: string };
-type ModelOption = { id: string; ad: string; hazir?: boolean; gorsel_hazir?: boolean };
+type ModelOption = { id: string; ad: string; hazir?: boolean; gorsel_hazir?: boolean; tuning_defaults?: { context?: number } };
 type JobState = "queued" | "running" | "stopping" | "done" | "error" | "cancelled";
 type ActiveJob = { id: string; state: JobState; message: string };
 type LibraryImage = { ad: string; url: string; thumb?: string };
@@ -26,6 +26,14 @@ export function messageText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.filter((part) => part && typeof part.text === "string").map((part) => part.text).join("\n");
   return "";
+}
+
+export function estimateContextTokens(messages: ChatMessage[]): number {
+  return messages.reduce((total, message) => total + Math.ceil(message.content.length / 4) + (message.images?.length ?? 0) * 320 + 48, 0);
+}
+
+function storedModel(): string {
+  try { return localStorage.getItem("sohbet_llm_model") || ""; } catch { return ""; }
 }
 
 export function restoreSavedMessage(message: ChatMessage & { resim?: string }): ChatMessage {
@@ -89,7 +97,8 @@ export function ChatWorkspace({ api, initialModel }: Props) {
   const [savedChats, setSavedChats] = useState<SavedChat[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
-  const [modelId, setModelId] = useState(initialModel ?? "");
+  const [modelId, setModelId] = useState(initialModel || storedModel());
+  const [measuredContext, setMeasuredContext] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [images, setImages] = useState<ChatImage[]>([]);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
@@ -119,7 +128,7 @@ export function ChatWorkspace({ api, initialModel }: Props) {
         if (!alive) return;
         const options = Array.isArray(status.llm_models) ? status.llm_models as ModelOption[] : [];
         setModelOptions(options);
-        setModelId((current) => initialModel || current || options.find((model) => model.hazir)?.id || options[0]?.id || "");
+        setModelId((current) => initialModel || (options.some(model => model.id === current) ? current : options.find((model) => model.hazir)?.id || options[0]?.id || ""));
         setSavedChats(Array.isArray(chats.sohbetler) ? chats.sohbetler as SavedChat[] : []);
         setError("");
       })
@@ -127,6 +136,8 @@ export function ChatWorkspace({ api, initialModel }: Props) {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [api, initialModel]);
+
+  useEffect(() => { try { if (modelId) localStorage.setItem("sohbet_llm_model", modelId); } catch { /* Browser storage may be disabled. */ } }, [modelId]);
 
   useEffect(() => {
     let alive = true;
@@ -216,6 +227,8 @@ export function ChatWorkspace({ api, initialModel }: Props) {
             ? { ...message, content: partial.parca as string, thinking: typeof partial.dusunme === "string" ? partial.dusunme : message.thinking }
             : message));
         }
+        const promptTokens = Number(partial.prompt_token ?? partial.prompt_tokens);
+        if (Number.isFinite(promptTokens) && promptTokens > 0) setMeasuredContext(promptTokens);
         if (state === "done") {
           const answer = String(partial.yanit ?? "");
           const reasoning = typeof partial.reasoning_content === "string" ? partial.reasoning_content : undefined;
@@ -375,7 +388,7 @@ export function ChatWorkspace({ api, initialModel }: Props) {
         <label className="chat-model"><span>LLM</span><select aria-label="Sohbet LLM modeli" value={modelId} onChange={(event) => setModelId(event.target.value)} disabled={busy}>
           {!modelOptions.length && <option value="">Model bilgisi yükleniyor</option>}
           {modelOptions.map((model) => <option key={model.id} value={model.id}>{model.ad}{model.hazir ? "" : " · kurulu değil"}</option>)}
-        </select></label>
+        </select></label><div className="chat-context" title={measuredContext === null ? "Yaklaşık bağlam kullanımı" : "Sunucudan ölçülen prompt tokeni"}><span>Bağlam</span><b>{measuredContext ?? estimateContextTokens(messages)}</b><small>{measuredContext === null ? "tahmini token" : "ölçülen token"}</small></div>
       </header>
 
       {error && <div className="chat-alert" role="alert">{error}</div>}
@@ -391,7 +404,7 @@ export function ChatWorkspace({ api, initialModel }: Props) {
               ? <div className="chat-thinking"><LoaderCircle size={15} className="chat-spinner"/> Yanıt hazırlanıyor…</div>
               : <p className="chat-message__text">{message.content}</p>}
             {message.thinking && <details className="chat-thinking-details"><summary>Düşünme kaydı</summary><p>{message.thinking}</p></details>}
-            {message.role === "assistant" && message.content && !busy && <button className="chat-message__retry" onClick={() => void regenerate(index)}>↻ Yeniden üret</button>}
+            {message.role === "assistant" && message.content && !busy && <div className="chat-message__actions"><button className="chat-message__retry" onClick={() => void regenerate(index)}>↻ Yeniden üret</button><button className="chat-message__retry" onClick={() => { void (navigator.clipboard?.writeText(message.content) ?? Promise.reject(new Error("clipboard unavailable"))).then(() => setNotice("Yanıt panoya kopyalandı.")).catch(() => setError("Panoya kopyalama izni verilmedi.")); }}>⧉ Kopyala</button></div>}
           </div>
         </article>)}
         {activeJob && <div className="chat-job-state" role="status"><LoaderCircle size={14} className="chat-spinner"/>{activeJob.message}</div>}

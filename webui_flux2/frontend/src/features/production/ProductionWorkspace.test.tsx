@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ProductionWorkspace } from "./ProductionWorkspace";
 import type { ProductionApi } from "../../lib/api/client";
 
@@ -69,6 +69,18 @@ describe("React üretim alanı",()=>{
     const stop=await screen.findByRole("button",{name:/durdur/i});
     fireEvent.click(stop);
     await waitFor(()=>expect(api.post).toHaveBeenCalledWith("/api/is/iptal",{is_id:"synthetic-job"}));
+  });
+
+  it("Prompt Stüdyosu hızlı üretim çağrısını seçili üretim ayarlarıyla kuyruğa alır",async()=>{
+    const api=fakeApi({get:vi.fn().mockResolvedValue({durum:"calisiyor",ilerleme:{oran:0}})});
+    let quickGenerate:((prompt:string,negative:string,files:File[])=>void)|null=null;
+    render(<ProductionWorkspace api={api} embedded registerQuickGenerate={handler=>{if(handler)quickGenerate=handler;}}/>);
+    await screen.findByRole("heading",{name:"Üretim alanı"});
+    await waitFor(()=>expect(quickGenerate).toBeTypeOf("function"));
+    act(()=>quickGenerate?.("Quick prompt","blur",[]));
+    await waitFor(()=>expect(api.post).toHaveBeenCalledWith("/api/kuyruk",expect.objectContaining({
+      prompt:"Quick prompt",negative:"blur",model:"z_image",image_model:"z_image",is_tipi:"goruntu-uretim",
+    })));
   });
 
   it("üretim sonucu videosunun sunucu kapağını kullanır",async()=>{

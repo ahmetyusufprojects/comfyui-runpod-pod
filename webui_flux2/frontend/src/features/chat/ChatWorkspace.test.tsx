@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ProductionApi } from "../../lib/api/client";
-import { acceptedChatFiles, ChatWorkspace, restoreSavedMessage } from "./ChatWorkspace";
+import { acceptedChatFiles, ChatWorkspace, estimateContextTokens, restoreSavedMessage } from "./ChatWorkspace";
 
 afterEach(() => cleanup());
 
@@ -28,6 +28,28 @@ describe("React sohbet alanı", () => {
     render(<ChatWorkspace api={api} />);
     fireEvent.click(await screen.findByRole("button", { name: "Bir sahne" }));
     expect(await screen.findByAltText("Eklenen görsel 1")).toHaveAttribute("src", "data:image/png;base64,AA==");
+  });
+
+  it("sohbet modeli seçimini yenilemeler arasında saklar", async () => {
+    const api = fakeApi({ get: vi.fn().mockImplementation((path: string) => path === "/api/durum" ? Promise.resolve({ llm_models: [
+      { id: "llm-a", ad: "Model A", hazir: true }, { id: "llm-b", ad: "Model B", hazir: true },
+    ] }) : path === "/api/isler" ? Promise.resolve({ isler: [] }) : Promise.resolve({})) });
+    render(<ChatWorkspace api={api}/>);
+    const model = await screen.findByLabelText("Sohbet LLM modeli");
+    fireEvent.change(model, { target: { value: "llm-b" } });
+    expect(localStorage.getItem("sohbet_llm_model")).toBe("llm-b");
+    expect(estimateContextTokens([{ role: "user", content: "abcd" }])).toBe(49);
+    expect(screen.getByText("tahmini token")).toBeInTheDocument();
+  });
+
+  it("asistan yanıtını kopyalama eylemi sunar", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const api = fakeApi();
+    render(<ChatWorkspace api={api}/>);
+    fireEvent.click(await screen.findByRole("button", { name: "Bir sahne" }));
+    fireEvent.click(await screen.findByRole("button", { name: "⧉ Kopyala" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Eski cevap"));
   });
 
   it("6 MiB üstü görseli reddeder ve altı görsel sınırını birleştirerek uygular", () => {
