@@ -542,6 +542,17 @@ body.uretim-tam-ekran{overflow:hidden}
 .gec-iyilestirme-kontroller select{padding:6px 8px;font-size:11px;min-height:32px}
 .gec-iyilestirme-baslat{min-height:34px;padding:6px 12px;white-space:nowrap}
 .gec-iyilestirme .kucuk{margin-top:5px}
+.uretim-enhance-settings{margin:8px 8px 12px;padding:12px;border:1px solid color-mix(in srgb,var(--brand) 42%,var(--line));border-radius:12px;background:linear-gradient(145deg,rgba(47,111,237,.09),rgba(255,255,255,.02))}
+.uretim-enhance-settings[hidden]{display:none}
+.uretim-enhance-settings h3{margin:0 0 8px;font-size:13px}
+.uretim-enhance-toggle{display:flex;align-items:center;gap:8px;color:var(--text);font-size:12px}
+.uretim-enhance-toggle input{width:20px;height:20px;margin:0;flex:none}
+.uretim-enhance-settings>p{margin:5px 0 9px}
+.uretim-enhance-options{display:flex;flex-wrap:wrap;align-items:end;gap:8px}
+.uretim-enhance-options[hidden]{display:none}
+.uretim-enhance-options label{flex:1 1 145px;min-width:0;margin:0}
+.uretim-enhance-options select{padding:7px;font-size:12px}
+.uretim-enhance-options select:disabled{opacity:.55}
 .krea-edit-strength{margin-top:8px}
 .krea-edit-strength label{display:flex;justify-content:space-between;max-width:330px}
 .krea-edit-strength input[type=range]{width:min(330px,100%);accent-color:var(--vurgu)}

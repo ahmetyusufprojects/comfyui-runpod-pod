@@ -132,6 +132,36 @@
 <div id="uretimAyarlarPanel" class="uretim-ayarlari-panel" hidden>
   <div class="uretim-panel-baslik"><b>Üretim ayarları</b><button id="uretimAyarKapat" type="button" class="hayalet kucukbtn" aria-label="Ayarları kapat">×</button></div>
   <div id="uretimAyarIcerik"></div>
+<section id="uretimEnhanceSettings" class="uretim-enhance-settings" hidden aria-label="Üretim sonrası iyileştirme">
+  <h3>Üretim sonrası iyileştirme</h3>
+  <label class="uretim-enhance-toggle"><input id="uretimEnhanceAfter" type="checkbox"> Üretimden sonra sonucu yükselt</label>
+  <p class="kucuk">İyileştirilmiş kopya oluşturulur; asıl sonuç korunur. Seçtiğin model ilk kullanımda otomatik indirilir.</p>
+  <div id="uretimImageEnhanceOptions" class="uretim-enhance-options">
+    <label>Görsel yöntemi<select id="uretimImageEnhancePreset">
+      <option value="skin">Ten ayrıntısı · Skin Contrast</option>
+      <option value="photo">Doğal fotoğraf · ClearReality</option>
+      <option value="realesrgan">Genel kullanım · Real-ESRGAN</option>
+    </select></label>
+    <label>Büyütme<select id="uretimImageEnhanceScale">
+      <option value="1">1×</option><option value="1.5">1.5×</option>
+      <option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option>
+    </select></label>
+  </div>
+  <div id="uretimVideoEnhanceOptions" class="uretim-enhance-options" hidden>
+    <label>Video yöntemi<select id="uretimVideoEnhancePreset">
+      <option value="seedvr2">SeedVR2 3B FP16 · yüksek kalite</option>
+      <option value="seedvr2_fp8" selected>SeedVR2 3B FP8 · daha az VRAM</option>
+    </select></label>
+    <label>Çözünürlük büyütme<select id="uretimVideoEnhanceScale">
+      <option value="1">1×</option><option value="1.5">1.5×</option>
+      <option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option>
+    </select></label>
+    <label>FPS artırma<select id="uretimVideoEnhanceFps">
+      <option value="1">Aynı FPS</option><option value="2" selected>2×</option>
+      <option value="3">3×</option><option value="4">4×</option>
+    </select></label>
+  </div>
+</section>
 </div>
 <div class="kart" id="kartWf">
 <h3>İş akışı</h3>

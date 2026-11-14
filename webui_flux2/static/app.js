@@ -260,6 +260,7 @@ function uretimModGuncelle(){
   if(modelDegisti) runpodLoraYukle();
   const runpodModelWrap = $('runpodModelWrap');
   if(runpodModelWrap) runpodModelWrap.hidden = !RUNPOD_WEBUI || videoMu();
+  uretimEnhanceAyarlariniGuncelle();
   const bboxWrap = $('flux3BboxModeWrap');
   if(bboxWrap) bboxWrap.hidden = !RUNPOD_WEBUI || model !== 'flux3';
   const kreaEditWrap = $('kreaEditStrengthWrap');
@@ -613,6 +614,7 @@ async function boot(){
       const k = await kurulumYaniti.json();
       if(!k){ girisEkraniAc(); bootCalisiyor = false; return; }
       RUNPOD_WEBUI = k.runpod === true;
+      uretimEnhanceAyarlariniGuncelle();
       const storageNote=$('firstRunStorageNote');
       if(storageNote){
         const ephemeral=RUNPOD_WEBUI&&k.storage_mode==='ephemeral';
@@ -1185,6 +1187,7 @@ function formVerisi(istekSecenekleri){
     sampler: $('sampler').value, seed: +$('seed').value,
     workflow: otomatikWorkflow(), image_base64: fotoB64, image2_base64: fotoB64_2,
     is_tipi: isTipiSec(), suresn: suresn, fps: fps,
+    enhance_after: uretimEnhanceSecenekleri(vm),
     image_mime: fotoMime || 'image/jpeg', image2_mime: fotoMime2 || 'image/jpeg',
     prompt_destek: $('uretimPromptDestek').checked,
     prompt_ceviri: !vm && $('uretimPromptCeviri').checked
@@ -1194,6 +1197,30 @@ function formVerisi(istekSecenekleri){
 }
 /* Uretilen sonuc ile gecmisten acilan medya TEK kapsayiciya (#galeri) ve
    TEK sinifla (.uretim-goruntu) girer; iki yon de ayni contain kuralini kullanir. */
+function uretimEnhanceSecenekleri(vm=videoMu()){
+  if(!RUNPOD_WEBUI || !$('uretimEnhanceAfter') || !$('uretimEnhanceAfter').checked) return null;
+  return {enabled:true, type:vm?'video':'image',
+    preset:vm?$('uretimVideoEnhancePreset').value:$('uretimImageEnhancePreset').value,
+    scale:+(vm?$('uretimVideoEnhanceScale').value:$('uretimImageEnhanceScale').value),
+    fps_multiplier:vm?+$('uretimVideoEnhanceFps').value:1};
+}
+function uretimEnhanceAyarlariniGuncelle(){
+  const section=$('uretimEnhanceSettings');
+  if(!section) return;
+  section.hidden=!RUNPOD_WEBUI;
+  const vm=videoMu(), active=$('uretimEnhanceAfter')?.checked===true;
+  const image=$('uretimImageEnhanceOptions'), video=$('uretimVideoEnhanceOptions');
+  if(image) image.hidden=vm;
+  if(video) video.hidden=!vm;
+  section.querySelectorAll('select').forEach(el=>el.disabled=!active);
+}
+if($('uretimEnhanceAfter')) $('uretimEnhanceAfter').addEventListener('change',()=>{
+  uretimEnhanceAyarlariniGuncelle(); formKaydet();
+});
+['uretimImageEnhancePreset','uretimImageEnhanceScale','uretimVideoEnhancePreset',
+ 'uretimVideoEnhanceScale','uretimVideoEnhanceFps'].forEach(id=>{
+  const el=$(id); if(el) el.addEventListener('change',formKaydet);
+});
 function galeriMedyasiEkle(tur, src, alt, poster){
   const el = document.createElement(tur === 'video' ? 'video' : 'img');
   el.className = 'uretim-goruntu';
@@ -1257,6 +1284,7 @@ function sonucuGoster(s){
       gecmisKaydiGoster(k, meta, -1, null, true);
     }catch(e){}
   });
+  if(s.iyilestirme_hata) bilgi('Üretim tamamlandı; iyileştirme yapılamadı, asıl sonuç korundu. ' + s.iyilestirme_hata);
   kuyrukYenile();
 }
 async function uret(istekSecenekleri, kesintisizDevam = false){
@@ -1339,7 +1367,8 @@ function takipEt(is_id){
             llm.faz === 'uretim' ? 'Prompt üretiliyor' : 'Model hazırlanıyor') :
           'Model hazırlanıyor · ' + Math.round(j.gecen || 0) + ' sn';
         yazi.textContent = [modelDurumu].concat(olcum).join(' · ');
-      }else if(il.adim != null && il.max) yazi.textContent = (videoIsi ? 'Video üretiliyor' : 'Örnekleniyor') + ': adım ' + il.adim + '/' + il.max + (il.node ? ' (' + il.node + ')' : '');
+      }else if(il.asama === 'iyilestirme') yazi.textContent = il.calisan || 'Üretim sonrası iyileştirme';
+      else if(il.adim != null && il.max) yazi.textContent = (videoIsi ? 'Video üretiliyor' : 'Örnekleniyor') + ': adım ' + il.adim + '/' + il.max + (il.node ? ' (' + il.node + ')' : '');
       else if(il.bitti) yazi.textContent = 'Son işlemler...';
       else if(il.calisan) yazi.textContent = videoIsi ? ('Video: ' + il.calisan) : ('Çalışan: ' + il.calisan);
       else yazi.textContent = 'Kuyrukta bekleniyor...';
@@ -3206,6 +3235,14 @@ function formUygulaKayitli(f){
   }
   koy('vmax', f.video_max_side); koy('steps', f.steps); koy('seed', f.seed);
   koy('vsure', f.suresn); koy('vfps', f.fps);
+  if($('uretimEnhanceAfter')) $('uretimEnhanceAfter').checked = !!(f.enhance_after && f.enhance_after.enabled);
+  if(f.enhance_after){
+    koy('uretimImageEnhancePreset', f.enhance_after.type === 'image' ? f.enhance_after.preset : undefined);
+    koy('uretimVideoEnhancePreset', f.enhance_after.type === 'video' ? f.enhance_after.preset : undefined);
+    koy('uretimImageEnhanceScale', f.enhance_after.type === 'image' ? f.enhance_after.scale : undefined);
+    koy('uretimVideoEnhanceScale', f.enhance_after.type === 'video' ? f.enhance_after.scale : undefined);
+    koy('uretimVideoEnhanceFps', f.enhance_after.type === 'video' ? f.enhance_after.fps_multiplier : undefined);
+  }
   koy('videoProfile', f.video_profile === 'fast' ? 'quality' : f.video_profile);
   if($('videoModel') && ['wan22','video'].includes(f.video_model_instance))
     $('videoModel').value = f.video_model_instance;
@@ -3225,6 +3262,7 @@ function formUygulaKayitli(f){
 function formPaketle(){
   const v = formVerisi();
   return {prompt: v.prompt, negatif: v.negative, model: v.model,
+    enhance_after: v.enhance_after,
     image_model: v.image_model, flux3_bbox_mode: v.flux3_bbox_mode,
     width: v.width, height: v.height,
     anima_model: $('animaModel').checked,

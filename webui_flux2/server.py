@@ -1194,6 +1194,7 @@ def _video_uret(job, req):
                         "gecmis": gecmis_kayit,
                         "gecmis_dosyalar": gecmis_dosyalar,
                         "is_id": job["is_id"]}
+        _uretim_sonrasi_iyilestir(job, "video")
         job["ilerleme"] = {"bitti": True, "oran": 1.0}
         job["durum"] = "bitti"
         job["bitis"] = time.time()
@@ -3106,6 +3107,38 @@ def _iyilestirme_istegi_dogrula(kullanici, req):
     return None
 
 
+def _uretim_sonrasi_iyilestirme_istegi_dogrula(req):
+    options = req.get("enhance_after")
+    if not options:
+        return None
+    if not isinstance(options, dict):
+        return {"hata": "Üretim sonrası iyileştirme ayarları geçersiz."}
+    if options.get("enabled") is not True:
+        return None
+    if not RUNPOD_MODE:
+        return {"hata": "Üretim sonrası iyileştirme yalnızca RunPod kurulumunda kullanılabilir."}
+    refs = int(bool(req.get("image_base64"))) + int(bool(req.get("image2_base64")))
+    media_type = "video" if is_tipini_belirle(req, refs) == IS_TIPI_VIDEO else "image"
+    if options.get("type") != media_type:
+        return {"hata": "Seçilen iyileştirme türü üretim türüyle uyuşmuyor."}
+    presets = VIDEO_PRESETS if media_type == "video" else IMAGE_PRESETS
+    if options.get("preset") not in presets:
+        return {"hata": "Üretim sonrası iyileştirme modeli geçersiz."}
+    try:
+        scale = float(options.get("scale", 2))
+        fps_multiplier = int(options.get("fps_multiplier", 1))
+    except (TypeError, ValueError, OverflowError):
+        return {"hata": "İyileştirme büyütme ve FPS ayarları geçersiz."}
+    if scale not in (1.0, 1.5, 2.0, 3.0, 4.0):
+        return {"hata": "Büyütme katsayısı 1, 1.5, 2, 3 veya 4 olmalı."}
+    if fps_multiplier not in (1, 2, 3, 4) or (media_type == "image" and fps_multiplier != 1):
+        return {"hata": "FPS artırma 1x, 2x, 3x veya 4x olmalı."}
+    req["enhance_after"] = {"enabled": True, "type": media_type,
+                            "preset": options["preset"], "scale": scale,
+                            "fps_multiplier": fps_multiplier}
+    return None
+
+
 def _iyilestirme_modelini_hazirla(group, job):
     item = pod_setup.CATALOG.get(group)
     if not item:
@@ -3210,6 +3243,20 @@ def _medyayi_iyilestir(job):
         _iyilestirme_modelini_hazirla(group, job)
     if job.get("iptal"):
         raise RuntimeError("İş durduruldu.")
+    try:
+        comfy_queue = comfy_get_json("/queue")
+    except Exception as exc:
+        raise RuntimeError("ComfyUI kuyruğu doğrulanamadı; GPU belleği boşaltılmadı: %s" % exc) from None
+    if comfy_queue.get("queue_running") or comfy_queue.get("queue_pending"):
+        raise RuntimeError("ComfyUI kuyruğunda başka işler varken iyileştirme başlatılamaz.")
+    job["ilerleme"] = {"asama": "iyilestirme", "calisan": "GPU belleği hazırlanıyor",
+                        "oran": 0.12}
+    status, _ = comfy_request(
+        "POST", "/free",
+        body=json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8"),
+        headers={"Content-Type": "application/json"})
+    if status != 200:
+        raise RuntimeError("İyileştirmeden önce ComfyUI GPU belleği boşaltılamadı (%s)." % status)
 
     temp_root = None
     uploaded_path = None
@@ -3442,6 +3489,36 @@ def _medyayi_iyilestir(job):
                 shutil.rmtree(temp_root, ignore_errors=True)
             except OSError:
                 pass
+
+
+def _uretim_sonrasi_iyilestir(job, media_type):
+    original_request = job.get("istek") or {}
+    options = original_request.get("enhance_after") or {}
+    if not options.get("enabled"):
+        return
+    original_result = job.get("sonuc") or {}
+    record, files = original_result.get("gecmis"), original_result.get("gecmis_dosyalar") or []
+    if not record or not files:
+        original_result["iyilestirme_hata"] = "Asıl sonuç kaydedilemediği için yükseltme başlatılamadı."
+        job["sonuc"] = original_result
+        return
+    enhancement_request = dict(original_request)
+    enhancement_request.update({
+        "postprocess": media_type, "kayit": record + ".json", "dosya": files[0],
+        "enhance_preset": options["preset"], "scale": options["scale"],
+        "fps_multiplier": options["fps_multiplier"],
+    })
+    job["istek"] = enhancement_request
+    job["ilerleme"] = {"asama": "iyilestirme", "calisan": "İyileştirme modeli hazırlanıyor",
+                        "oran": 0.05}
+    try:
+        _medyayi_iyilestir(job)
+    except Exception as exc:
+        original_result["iyilestirme_hata"] = str(exc)[:300]
+        job["sonuc"] = original_result
+        job["durum"] = "calisiyor"
+    finally:
+        job["istek"] = original_request
 
 
 def _isi_calistir(job):
@@ -3705,6 +3782,7 @@ def _isi_calistir(job):
                         "gecmis": gecmis_kayit,
                         "gecmis_dosyalar": gecmis_dosyalar,
                         "is_id": job["is_id"]}
+        _uretim_sonrasi_iyilestir(job, "image")
         job["ilerleme"] = {"bitti": True, "oran": 1.0}
         job["durum"] = "bitti"
         job["bitis"] = time.time()
@@ -5239,6 +5317,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 hata = _iyilestirme_istegi_dogrula(kullanici, req)
             else:
                 hata = _is_dogrula(req)
+                if not hata:
+                    hata = _uretim_sonrasi_iyilestirme_istegi_dogrula(req)
             if hata:
                 self._send(400, json.dumps(hata))
                 return
