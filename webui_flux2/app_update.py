@@ -14,13 +14,48 @@ ROOT = Path(os.environ.get('POD_RUNTIME_ROOT', '/opt/runtime')) / 'app-update'
 REPO = 'ahmetyusufprojects/comfyui-runpod-pod'
 BRANCH = 'runpod%2Fgallery-first'
 CHANNELS = ('stable', 'beta')
+_CHANNEL_CACHE = None
 
 def image_channel():
     """Return the update channel selected by the RunPod template."""
-    value = os.environ.get('WEBUI_IMAGE_CHANNEL', 'stable').strip().lower()
-    if value not in CHANNELS:
-        raise RuntimeError('İmaj kanalı stable veya beta olmalı.')
-    return value
+    global _CHANNEL_CACHE
+    configured = os.environ.get('WEBUI_IMAGE_CHANNEL')
+    if configured:
+        value = configured.strip().lower()
+        if value not in CHANNELS:
+            raise RuntimeError('İmaj kanalı stable veya beta olmalı.')
+        return value
+    if _CHANNEL_CACHE is not None:
+        return _CHANNEL_CACHE
+    try:
+        _CHANNEL_CACHE = _infer_channel_from_image()
+    except (OSError, ValueError, KeyError, RuntimeError, tarfile.TarError):
+        _CHANNEL_CACHE = 'stable'
+    return _CHANNEL_CACHE
+
+def _image_baseline():
+    return {
+        'docker/Dockerfile.gallery': Path('/opt/pod/base.Dockerfile').read_bytes(),
+        'docker/supervisor.py': Path('/opt/pod/supervisor.py').read_bytes(),
+        'docker/models.json': Path('/opt/pod/models.json').read_bytes(),
+    }
+
+def _source_baseline(commit):
+    names = ('docker/Dockerfile.gallery', 'docker/supervisor.py', 'docker/models.json')
+    return {name: _fetch(f'https://raw.githubusercontent.com/{REPO}/{commit}/{name}',
+                         4 * 1024 * 1024) for name in names}
+
+def _infer_channel_from_image():
+    current = _image_baseline()
+    stable = _source_baseline(_stable_commit())
+    beta = _source_baseline(_beta_commit())
+    stable_match = current == stable
+    beta_match = current == beta
+    if stable_match != beta_match:
+        return 'stable' if stable_match else 'beta'
+    # Old templates did not provide a channel marker. Stable is the safe
+    # fallback when both tags share a base or the source has moved on.
+    return 'stable'
 
 def _stable_commit():
     url = (f'https://api.github.com/repos/{REPO}/contents/docker/stable-image.txt'
