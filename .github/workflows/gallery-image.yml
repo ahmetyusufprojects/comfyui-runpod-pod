@@ -2,6 +2,12 @@ name: RunPod gallery image
 
 on:
   workflow_dispatch:
+    inputs:
+      promote_stable:
+        description: Promote docker/stable-image.txt to the stable tag
+        required: false
+        type: boolean
+        default: false
   push:
     paths:
       - '.github/workflows/gallery-image.yml'
@@ -272,7 +278,7 @@ jobs:
           docker push "$current_image"
           docker push "$beta_image"
       - name: Promote the selected image to stable
-        if: github.event_name == 'push' && contains(join(github.event.commits.*.modified, ','), 'docker/stable-image.txt')
+        if: (github.event_name == 'push' && contains(github.event.head_commit.modified, 'docker/stable-image.txt')) || (github.event_name == 'workflow_dispatch' && inputs.promote_stable)
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
