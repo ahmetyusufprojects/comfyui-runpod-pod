@@ -58,7 +58,7 @@
       <div id="backupsView" hidden>
         <section class="panel backup-hero">
           <div><p class="eyebrow">ÖZEL R2 DEPOSU</p><h2>Şifreli sistem yedekleri</h2>
-            <p>Yedekler özel Cloudflare R2 kovasında tutulur. Bu bir RunPod volume’ü değildir; Pod silinse veya değişse de yedek orada kalır. Sistem verileri R2’ye gönderilmeden önce şifrelenir.</p></div>
+            <p>Yedek; tüm kullanıcı hesaplarını, şifreli kasaları, kullanıcı kayıtlarını ve genel kurulum/model ayarlarını içerir. Modellerin kendisi ve medya dosyaları eklenmez. Yedekler özel Cloudflare R2 kovasında tutulur; bu bir RunPod volume’ü değildir ve Pod silinse de yedek orada kalır.</p></div>
           <div id="r2Status" class="r2-status" role="status">R2 bağlantısı kontrol ediliyor…</div>
         </section>
         <div class="backup-grid">
@@ -106,7 +106,7 @@
           <form id="backupExportForm" class="stack-form">
             <label>Yeni yedek parolası<input id="backupExportPassword" type="password" autocomplete="new-password" minlength="8" required></label>
             <label class="check-row"><input id="backupExcludeMedia" type="checkbox"><span><b>Medya dosyalarını yedeğe alma</b><small>Fotoğraf, video ve ses dosyaları çıkarılır; metin kayıtları ve ayarlar korunur.</small></span></label>
-            <button type="submit">Şifreli yedeği indir</button><span id="backupExportStatus" class="muted" role="status"></span>
+            <button type="submit">Tüm sistemi şifreleyip indir</button><span id="backupExportStatus" class="muted" role="status"></span>
           </form>
           <form id="backupImportForm" class="stack-form">
             <label>Yedek parolası<input id="backupPassword" type="password" autocomplete="current-password" required></label>
