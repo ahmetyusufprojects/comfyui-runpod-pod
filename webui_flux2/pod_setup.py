@@ -2097,6 +2097,19 @@ def _tree_size(directory):
     return total
 
 
+def _process_io_bytes(pid):
+    """Count actual process I/O, including Xet network reads, when available."""
+    try:
+        values = {}
+        for line in Path('/proc/%d/io' % pid).read_text().splitlines():
+            key, value = line.split(':', 1)
+            if key in ('rchar', 'wchar'):
+                values[key] = int(value.strip())
+        return values['rchar'] + values['wchar']
+    except (OSError, KeyError, ValueError):
+        return None
+
+
 def _model(file, cancel, group):
     global _active_process
     directory = MODELS / file["dir"]
@@ -2116,8 +2129,8 @@ def _model(file, cancel, group):
     if source_type == "url":
         _url_model(target, file, cancel, group)
         return
-    incoming = directory / ".incoming"
-    incoming.mkdir(parents=True, exist_ok=True)
+    xet_dir = directory / ".incoming"
+    http_dir = directory / ".incoming-http"
     helper = """import json, os, sys
 from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import HfHubHTTPError
@@ -2133,67 +2146,100 @@ except HfHubHTTPError as e:
 """
     root_log = ROOT / "setup.log"
     ROOT.mkdir(parents=True, exist_ok=True)
-    source = incoming / file["path"]
-    source.parent.mkdir(parents=True, exist_ok=True)
-    previous_time = time.monotonic()
-    partial = _hf_incomplete_file(incoming, file["path"])
-    partial_visible = bool(partial and partial.exists())
-    progress_file = partial if partial_visible else source
-    previous_size = progress_file.stat().st_size if progress_file.exists() else 0
-    previous_progress_path = progress_file if partial_visible else None
-    process = None
     try:
-        with root_log.open("ab") as log:
-            process = subprocess.Popen([sys.executable, "-c", helper], stdin=subprocess.PIPE,
-                                       stdout=log, stderr=subprocess.STDOUT, cwd=ROOT,
-                                       start_new_session=True)
-            with _lock:
-                _active_process = process
-            payload = json.dumps({"repo": file["repo"], "revision": file.get("revision"),
-                                  "path": file["path"], "local_dir": str(incoming)}).encode("utf-8")
-            process.stdin.write(payload)
-            process.stdin.close()
-            while process.poll() is None:
-                if cancel.is_set():
-                    _stop_process(process)
-                    raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
-                time.sleep(1)
-                now = time.monotonic()
-                partial = _hf_incomplete_file(incoming, file["path"])
-                partial_visible = bool(partial and partial.exists())
-                progress_file = partial if partial_visible else source
-                current_size = (progress_file.stat().st_size
-                                if progress_file.exists() else previous_size)
-                stable_partial = (partial_visible
-                                  and previous_progress_path == progress_file)
-                rate = (max(0, current_size - previous_size)
-                        / max(now - previous_time, .001) / (1024 * 1024)
-                        if stable_partial else None)
-                _progress(group, "İndiriliyor", name=file["name"],
-                          downloaded=current_size, total=file.get("size"),
-                          rate=round(rate, 2) if rate is not None else None)
-                previous_time, previous_size = now, current_size
-                previous_progress_path = progress_file if partial_visible else None
-    finally:
-        if process is not None:
-            with _lock:
-                if _active_process is process:
-                    _active_process = None
-    if cancel.is_set():
-        raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
-    if process.returncode == 42:
-        raise RuntimeError("Model erişim izni gerekiyor. Pod’a HF_TOKEN ekleyin.")
-    if process.returncode:
-        raise RuntimeError("Hugging Face model indirmesi başarısız oldu; logları kontrol edin.")
-    _progress(group, "Dosya doğrulanıyor", name=file["name"],
-              downloaded=source.stat().st_size if source.is_file() else 0,
-              total=file.get("size"))
-    if not _valid_model(source, file):
-        source.unlink(missing_ok=True)
-        raise RuntimeError("Model dosyasının bütünlüğü doğrulanamadı.")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    source.replace(target)
-    _write_verification(target, file)
+        stall_limit = max(5, min(1800, int(os.environ.get("POD_HF_STALL_SECONDS", "120"))))
+    except ValueError:
+        stall_limit = 120
+    http_requested = os.environ.get("HF_HUB_DISABLE_XET", "").lower() in ("1", "true", "yes", "on")
+    http_resume = (_hf_incomplete_file(http_dir, file["path"])
+                   or (http_dir / file["path"]).is_file())
+    modes = ["http"] if http_requested or http_resume else ["xet", "http"]
+    for mode in modes:
+        if cancel.is_set():
+            raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
+        incoming = http_dir if mode == "http" else xet_dir
+        source = incoming / file["path"]
+        source.parent.mkdir(parents=True, exist_ok=True)
+        previous_time = time.monotonic()
+        last_activity = previous_time
+        partial = _hf_incomplete_file(incoming, file["path"])
+        progress_file = partial if partial and partial.exists() else source
+        previous_size = progress_file.stat().st_size if progress_file.exists() else 0
+        previous_progress_path = partial
+        process = None
+        stalled = False
+        env = os.environ.copy()
+        if mode == "http":
+            env["HF_HUB_DISABLE_XET"] = "1"
+        try:
+            with root_log.open("ab") as log:
+                process = subprocess.Popen([sys.executable, "-c", helper], stdin=subprocess.PIPE,
+                                           stdout=log, stderr=subprocess.STDOUT, cwd=ROOT,
+                                           env=env, start_new_session=True)
+                with _lock:
+                    _active_process = process
+                payload = json.dumps({"repo": file["repo"], "revision": file.get("revision"),
+                                      "path": file["path"], "local_dir": str(incoming)}).encode("utf-8")
+                process.stdin.write(payload)
+                process.stdin.close()
+                previous_io = _process_io_bytes(process.pid)
+                while process.poll() is None:
+                    if cancel.is_set():
+                        _stop_process(process)
+                        raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
+                    time.sleep(1)
+                    now = time.monotonic()
+                    partial = _hf_incomplete_file(incoming, file["path"])
+                    progress_file = partial if partial and partial.exists() else source
+                    try:
+                        current_size = progress_file.stat().st_size
+                    except OSError:
+                        current_size = previous_size
+                    current_io = _process_io_bytes(process.pid)
+                    if (current_size != previous_size or
+                            (current_io is not None and previous_io is not None and current_io > previous_io)):
+                        last_activity = now
+                    stable_partial = bool(partial and previous_progress_path == progress_file)
+                    rate = (max(0, current_size - previous_size)
+                            / max(now - previous_time, .001) / (1024 * 1024)
+                            if stable_partial else None)
+                    _progress(group, "İndiriliyor", name=file["name"],
+                              downloaded=current_size, total=file.get("size"),
+                              rate=round(rate, 2) if rate is not None else None)
+                    previous_time, previous_size, previous_io = now, current_size, current_io
+                    previous_progress_path = partial
+                    if now - last_activity >= stall_limit:
+                        stalled = True
+                        _stop_process(process)
+                        break
+        finally:
+            if process is not None:
+                with _lock:
+                    if _active_process is process:
+                        _active_process = None
+        if cancel.is_set():
+            raise DownloadCancelled("Model indirmesi iptal edildi; kaldığı yer korunup devam ettirilebilir.")
+        if process.returncode == 42:
+            raise RuntimeError("Model erişim izni gerekiyor. Pod’a HF_TOKEN ekleyin.")
+        if not stalled and process.returncode == 0:
+            _progress(group, "Dosya doğrulanıyor", name=file["name"],
+                      downloaded=source.stat().st_size if source.is_file() else 0,
+                      total=file.get("size"))
+            if _valid_model(source, file):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.replace(target)
+                _write_verification(target, file)
+                return
+            source.unlink(missing_ok=True)
+        if mode == "xet":
+            with root_log.open("a", encoding="utf-8") as log:
+                log.write("[pod-setup] Xet indirmesi ilerlemedi veya başarısız oldu; HTTP ile yeniden deneniyor.\n")
+            # Xet's partial may contain out-of-order blocks; never resume it as HTTP.
+            partial = _hf_incomplete_file(xet_dir, file["path"])
+            if partial:
+                partial.unlink(missing_ok=True)
+            continue
+        raise RuntimeError("Hugging Face indirmesi durdu veya doğrulanamadı; logları kontrol edin.")
 
 
 def _civitai_model(target, file, cancel, group):

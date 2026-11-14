@@ -239,6 +239,11 @@ jobs:
           set -eu
           docker cp tests/pod_setup_smoke.py gallery-check:/tmp/pod_setup_smoke.py
           docker exec gallery-check /opt/webui-venv/bin/python /tmp/pod_setup_smoke.py
+      - name: Verify stalled Hugging Face download recovery
+        run: |
+          set -eu
+          docker cp tests/hf_fallback_smoke.py gallery-check:/tmp/hf_fallback_smoke.py
+          docker exec gallery-check /opt/webui-venv/bin/python /tmp/hf_fallback_smoke.py
       - name: Verify encrypted vault password rotation
         run: |
           set -eu
