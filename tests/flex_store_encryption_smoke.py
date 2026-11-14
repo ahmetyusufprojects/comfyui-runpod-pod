@@ -8,7 +8,10 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "webui_flux2"))
+_webui_path = Path("/opt/webui_flux2")
+if not _webui_path.is_dir():
+    _webui_path = Path(__file__).resolve().parents[1] / "webui_flux2"
+sys.path.insert(0, str(_webui_path))
 from flex_store import FlexStore
 
 
