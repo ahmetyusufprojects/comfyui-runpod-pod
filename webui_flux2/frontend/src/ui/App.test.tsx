@@ -8,20 +8,20 @@ afterEach(() => cleanup());
 describe("port bazlı sistem durumu", () => {
   it("yükleme durumunu gösterir", () => {
     const api: StatusApi = { health: () => new Promise(() => undefined) };
-    render(<App api={api} port={8189} />);
+    render(<App api={api} port={8192} />);
     expect(screen.getByText("Sunucudan durum alınıyor…")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "WebUI" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Kurucu" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Durumu yenile" })).toBeDisabled();
     expect(within(screen.getByRole("navigation", { name: "Uygulama bölümleri" }))
-      .getByRole("link", { name: /Ana WebUI/ })).toHaveAttribute("aria-current", "page");
+      .getByRole("link", { name: /Kurucu/ })).toHaveAttribute("aria-current", "page");
   });
 
   it("8189 sağlık yanıtını hazır görünümüne bağlar", async () => {
     const api: StatusApi = { health: vi.fn().mockResolvedValue({ hazir: true, pid: 17 }) };
-    render(<App api={api} port={8189} pollMs={60_000} />);
+    render(<App api={api} port={8192} pollMs={60_000} />);
     expect(await screen.findByText("Bağlantı kuruldu")).toBeInTheDocument();
-    expect(screen.getByText("WebUI çalışıyor ve durum bilgisi güncel.")).toBeInTheDocument();
-    expect(api.health).toHaveBeenCalledWith(8189, expect.any(AbortSignal));
+    expect(screen.getByText("Kurucu çalışıyor ve durum bilgisi güncel.")).toBeInTheDocument();
+    expect(api.health).toHaveBeenCalledWith(8192, expect.any(AbortSignal));
   });
 
   it("8192 setup yanıtındaki storage durumunu gösterir", async () => {
@@ -36,7 +36,7 @@ describe("port bazlı sistem durumu", () => {
 
   it("API hatasında tekrar deneme düğmesini gösterir", async () => {
     const api: StatusApi = { health: vi.fn().mockRejectedValue(new Error("Sunucu HTTP 503 yanıtı verdi.")) };
-    render(<App api={api} port={8189} pollMs={60_000} />);
+    render(<App api={api} port={8192} pollMs={60_000} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Sunucu HTTP 503 yanıtı verdi.");
     expect(screen.getByRole("button", { name: "Tekrar dene" })).toBeInTheDocument();
   });

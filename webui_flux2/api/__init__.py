@@ -1,10 +1,16 @@
-"""ASGI compatibility layer for the existing RunPod HTTP handlers.
+"""RunPod API package.
 
-The module intentionally does not import ``server``. The caller supplies the
-legacy handler class so importing an ASGI app does not start vault watchdogs,
-touch storage, or import the ComfyUI/LLM runtimes.
+Keep package import side-effect free so Windows portable code can import
+framework-independent route helpers without installing FastAPI. ASGI app
+factories are loaded only when explicitly requested.
 """
 
-from .app import LegacyApps, create_apps, create_legacy_app
-
 __all__ = ["LegacyApps", "create_apps", "create_legacy_app"]
+
+
+def __getattr__(name):
+    if name in __all__:
+        from . import app
+
+        return getattr(app, name)
+    raise AttributeError(name)

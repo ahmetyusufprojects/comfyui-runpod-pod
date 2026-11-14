@@ -14,4 +14,13 @@ declare module "lucide-react" {
   export const Layers3: LucideIcon;
   export const RefreshCw: LucideIcon;
   export const Server: LucideIcon;
+  export const ArrowUp: LucideIcon;
+  export const Check: LucideIcon;
+  export const ChevronDown: LucideIcon;
+  export const Image: LucideIcon;
+  export const LoaderCircle: LucideIcon;
+  export const SlidersHorizontal: LucideIcon;
+  export const Square: LucideIcon;
+  export const Video: LucideIcon;
+  export const X: LucideIcon;
 }

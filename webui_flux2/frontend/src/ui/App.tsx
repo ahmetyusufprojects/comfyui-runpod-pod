@@ -3,6 +3,8 @@ import { Activity, ArrowUpRight, CircleAlert, Layers3, RefreshCw, Server } from 
 import { Button } from "../components/ui/Button";
 import { StatusBadge, type StatusTone } from "../components/ui/StatusBadge";
 import { getWebUiPort, statusApi, type HealthStatus, type StatusApi, type WebUiPort } from "../lib/api/client";
+import { ProductionWorkspace } from "../features/production/ProductionWorkspace";
+import { productionApi, type ProductionApi } from "../lib/api/client";
 
 type LoadState =
   | { kind: "loading" }
@@ -13,6 +15,7 @@ interface AppProps {
   api?: StatusApi;
   port?: WebUiPort;
   pollMs?: number;
+  production?: ProductionApi;
 }
 
 function surfaceUrl(target: WebUiPort): string {
@@ -44,7 +47,12 @@ function statusLabel(state: LoadState): string {
   return state.status.hazir ? "Hazır" : "Hazırlanıyor";
 }
 
-export function App({ api = statusApi, port = getWebUiPort(), pollMs = 15_000 }: AppProps) {
+export function App({ api = statusApi, production = productionApi, port = getWebUiPort(), pollMs = 15_000 }: AppProps) {
+  if (port === 8189) return <ProductionWorkspace api={production} />;
+  return <StatusApp api={api} port={port} pollMs={pollMs} />;
+}
+
+function StatusApp({ api, port, pollMs }: Required<Pick<AppProps, "api" | "port" | "pollMs">>) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const label = port === 8192 ? "Kurucu" : "WebUI";

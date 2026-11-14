@@ -1,6 +1,6 @@
 # API ve UI özelliği ekleme
 
-Bu rehber RunPod'da geçiş sürerken API ve UI özelliği eklemek içindir. FastAPI native sağlık router'ları ve React durum önizlemesi vardır; özelliklerin büyük bölümü halen mevcut Handler/JS içindedir.
+Bu rehber RunPod'da geçiş sürerken API ve UI özelliği eklemek içindir. FastAPI sağlık router'ları ile legacy route aile adaptörleri, servis facade'ları ve React üretim arayüzünün ilk dilimi birlikte çalışır. Sohbet, prompt stüdyosu, albüm ve kurucu akışları henüz eski UI'dadır.
 
 ## 1. Sözleşmeyi önce belirle
 
@@ -10,17 +10,17 @@ Bu rehber RunPod'da geçiş sürerken API ve UI özelliği eklemek içindir. Fas
 
 ## 2. Mevcut kaynakta uygula
 
-- Yeni RunPod API uçları için `webui_flux2/api/` altında `APIRouter` ve özelliğe ait service kullan. Var olan endpoint'i yeni router'a taşırken eski yol ve JSON şekli için sözleşme testi ekle; `api/legacy.py` yalnız taşınmamış yolları geçici olarak yürütür.
-- Özellik henüz taşınmamışsa ilgili iş kuralını mevcut sahip modülde tut; `server.py` içine ek yığma yapma. Windows portable davranışını koru.
-- Ana ekran davranışı `static/app.js`/`app.css`/`index.html`; kurucu davranışı `setup.js`/`setup.css`/`setup.html` içindedir.
+- Yeni RunPod API uçları için `webui_flux2/api/` altında `APIRouter` ve özelliğe ait service kullan. Mevcut route aileleri `api/legacy_*_routes.py` içindedir ve Handler sözleşmesine dispatch eder. Var olan endpoint'i native router'a taşırken eski yol ve JSON şekli için sözleşme testi ekle; `api/legacy.py` geçiş sırasında kalan Handler yollarını yürütür.
+- Özellik henüz taşınmamışsa ilgili iş kuralını uygun `services/`, `kasa_modules/`, `llm_runtime/` veya `pod_setup_modules/` paketinde tut; `server.py` içine ek yığma yapma. Windows portable davranışını koru.
+- React ana ekranı `frontend/src/features/` içindedir; HTTP çağrıları `frontend/src/lib/api/` typed istemcisinden geçer. Eski ekran davranışı `static/app.js`/`app.css`/`index.html`, kurucu davranışı `setup.js`/`setup.css`/`setup.html` içindedir. React'e taşınmamış ekranlara görünür bağlantı bırak.
 - Uzun işler kuyruk, job ID, durum sorgusu, iptal ve uygulama yeniden başlatma ile tutarlı yürümelidir. Polling arayüzü 8192’de giriş ekranından bağımsız çalışabilmelidir.
 - Secret, kullanıcı parolası, kasa anahtarı veya tam hata trace’i UI/log yanıtına yazdırma.
 
 ## 3. Dağıtım paketine ekle
 
 - Yeni Python modülü `docker/Dockerfile.gallery` içindeki açık `COPY` listesine eklenmeli.
-- Yeni UI dosyaları aynı şekilde açık `COPY` listesine eklenmeli.
-- `app_update.py` dosya allowlist/required set’i de yeni dosyayı içermeli; aksi hâlde çalışan Pod uygulama güncellemesi o dosyayı alamaz.
+- Yeni legacy UI dosyaları açık `COPY` listesine, gerekiyorsa `app_update.py` allowlist'ine eklenmeli. React dosyaları Docker'ın Node build aşamasından `frontend-dist/` olarak imaja kopyalanır; her React bundle değişikliği yeni imaj gerektirir.
+- Yeni Python kaynak modülleri `app_update.py` allowlist/required set’ine de eklenmeli; aksi hâlde çalışan Pod uygulama güncellemesi o dosyayı alamaz.
 - Dockerfile/supervisor veya Linux bağımlılığı değiştiyse uygulama güncellemesi yetmez; yeni imaj gerekir.
 
 ## 4. Doğrulama
@@ -29,4 +29,4 @@ Mevcut kontroller: Python derleme, FastAPI API sözleşme testleri, React/Vitest
 
 ## Ekranları kademeli taşıma
 
-API sözleşmesini React bileşeninden bağımsız tut. Tipli istemci, yükleme/boş/hata/disabled/focus/selected/submitting/success durumları ve erişilebilir kontroller ekle. Route başına bağımsız feature bileşenleri kullan; mevcut API yanıtlarını typed client ile eşle. Şimdiki `/?ui=next` ekranı yalnız bağlantı durumunu gösterir; tam işlevli sayfa olarak tanıtma. Playwright akışını, login/kasa ve kurucu API akışları React'e taşınırken CI'a ekle.
+API sözleşmesini React bileşeninden bağımsız tut. Tipli istemci, yükleme/boş/hata/disabled/focus/selected/submitting/success durumları ve erişilebilir kontroller ekle. Route başına bağımsız feature bileşenleri kullan; mevcut API yanıtlarını typed client ile eşle. `/?ui=next` üzerinde 8189 üretim dikey dilimi (hesap/kasa geçidi, geniş çıktı alanı, model ve görsel/video kontrolleri, kuyruk/iptal/sonuç) çalışır; diğer ekranların taşındığını varsayma. Playwright veya tarayıcı akışını login/kasa, kuyruk ve mobil panel için sonraki aşamalarda ekle.

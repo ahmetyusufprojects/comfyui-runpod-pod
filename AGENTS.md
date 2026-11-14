@@ -4,8 +4,12 @@ Bu depo yalnızca RunPod dağıtımını kapsar; Windows portable kurulumun kayn
 
 | Alan | Kaynak |
 | --- | --- |
-| API ve iş akışları | `webui_flux2/server.py`, `image_graphs.py`, `comfy_client.py`, `llm.py`, ilgili modüller |
-| Ana arayüz | `webui_flux2/index.html`, `static/app.js`, `static/app.css` |
+| API uygulaması ve uyumluluk rotaları | `webui_flux2/api/app.py`, `api/legacy_*_routes.py`, `api/legacy.py` |
+| API durumu/geriye uyumluluk | `webui_flux2/server.py` (Handler facade), `image_graphs.py`, `comfy_client.py` |
+| Üretim, kuyruk, içerik servisleri | `webui_flux2/services/` |
+| Kasa, LLM, kurucu servisleri | `webui_flux2/kasa_modules/`, `llm_runtime/`, `pod_setup_modules/`; eski `kasa.py`, `llm.py`, `pod_setup.py` facade'ları |
+| Eski ana arayüz | `webui_flux2/index.html`, `static/app.js`, `static/app.css` |
+| React ana üretim arayüzü | `webui_flux2/frontend/src/features/production/`, `webui_flux2/frontend/src/lib/api/`, `webui_flux2/frontend/src/ui/`, `webui_flux2/frontend/src/styles.css` (`/?ui=next`) |
 | Kurucu arayüzü (8192) | `webui_flux2/setup.html`, `static/setup.js`, `static/setup.css` |
 | Model/workflow kataloğu | `docker/models.json` (şema 2) |
 | İmaj ve süreç yöneticisi | `docker/Dockerfile.gallery`, `docker/supervisor.py` |
@@ -33,7 +37,7 @@ Bu depo yalnızca RunPod dağıtımını kapsar; Windows portable kurulumun kayn
 1. Özelliğin sahibi olan API, UI, katalog ve kalıcılık sözleşmelerini belirleyin; API/UI eşleşmesini birlikte güncelleyin.
 2. Model ekleme/kaldırma/URL değiştirmede katalogla onu kullanan workflow/varsayılanları birlikte kontrol edin; katalog dışına dosya adı sabitlemeyin.
 3. RunPod imajına giren kaynakların açık `COPY` listesini, bağımlılıkları ve app update allowlist’ini gözden geçirin.
-4. Sadece istenen doğrulamaları çalıştırın. Kod değişikliği için mevcut CI kontrolleri: `python3 -m py_compile webui_flux2/*.py pod-launch.py tests/*.py`, `node --check webui_flux2/static/app.js`, `node --check webui_flux2/static/setup.js` ve workflow içindeki smoke/build/start kontrolleri. Bunlar kullanıcı verisiyle değil sentetik kurulumla çalışmalıdır.
+4. Sadece istenen doğrulamaları çalıştırın. Kod değişikliği için mevcut CI kontrolleri: `python3 -m compileall -q webui_flux2 tests pod-launch.py`, `PYTHONPATH=webui_flux2 python3 -m pytest -q tests/test_*.py`, eski JavaScript syntax/smoke kontrolleri ve Docker derlemesindeki React/Vitest build adımları. Bunlar kullanıcı verisiyle değil sentetik kurulumla çalışmalıdır.
 5. Dokümantasyon-only işinde uygulama testlerini/servisleri çalıştırmayın. Değişiklik öncesi/sonrası `git status --short`, sonrasında `git diff --check` ve diff incelemesi yapın.
 
 ## Beceriler ve alt ajanlar
@@ -41,3 +45,5 @@ Bu depo yalnızca RunPod dağıtımını kapsar; Windows portable kurulumun kayn
 İşin türüne uygun mevcut skill’leri kullanın: arayüz işleri için `webapp-ui-skill`; Cloudflare/R2 kodu için ilgili Cloudflare becerisi; framework geçişinde React/FastAPI’nin resmi belgeleri. Skill’in tavsiyesi kullanıcı/veri sınırlarını geçersiz kılamaz. Henüz mevcut olmayan skill’i kurmak bu depo değişikliğinin parçası değildir.
 
 Geniş mimari çalışmada alt ajan kullanılması beklenir. **Luna High** mimari kararlar, API sözleşmesi ve risk incelemesini; **Luna Medium** sınırları belirlenmiş bağımsız UI bileşeni, test veya dokümantasyon işlerini üstlenebilir. Ajanlara açık dosya kapsamı verin; aynı dosyada eşzamanlı düzenleme yaptırmayın. Entegrasyon, diff incelemesi ve uçtan uca sözleşme sorumluluğu ana ajandadır. Bu model planlama kuralıdır; depo kodunda otomatik ajan sistemi yoktur.
+
+React kaynakları Docker'ın Node aşamasında derlenip imaja `frontend-dist/` olarak kopyalanır. Çalışan Pod'un uygulama içi kaynak güncellemesi React bundle'ını üretmez; React değişikliğini dağıtmak için GitHub Actions üzerinden yeni beta imajı oluşturulmalıdır.

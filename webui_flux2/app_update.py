@@ -121,7 +121,23 @@ def prepare(channel=None):
                 'setup.html', 'video_r2v_api.json', 'video_wan22_api.json', 'static/app.js', 'static/app.css',
                 'static/setup.js', 'static/setup.css', 'model_prompts/flux.json',
                 'model_prompts/krea2.txt', 'model_prompts/minimaxh3.txt', 'model_prompts/wan22.txt', 'model_prompts/z_image.txt',
-                'api/__init__.py', 'api/app.py', 'api/health.py', 'api/legacy.py']
+                'api/__init__.py', 'api/app.py', 'api/health.py', 'api/legacy.py',
+                'api/legacy_setup_routes.py', 'api/legacy_main_routes.py',
+                'api/legacy_auth_routes.py', 'api/legacy_admin_routes.py',
+                'api/legacy_media_routes.py', 'api/legacy_queue_routes.py',
+                'api/legacy_ai_routes.py',
+                'llm_runtime/__init__.py', 'llm_runtime/engine.py',
+                'llm_runtime/metrics.py', 'llm_runtime/prompting.py',
+                'llm_runtime/transport.py',
+                'kasa_modules/__init__.py', 'kasa_modules/accounts.py',
+                'kasa_modules/backup.py', 'kasa_modules/crypto.py',
+                'kasa_modules/vault.py',
+                'pod_setup_modules/__init__.py', 'pod_setup_modules/catalog.py',
+                'pod_setup_modules/downloads.py', 'pod_setup_modules/installer.py',
+                'pod_setup_modules/settings.py', 'pod_setup_modules/storage.py',
+                'services/__init__.py', 'services/user_content.py',
+                'services/media_enhancement.py', 'services/video_generation.py',
+                'services/job_queue.py', 'services/generation.py']
     if any('webui_flux2/' + name not in members for name in required) or 'docker/models.json' not in members:
         raise RuntimeError('Güncelleme paketi eksik.')
     for relative in required:

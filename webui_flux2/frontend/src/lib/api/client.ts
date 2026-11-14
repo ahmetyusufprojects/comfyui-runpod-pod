@@ -1,5 +1,41 @@
 export type WebUiPort = 8189 | 8192;
 
+export type JsonRecord = Record<string, unknown>;
+
+async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    headers: { Accept: "application/json", ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers },
+    credentials: "same-origin",
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof body?.hata === "string" ? body.hata : `Sunucu HTTP ${response.status} yanıtı verdi.`);
+  return body as T;
+}
+
+export interface ModelInstance {
+  id: string; family: string; name: string; group?: string; engine?: string; ready: boolean;
+  primary_file?: string;
+}
+export interface ProductionApi {
+  setup(signal?: AbortSignal): Promise<JsonRecord>;
+  me(signal?: AbortSignal): Promise<JsonRecord>;
+  vault(signal?: AbortSignal): Promise<JsonRecord>;
+  status(signal?: AbortSignal): Promise<JsonRecord>;
+  settings(signal?: AbortSignal): Promise<JsonRecord>;
+  post<T = JsonRecord>(path: string, data: JsonRecord): Promise<T>;
+  get<T = JsonRecord>(path: string, signal?: AbortSignal): Promise<T>;
+}
+export const productionApi: ProductionApi = {
+  setup: (signal) => getJson("/api/kurulum-durumu", signal),
+  me: (signal) => getJson("/api/ben", signal),
+  vault: (signal) => getJson("/api/kasa/durum", signal),
+  status: (signal) => getJson("/api/durum", signal),
+  settings: (signal) => getJson("/api/ayarlar", signal),
+  post: (path, data) => requestJson(path, { method: "POST", body: JSON.stringify(data) }),
+  get: (path, signal) => getJson(path, signal),
+};
+
 export interface MainHealth {
   hazir: boolean;
   pid?: number;
